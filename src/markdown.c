@@ -123,10 +123,49 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
     return (int)span_count;
 }
 
+static char* strip_all_markers(const char* text) {
+    size_t len = strlen(text);
+    char* result = malloc(len + 1);
+    size_t write_pos = 0;
+    
+    for (size_t i = 0; i < len; ) {
+        bool skipped = false;
+        
+        // Skip ** markers
+        if (i + 1 < len && text[i] == '*' && text[i+1] == '*') {
+            i += 2;
+            skipped = true;
+        }
+        // Skip * markers
+        else if (text[i] == '*') {
+            i++;
+            skipped = true;
+        }
+        // Skip == markers
+        else if (i + 1 < len && text[i] == '=' && text[i+1] == '=') {
+            i += 2;
+            skipped = true;
+        }
+        // Skip ++ markers
+        else if (i + 1 < len && text[i] == '+' && text[i+1] == '+') {
+            i += 2;
+            skipped = true;
+        }
+        
+        if (!skipped) {
+            result[write_pos++] = text[i];
+            i++;
+        }
+    }
+    
+    result[write_pos] = '\0';
+    return result;
+}
+
 TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans, size_t span_count, size_t *out_count) {
     if (span_count == 0) {
         TextSpan *result = malloc(sizeof(TextSpan));
-        result[0].text = strdup_safe(text);
+        result[0].text = strip_all_markers(text);
         result[0].bold = false;
         result[0].italic = false;
         result[0].has_highlight = false;
@@ -142,9 +181,12 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
     for (size_t i = 0; i < span_count; i++) {
         if (text_pos < spans[i].start) {
             size_t len = spans[i].start - text_pos;
-            char *plain_text = malloc(len + 1);
-            memcpy(plain_text, text + text_pos, len);
-            plain_text[len] = '\0';
+            char *temp_text = malloc(len + 1);
+            memcpy(temp_text, text + text_pos, len);
+            temp_text[len] = '\0';
+            
+            char *plain_text = strip_all_markers(temp_text);
+            free(temp_text);
             
             result[result_count].text = plain_text;
             result[result_count].bold = false;
@@ -183,9 +225,12 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
         }
         
         size_t styled_len = content_end - content_start;
-        char *styled_text = malloc(styled_len + 1);
-        memcpy(styled_text, text + content_start, styled_len);
-        styled_text[styled_len] = '\0';
+        char *temp_styled = malloc(styled_len + 1);
+        memcpy(temp_styled, text + content_start, styled_len);
+        temp_styled[styled_len] = '\0';
+        
+        char *styled_text = strip_all_markers(temp_styled);
+        free(temp_styled);
         
         result[result_count].text = styled_text;
         result[result_count].bold = (spans[i].style == INLINE_BOLD || spans[i].style == INLINE_BOLD_ITALIC);
@@ -206,9 +251,12 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
     
     if (text_pos < strlen(text)) {
         size_t len = strlen(text) - text_pos;
-        char *remaining_text = malloc(len + 1);
-        memcpy(remaining_text, text + text_pos, len);
-        remaining_text[len] = '\0';
+        char *temp_remaining = malloc(len + 1);
+        memcpy(temp_remaining, text + text_pos, len);
+        temp_remaining[len] = '\0';
+        
+        char *remaining_text = strip_all_markers(temp_remaining);
+        free(temp_remaining);
         
         result[result_count].text = remaining_text;
         result[result_count].bold = false;
@@ -641,17 +689,35 @@ int json_to_markdown(const Document *doc, char **out_markdown) {
             case T_TEXT: {
                 const ElementText *text = &elem->as.text;
                 
-                if (text->level > 0) {
-                    for (int j = 0; j < text->level; j++) {
-                        fputc('#', fp);
+                // Check if this text element has any actual content
+                bool has_content = false;
+                for (size_t s = 0; s < text->spans_count; s++) {
+                    const char *span_text = text->spans[s].text ? text->spans[s].text : "";
+                    if (strlen(span_text) > 0) {
+                        has_content = true;
+                        break;
                     }
-                    fputc(' ', fp);
                 }
                 
-                write_inline_markup(fp, text->text ? text->text : "", 
-                                  text->bold, text->italic, 
-                                  text->has_highlight, text->has_underline);
-                fprintf(fp, "\n");
+                // Only output if there's actual content or it's a header (level > 0)
+                if (has_content || text->level > 0) {
+                    if (text->level > 0) {
+                        for (int j = 0; j < text->level; j++) {
+                            fputc('#', fp);
+                        }
+                        fputc(' ', fp);
+                    }
+                    
+                    // Reconstruct content from spans
+                    for (size_t s = 0; s < text->spans_count; s++) {
+                        const char *span_text = text->spans[s].text ? text->spans[s].text : "";
+                        write_inline_markup(fp, span_text, 
+                                          text->spans[s].bold, text->spans[s].italic, 
+                                          text->spans[s].has_highlight, text->spans[s].has_underline);
+                    }
+                    
+                    fprintf(fp, "\n");
+                }
                 break;
             }
             

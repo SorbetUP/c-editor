@@ -1,0 +1,35 @@
+# Build artifacts
+*.o
+*.a
+*.dSYM/
+obj/
+bin/
+run_tests
+
+# Debug and test binaries
+debug_*
+test_*
+simple_test
+ultra_simple_test
+fuzz_md
+
+# Temporary files
+*.log
+*.tmp
+
+# Documentation and reports (not essential for project)
+IMPLEMENTATION_SUMMARY.md
+RELEASE_VALIDATION_REPORT.md
+FULL_VALIDATION_REPORT.md
+VALIDATION_REPORT.md
+claude.md
+CLAUDE.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store

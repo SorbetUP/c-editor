@@ -11,7 +11,7 @@
 #include "../src/json.h"
 
 static unsigned S=0xABCD1234u;
-static unsigned u(){ S^=S<<13; S^=S>>17; S^=S<<5; return S?S:0xBEEFCAFE; }
+static unsigned u(void){ S^=S<<13; S^=S>>17; S^=S<<5; return S?S:0xBEEFCAFE; }
 static int ri(int a,int b){ return a + (int)(u()%(unsigned)(b-a+1)); }
 
 static void push(char **s,size_t *c,size_t *l,const char* t){

@@ -1,0 +1,40 @@
+name: c_editor_flutter
+description: A Flutter UI for the C Markdown Editor with multiplatform support
+version: 1.0.0+1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.0
+  path: ^1.8.3
+  js: ^0.6.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  ffigen: ^9.0.1
+
+flutter:
+  uses-material-design: true
+  
+  # Assets for WASM
+  assets:
+    - web/editor.wasm
+    - web/editor_wasm.js
+
+# FFI configuration
+ffigen:
+  output: 'lib/ffi/generated/editor_bindings.dart'
+  headers:
+    entry-points:
+      - '../src/editor.h'
+      - '../src/markdown.h' 
+      - '../src/json.h'
+  name: 'EditorBindings'
+  description: 'Bindings for C Editor Library'

@@ -1,23 +1,20 @@
 #include "src/editor.h"
+#include "src/markdown.h"
 #include <stdio.h>
 
-int main(void) {
-    Document doc;
-    editor_init(&doc);
+int main() {
+    Document doc = {0};
+    int result = markdown_to_json("==**==", &doc);
+    printf("Parse result: %d\n", result);
     
-    printf("Document initialized successfully\n");
-    
-    const char *test = "# Hello World";
-    int result = json_import_markdown(test, &doc);
-    
-    printf("Import result: %d\n", result);
-    printf("Elements: %zu\n", doc.elements_len);
-    
-    if (doc.elements_len > 0) {
-        printf("First element type: %d\n", doc.elements[0].kind);
-        if (doc.elements[0].kind == T_TEXT) {
-            printf("Text: %s\n", doc.elements[0].as.text.text);
-            printf("Level: %d\n", doc.elements[0].as.text.level);
+    if (doc.elements_len > 0 && doc.elements[0].kind == T_TEXT) {
+        ElementText *text = &doc.elements[0].as.text;
+        printf("Spans: %zu\n", text->spans_count);
+        
+        for (size_t s = 0; s < text->spans_count; s++) {
+            const char *span_text = text->spans[s].text ? text->spans[s].text : "NULL";
+            printf("  [%zu] '%s' (bold=%d, highlight=%d)\n", s, span_text, 
+                   text->spans[s].bold, text->spans[s].has_highlight);
         }
     }
     
