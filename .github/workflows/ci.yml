@@ -1,0 +1,55 @@
+name: C Editor Core CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        compiler: [gcc, clang]
+        exclude:
+          - os: macos-latest
+            compiler: gcc
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y valgrind clang-format
+    
+    - name: Build with ${{ matrix.compiler }}
+      run: |
+        make clean
+        CC=${{ matrix.compiler }} CFLAGS="-std=c11 -Wall -Wextra -Werror -O2" make -j
+    
+    - name: Run tests
+      run: make test
+    
+    - name: Build with sanitizers
+      run: |
+        make clean
+        ${{ matrix.compiler }} -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -Wall -Wextra -Werror -Isrc tests/test_inline_loop.c src/*.c -o test_asan -lm
+        ASAN_OPTIONS=halt_on_error=1:strict_string_checks=1 ./test_asan
+    
+    - name: Run Valgrind (Ubuntu only)
+      if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc'
+      run: |
+        make clean
+        make 
+        gcc -std=c11 -g -Isrc tests/test_inline_loop.c libeditor.a -o test_valgrind -lm
+        valgrind --leak-check=full --errors-for-leak-kinds=all --show-leak-kinds=all --error-exitcode=1 ./test_valgrind
+    
+    - name: Check code formatting
+      if: matrix.compiler == 'clang'
+      run: |
+        clang-format --version
+        find src tests -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
