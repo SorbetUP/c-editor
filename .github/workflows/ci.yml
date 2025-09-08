@@ -53,3 +53,23 @@ jobs:
       run: |
         clang-format --version
         find src tests -name "*.c" -o -name "*.h" | xargs clang-format --dry-run --Werror
+
+  property-fuzz-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build library
+      run: |
+        make clean
+        CC=clang CFLAGS="-std=c11 -Wall -Wextra -Werror -O1 -g" make -j
+    
+    - name: Build fuzz tests with sanitizers
+      run: |
+        CC=clang CFLAGS="-std=c11 -Wall -Wextra -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" make bin/prop_roundtrip bin/fuzz_markdown
+    
+    - name: Run property tests (fast)
+      run: |
+        ASAN_OPTIONS=halt_on_error=1:strict_string_checks=1 ./bin/prop_roundtrip 12345 300
+        ASAN_OPTIONS=halt_on_error=1:strict_string_checks=1 ./bin/fuzz_markdown  98765 800
