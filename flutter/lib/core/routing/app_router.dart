@@ -5,12 +5,14 @@ import 'package:go_router/go_router.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/viewer/screens/viewer_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
+import '../../features/editor/screens/editor_screen.dart';
 import '../state/app_state.dart';
 
 // Routes
 class AppRoutes {
   static const String home = '/';
   static const String viewer = '/viewer';
+  static const String editor = '/editor';
   static const String settings = '/settings';
 }
 
@@ -31,6 +33,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // Extract note path from query parameters
           final notePath = state.uri.queryParameters['path'];
           return ViewerScreen(notePath: notePath);
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.editor,
+        name: 'editor',
+        builder: (context, state) {
+          // Extract document path from query parameters
+          final documentPath = state.uri.queryParameters['path'];
+          return EditorScreen(documentPath: documentPath);
         },
       ),
       GoRoute(
@@ -88,6 +99,14 @@ class AppNavigation {
     final uri = Uri(
       path: AppRoutes.viewer,
       queryParameters: notePath != null ? {'path': notePath} : null,
+    );
+    context.go(uri.toString());
+  }
+
+  static void toEditor(BuildContext context, {String? documentPath}) {
+    final uri = Uri(
+      path: AppRoutes.editor,
+      queryParameters: documentPath != null ? {'path': documentPath} : null,
     );
     context.go(uri.toString());
   }

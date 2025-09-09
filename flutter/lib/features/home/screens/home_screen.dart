@@ -38,10 +38,23 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         error: (error, _) => _buildErrorState(error.toString()),
         data: (config) => _buildHomeContent(notesState, uiState),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _createNewNote(context),
-        tooltip: 'Créer une nouvelle note',
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            onPressed: () => AppNavigation.toEditor(context),
+            heroTag: 'editor',
+            tooltip: 'New Editor',
+            child: const Icon(Icons.edit),
+          ),
+          const SizedBox(height: 8.0),
+          FloatingActionButton(
+            onPressed: () => _createNewNote(context),
+            heroTag: 'note',
+            tooltip: 'Créer une nouvelle note',
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }

@@ -1,218 +1,146 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:c_editor_flutter/models/models.dart';
 import 'dart:async';
 
-import '../editor_api.dart';
 import 'adapters.dart';
+import '../core/editor/editor_controller.dart';
+import '../core/editor/span_text_controller.dart';
+import '../core/editor/editor_sync.dart';
+import '../core/editor/editor_shortcuts.dart';
+import '../features/editor/widgets/editor_toolbar.dart';
 
-/// Main editor widget with live markdown editing and preview
-class EditorWidget extends StatefulWidget {
+/// Advanced interactive editor widget with real-time markdown parsing
+class EditorWidget extends ConsumerStatefulWidget {
   final String? initialContent;
   final bool showPreview;
   final bool showToolbar;
+  final bool enableSyntaxHighlighting;
+  final bool enableSync;
   final ValueChanged<String>? onChanged;
   final ValueChanged<Document>? onDocumentChanged;
+  final VoidCallback? onSave;
+  final VoidCallback? onOpen;
+  final VoidCallback? onNew;
   
   const EditorWidget({
     Key? key,
     this.initialContent,
     this.showPreview = true,
     this.showToolbar = true,
+    this.enableSyntaxHighlighting = true,
+    this.enableSync = true,
     this.onChanged,
     this.onDocumentChanged,
+    this.onSave,
+    this.onOpen,
+    this.onNew,
   }) : super(key: key);
 
   @override
-  State<EditorWidget> createState() => _EditorWidgetState();
+  ConsumerState<EditorWidget> createState() => _EditorWidgetState();
 }
 
-class _EditorWidgetState extends State<EditorWidget> {
-  late final TextEditingController _controller;
-  late final EditorApi _editorApi;
+class _EditorWidgetState extends ConsumerState<EditorWidget> 
+    with EditorSyncMixin<EditorWidget> {
+  late final SpanTextEditingController _textController;
+  late final ScrollController _editorScrollController;
+  late final ScrollController _previewScrollController;
+  late final EditorController _editorController;
   
-  Document? _parsedDocument;
-  String? _parseError;
-  bool _isInitialized = false;
-  Timer? _parseTimer;
   
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialContent ?? '');
-    _editorApi = EditorApiFactory.instance();
     
-    // Listen to text changes
-    _controller.addListener(_onTextChanged);
+    // Initialize controllers
+    _textController = SpanTextEditingController(
+      text: widget.initialContent ?? '',
+      enableSyntaxHighlighting: widget.enableSyntaxHighlighting,
+    );
+    _editorScrollController = ScrollController();
+    _previewScrollController = ScrollController();
+    // EditorController will be accessed via ref.watch in build method
+    
     
     _initializeEditor();
   }
   
   @override
   void dispose() {
-    _parseTimer?.cancel();
-    _controller.dispose();
+    _textController.dispose();
+    _editorScrollController.dispose();
+    _previewScrollController.dispose();
+    disposeSync();
     super.dispose();
   }
   
   Future<void> _initializeEditor() async {
-    final result = await _editorApi.initialize();
-    
-    if (mounted) {
-      setState(() {
-        _isInitialized = result.success;
-        if (!result.success) {
-          _parseError = result.error;
+    // Initialize sync if enabled
+    if (widget.enableSync) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          initializeSync(ref, _editorScrollController);
         }
       });
-      
-      // Parse initial content
-      if (_isInitialized && _controller.text.isNotEmpty) {
-        _scheduleUpdate();
-      }
-    }
-  }
-  
-  void _onTextChanged() {
-    widget.onChanged?.call(_controller.text);
-    _scheduleUpdate();
-  }
-  
-  void _scheduleUpdate() {
-    _parseTimer?.cancel();
-    _parseTimer = Timer(const Duration(milliseconds: 300), _parseMarkdown);
-  }
-  
-  Future<void> _parseMarkdown() async {
-    if (!_isInitialized || _controller.text.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _parsedDocument = null;
-          _parseError = null;
-        });
-      }
-      return;
-    }
-    
-    final result = await _editorApi.parseMarkdown(_controller.text);
-    
-    if (mounted) {
-      setState(() {
-        if (result.success) {
-          _parsedDocument = result.data;
-          _parseError = null;
-          widget.onDocumentChanged?.call(_parsedDocument!);
-        } else {
-          _parseError = result.error;
-          _parsedDocument = null;
-        }
-      });
-    }
-  }
-  
-  void _insertFormatting(String prefix, String suffix) {
-    final selection = _controller.selection;
-    final text = _controller.text;
-    
-    if (selection.isValid) {
-      final selectedText = selection.textInside(text);
-      final newText = prefix + selectedText + suffix;
-      
-      _controller.text = text.replaceRange(selection.start, selection.end, newText);
-      
-      // Update cursor position
-      final newStart = selection.start + prefix.length;
-      final newEnd = newStart + selectedText.length;
-      _controller.selection = TextSelection(
-        baseOffset: newStart,
-        extentOffset: newEnd,
-      );
     }
   }
   
   @override
-  Widget build(BuildContext context) {
-    if (!_isInitialized) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+  void onScrollChanged(double offset) {
+    if (widget.enableSync) {
+      updateSyncScroll(offset, SyncDirection.editorToPreview);
     }
-    
-    return Column(
-      children: [
-        if (widget.showToolbar) _buildToolbar(context),
-        
-        Expanded(
-          child: widget.showPreview 
-              ? _buildSplitView(context)
-              : _buildEditorOnly(context),
-        ),
-        
-        if (_parseError != null) _buildErrorBar(context),
-      ],
-    );
   }
   
-  Widget _buildToolbar(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(8.0),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: Border(
-          bottom: BorderSide(
-            color: Theme.of(context).colorScheme.outline,
-          ),
-        ),
-      ),
-      child: Wrap(
-        spacing: 8.0,
+  
+  @override
+  Widget build(BuildContext context) {
+    final editorState = ref.watch(editorStateProvider);
+    final editorController = ref.watch(editorStateProvider.notifier);
+    
+    // Set initial content if provided and controller is empty
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (widget.initialContent != null && 
+          editorState.text.isEmpty && 
+          widget.initialContent!.isNotEmpty) {
+        editorController.setContent(widget.initialContent!);
+      }
+    });
+    
+    return EditorShortcuts(
+      controller: editorController,
+      onSave: widget.onSave,
+      onOpen: widget.onOpen,
+      onNew: widget.onNew,
+      child: Column(
         children: [
-          IconButton(
-            onPressed: () => _insertFormatting('**', '**'),
-            icon: const Icon(Icons.format_bold),
-            tooltip: 'Bold',
+          if (widget.showToolbar) 
+            EditorToolbar(
+              controller: editorController,
+              onUndo: () => editorController.undo(),
+              onRedo: () => editorController.redo(),
+            ),
+          
+          Expanded(
+            child: widget.showPreview 
+                ? _buildSplitView(context, editorState)
+                : _buildEditorOnly(context, editorState),
           ),
-          IconButton(
-            onPressed: () => _insertFormatting('*', '*'),
-            icon: const Icon(Icons.format_italic),
-            tooltip: 'Italic',
-          ),
-          IconButton(
-            onPressed: () => _insertFormatting('***', '***'),
-            icon: const Icon(Icons.format_bold),
-            tooltip: 'Bold + Italic',
-          ),
-          IconButton(
-            onPressed: () => _insertFormatting('==', '=='),
-            icon: const Icon(Icons.highlight),
-            tooltip: 'Highlight',
-          ),
-          IconButton(
-            onPressed: () => _insertFormatting('++', '++'),
-            icon: const Icon(Icons.format_underlined),
-            tooltip: 'Underline',
-          ),
-          const VerticalDivider(),
-          IconButton(
-            onPressed: () => _insertFormatting('# ', ''),
-            icon: const Icon(Icons.title),
-            tooltip: 'Header 1',
-          ),
-          IconButton(
-            onPressed: () => _insertFormatting('## ', ''),
-            icon: const Icon(Icons.title),
-            tooltip: 'Header 2',
-          ),
+          
+          if (editorState.error != null) _buildErrorBar(context, editorState),
         ],
       ),
     );
   }
   
-  Widget _buildSplitView(BuildContext context) {
+  
+  Widget _buildSplitView(BuildContext context, EditorState editorState) {
     return Row(
       children: [
         Expanded(
           flex: 1,
-          child: _buildEditor(context),
+          child: _buildEditor(context, editorState),
         ),
         
         VerticalDivider(
@@ -222,65 +150,119 @@ class _EditorWidgetState extends State<EditorWidget> {
         
         Expanded(
           flex: 1,
-          child: _buildPreview(context),
+          child: _buildPreview(context, editorState),
         ),
       ],
     );
   }
   
-  Widget _buildEditorOnly(BuildContext context) {
-    return _buildEditor(context);
+  Widget _buildEditorOnly(BuildContext context, EditorState editorState) {
+    return _buildEditor(context, editorState);
   }
   
-  Widget _buildEditor(BuildContext context) {
+  Widget _buildEditor(BuildContext context, EditorState editorState) {
+    // Update text controller with latest document for syntax highlighting
+    if (editorState.document != null && widget.enableSyntaxHighlighting) {
+      _textController.updateDocument(editorState.document);
+    }
+    
     return Container(
       padding: const EdgeInsets.all(16.0),
-      child: TextField(
-        controller: _controller,
-        maxLines: null,
-        expands: true,
-        style: const TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 14.0,
+      child: Scrollbar(
+        controller: _editorScrollController,
+        child: TextField(
+          controller: _textController,
+          scrollController: _editorScrollController,
+          maxLines: null,
+          expands: true,
+          style: const TextStyle(
+            fontFamily: 'monospace',
+            fontSize: 14.0,
+            height: 1.4,
+          ),
+          decoration: const InputDecoration(
+            hintText: 'Enter your markdown here...',
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+          ),
+          textAlignVertical: TextAlignVertical.top,
+          onChanged: (text) {
+            widget.onChanged?.call(text);
+            if (editorState.document != null) {
+              widget.onDocumentChanged?.call(editorState.document!);
+            }
+          },
         ),
-        decoration: const InputDecoration(
-          hintText: 'Enter your markdown here...',
-          border: InputBorder.none,
-        ),
-        textAlignVertical: TextAlignVertical.top,
       ),
     );
   }
   
-  Widget _buildPreview(BuildContext context) {
+  Widget _buildPreview(BuildContext context, EditorState editorState) {
     return Container(
       padding: const EdgeInsets.all(16.0),
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: SingleChildScrollView(
-        child: _parsedDocument != null
-            ? DocumentRenderer(document: _parsedDocument!)
-            : const Text(
-                'Preview will appear here...',
-                style: TextStyle(
-                  fontStyle: FontStyle.italic,
-                  color: Colors.grey,
-                ),
-              ),
+      child: Scrollbar(
+        controller: _previewScrollController,
+        child: SingleChildScrollView(
+          controller: _previewScrollController,
+          child: editorState.isLoading
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                )
+              : editorState.document != null
+                  ? DocumentRenderer(document: editorState.document!)
+                  : const Text(
+                      'Preview will appear here...',
+                      style: TextStyle(
+                        fontStyle: FontStyle.italic,
+                        color: Colors.grey,
+                      ),
+                    ),
+        ),
       ),
     );
   }
   
-  Widget _buildErrorBar(BuildContext context) {
-    return Container(
+  Widget _buildErrorBar(BuildContext context, EditorState editorState) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
       width: double.infinity,
       padding: const EdgeInsets.all(8.0),
       color: Theme.of(context).colorScheme.errorContainer,
-      child: Text(
-        'Parse Error: $_parseError',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.onErrorContainer,
-          fontSize: 12.0,
-        ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.error_outline,
+            color: Theme.of(context).colorScheme.onErrorContainer,
+            size: 16.0,
+          ),
+          const SizedBox(width: 8.0),
+          Expanded(
+            child: Text(
+              'Parse Error: ${editorState.error}',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onErrorContainer,
+                fontSize: 12.0,
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: () {
+              // Clear error - would need to update controller
+            },
+            icon: Icon(
+              Icons.close,
+              color: Theme.of(context).colorScheme.onErrorContainer,
+              size: 16.0,
+            ),
+            iconSize: 16.0,
+            constraints: const BoxConstraints(),
+            padding: EdgeInsets.zero,
+          ),
+        ],
       ),
     );
   }
