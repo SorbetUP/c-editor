@@ -1,0 +1,119 @@
+{
+  "name": "Sample Document",
+  "meta": {
+    "created": "2024-01-01T00:00:00Z",
+    "modified": "2024-01-01T12:00:00Z",
+    "author": "Final Editor"
+  },
+  "elements": [
+    {
+      "type": "heading",
+      "level": 1,
+      "content": [
+        {
+          "type": "text",
+          "text": "Sample Document"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "This is a sample JSON document structure for testing the Final Editor."
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 2,
+      "content": [
+        {
+          "type": "text",
+          "text": "Features"
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "The editor supports:"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "items": [
+        {
+          "type": "list_item",
+          "content": [
+            {
+              "type": "text",
+              "text": "Bold text",
+              "marks": ["bold"]
+            },
+            {
+              "type": "text",
+              "text": " formatting"
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "content": [
+            {
+              "type": "text",
+              "text": "Italic text",
+              "marks": ["italic"]
+            },
+            {
+              "type": "text",
+              "text": " styling"
+            }
+          ]
+        },
+        {
+          "type": "list_item",
+          "content": [
+            {
+              "type": "code",
+              "text": "Inline code"
+            },
+            {
+              "type": "text",
+              "text": " snippets"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "heading",
+      "level": 3,
+      "content": [
+        {
+          "type": "text",
+          "text": "Code Blocks"
+        }
+      ]
+    },
+    {
+      "type": "code_block",
+      "language": "javascript",
+      "content": "function hello() {\n  console.log(\"Hello, World!\");\n}"
+    },
+    {
+      "type": "blockquote",
+      "content": [
+        {
+          "type": "text",
+          "text": "This is a blockquote with some example text. It can span multiple lines."
+        }
+      ]
+    }
+  ]
+}
