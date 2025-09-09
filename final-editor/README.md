@@ -211,7 +211,16 @@ WebAssembly and modern JavaScript features are required.
 
 ## 📄 License
 
-This project is part of the c-editor suite. See the main repository for license information.
+**C-Editor License (CeL) v1.0** - Free for personal, educational, and non-commercial use.
+
+- ✅ **FREE for individuals**: Personal projects, learning, research
+- ✅ **FREE for students**: Educational use, academic projects  
+- ✅ **FREE for non-profits**: Open source projects, NGOs
+- 💼 **Commercial license required**: Businesses, corporations, commercial products
+
+See [LICENSE](../LICENSE) for full terms. Contact us for commercial licensing.
+
+This ensures the project remains accessible to the community while supporting sustainable development.
 
 ## 🔗 Related
 

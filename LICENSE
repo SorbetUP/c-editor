@@ -1,0 +1,41 @@
+C-Editor License (CeL) v1.0
+
+Copyright (c) 2024 C-Editor Contributors
+
+This license allows free use of this software for personal, educational, and non-commercial purposes, but requires a commercial license for commercial use.
+
+TERMS AND CONDITIONS:
+
+1. PERSONAL AND NON-COMMERCIAL USE
+   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, modify, and distribute the Software for personal, educational, research, or other non-commercial purposes, subject to the following conditions:
+   
+   - The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+   - Any derivative work must also be licensed under the same terms.
+
+2. COMMERCIAL USE
+   Commercial use of this Software by any individual, company, corporation, or other entity is prohibited without a valid commercial license. "Commercial use" includes but is not limited to:
+   
+   - Use within a for-profit business or organization
+   - Integration into products or services sold commercially
+   - Use to generate revenue or commercial advantage
+   - Use by employees of commercial entities in the course of their work
+   
+   To obtain a commercial license, contact the copyright holders.
+
+3. CONTRIBUTIONS
+   By contributing to this project, you agree that your contributions will be licensed under the same terms as this license.
+
+4. DISCLAIMER
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+5. TERMINATION
+   This license terminates automatically if you violate any of its terms. Upon termination, you must cease all use and distribution of the Software.
+
+6. GOVERNING LAW
+   This license is governed by the laws of the jurisdiction where the copyright holders are located.
+
+For commercial licensing inquiries, please contact: [your-email@example.com]
+
+---
+
+This license is inspired by the Creative Commons NonCommercial licenses but is designed specifically for software. It allows the code to be truly open source for individuals, students, researchers, and non-profit organizations while requiring commercial entities to obtain a license.
