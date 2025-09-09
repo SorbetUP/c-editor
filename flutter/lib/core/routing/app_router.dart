@@ -6,6 +6,7 @@ import '../../features/home/screens/home_screen.dart';
 import '../../features/viewer/screens/viewer_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
 import '../../features/editor/screens/editor_screen.dart';
+// Playground example moved to examples/ directory
 import '../state/app_state.dart';
 
 // Routes
