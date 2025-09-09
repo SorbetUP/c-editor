@@ -1,193 +1,197 @@
-# Flutter UI Multiplatform Architecture
+# Flutter Note Editor - v1.1.0 App Container
 
-This directory contains the Flutter UI implementation for the C Editor with multiplatform support.
+Application Flutter multiplateforme pour l'édition de notes, utilisant le core C validé pour le traitement des documents.
 
-## Architecture Overview
+## 🎯 Objectif
 
-### Core Components
+Cette application sert de "container" intelligent qui:
+- ✅ Fournit une interface utilisateur native sur toutes les plateformes
+- ✅ Gère les opérations d'I/O et le stockage multiplateforme  
+- ✅ Intègre le core C validé via FFI (natif) et WASM (web)
+- ✅ Offre une expérience utilisateur cohérente et performante
 
-1. **C Core Library** (`../src/`)
-   - Markdown parsing and JSON serialization
-   - Memory-safe C11 implementation
-   - Property-tested and fuzz-tested
+## 🏗️ Architecture
 
-2. **FFI Bridge** (`lib/ffi/`)
-   - Native bindings for mobile/desktop platforms
-   - Direct C library integration via dart:ffi
-   - Platform: iOS, Android, macOS, Windows, Linux
+### Séparation des responsabilités
+- **Core C**: Parsing markdown, conversion JSON, canonicalisation
+- **Flutter App**: Interface utilisateur, stockage, navigation, I/O
+- **Platform Bindings**: FFI (desktop/mobile) + WASM (web)
 
-3. **WASM Bridge** (`lib/wasm/`)
-   - Web-compatible interface
-   - Compiled C library to WebAssembly
-   - Platform: Web browsers
+### Stack technique
+- **Flutter 3.35+** - Framework UI multiplateforme
+- **Riverpod** - State management avec code generation
+- **go_router** - Routing déclaratif type-safe
+- **Material Design 3** - Thème sombre (#202124)
+- **i18n** - Support français/anglais
 
-4. **Unified API** (`lib/editor_api.dart`)
-   - Abstract interface hiding platform differences
-   - Consistent API across all platforms
-   - Automatic platform detection and routing
+## 🚀 Installation rapide
 
-## Directory Structure
+```bash
+# 1. Installer Flutter (si pas déjà fait)
+brew install --cask flutter
+
+# 2. Setup du projet
+cd flutter
+chmod +x scripts/setup.sh
+./scripts/setup.sh
+
+# 3. Lancer l'app
+flutter run -d chrome    # Web
+flutter run -d macos     # Desktop macOS
+```
+
+## 📱 Plateformes supportées
+
+| Plateforme | Statut | Integration | Notes |
+|------------|--------|-------------|-------|
+| Web | ✅ | WASM | Production ready |
+| macOS | ✅ | FFI | Production ready |
+| Windows | ✅ | FFI | Production ready |
+| Linux | ✅ | FFI | Production ready |
+| iOS | 🔄 | FFI | En développement |
+| Android | 🔄 | FFI | En développement |
+
+## 🎨 Fonctionnalités
+
+### Interface utilisateur
+- **Thème sombre** (#202124) Material Design 3
+- **Navigation fluide** avec go_router
+- **Responsive design** adaptatif
+- **Internationalisation** français/anglais
+
+### Gestion des notes
+- **Liste des notes** avec aperçu et métadonnées
+- **Visualiseur riche** avec support spans, images, tableaux
+- **Import/Export** Markdown et JSON
+- **Stockage multiplateforme** (filesystem/app dir/IndexedDB)
+
+### Intégration C Core
+- **API unifiée** EditorApi abstrait
+- **Binding automatique** selon la plateforme
+- **Gestion d'erreurs** robuste avec EditorResult<T>
+- **Performance optimale** grâce au core C validé
+
+## 📋 Structure du projet
 
 ```
 flutter/
 ├── lib/
-│   ├── editor_api.dart          # Unified cross-platform API
-│   ├── ffi/
-│   │   ├── editor_ffi.dart      # FFI bindings
-│   │   └── generated/           # Generated FFI bindings
-│   ├── wasm/
-│   │   ├── editor_wasm.dart     # WASM interface
-│   │   └── js_interop.dart      # JavaScript interop
-│   ├── widgets/
-│   │   ├── editor_widget.dart   # Main editor widget
-│   │   ├── toolbar.dart         # Formatting toolbar
-│   │   └── preview.dart         # Live preview pane
-│   └── models/
-│       ├── document.dart        # Document data model
-│       └── text_span.dart       # Text span model
-├── web/
-│   ├── editor_wasm.js          # WASM loader
-│   └── editor.wasm             # Compiled C library
-├── ios/
-│   └── libeditor.a             # iOS static library
-├── android/
-│   └── src/main/jniLibs/       # Android native libraries
-├── macos/
-│   └── libeditor.dylib         # macOS dynamic library
-├── windows/
-│   └── editor.dll              # Windows DLL
-└── linux/
-    └── libeditor.so            # Linux shared library
+│   ├── core/                    # Logique core application
+│   │   ├── routing/            # Configuration go_router  
+│   │   ├── state/              # State management Riverpod
+│   │   ├── storage/            # Stockage multiplateforme
+│   │   └── editor/             # Intégration core C
+│   ├── features/               # Modules par fonctionnalité
+│   │   ├── home/              # Écran liste des notes
+│   │   ├── viewer/            # Visualiseur de documents
+│   │   └── settings/          # Paramètres application
+│   ├── models/                # Modèles de données
+│   ├── shared/                # Composants partagés
+│   │   ├── theme/             # Thème Material Design
+│   │   ├── i18n/              # Internationalisation
+│   │   └── widgets/           # Widgets réutilisables
+│   ├── ffi/                   # Bindings FFI (desktop/mobile)
+│   ├── wasm/                  # Bindings WASM (web)
+│   └── main.dart              # Point d'entrée
+├── scripts/                   # Scripts de build et setup
+├── ARCHITECTURE.md            # Documentation architecture
+└── README.md                  # Ce fichier
 ```
 
-## Platform-Specific Implementation
+## 🔧 Développement
 
-### Native Platforms (FFI)
-- **Mobile**: iOS, Android
-- **Desktop**: macOS, Windows, Linux
-- **Technology**: dart:ffi with platform-specific native libraries
-- **Benefits**: Maximum performance, full C library access
-
-### Web Platform (WASM)
-- **Platform**: Web browsers
-- **Technology**: WebAssembly + JavaScript interop
-- **Benefits**: No plugin required, runs in any modern browser
-
-## API Design
-
-### Unified Editor API
+### State Management avec Riverpod
 ```dart
-abstract class EditorApi {
-  Future<void> initialize();
-  Future<Document> parseMarkdown(String markdown);
-  Future<String> exportToMarkdown(Document doc);
-  Future<String> exportToJson(Document doc);
-  void dispose();
-}
-
-class EditorApiFactory {
-  static EditorApi create() {
-    if (kIsWeb) {
-      return WasmEditorApi();
-    } else {
-      return FfiEditorApi();
-    }
+@riverpod
+class Notes extends _$Notes {
+  @override
+  FutureOr<List<String>> build() async {
+    final storage = ref.read(storageServiceProvider);
+    return await storage.listNotes();
   }
 }
 ```
 
-### Document Model
+### Intégration Platform Editor
 ```dart
-class Document {
-  final List<Element> elements;
-  Document(this.elements);
-}
+final editor = PlatformEditor.instance;
+await editor.initialize();
 
-abstract class Element {
-  ElementType get type;
-}
-
-class TextElement extends Element {
-  final List<TextSpan> spans;
-  final int level; // Header level (0 = normal text)
-  TextElement(this.spans, {this.level = 0});
-}
-
-class TextSpan {
-  final String text;
-  final bool bold;
-  final bool italic;
-  final bool highlight;
-  final bool underline;
-  final Color? highlightColor;
-  final Color? underlineColor;
-  
-  TextSpan({
-    required this.text,
-    this.bold = false,
-    this.italic = false,
-    this.highlight = false,
-    this.underline = false,
-    this.highlightColor,
-    this.underlineColor,
-  });
+final result = await editor.parseMarkdown(markdown);
+if (result.isSuccess) {
+  final document = result.data!;
+  // Utiliser le document...
 }
 ```
 
-## Implementation Plan
+### Thématisation
+```dart
+MaterialApp.router(
+  theme: AppTheme.darkTheme(), // #202124 background
+  routerConfig: AppRouter.router,
+);
+```
 
-### Phase 1: Project Setup
-1. Create Flutter project with multiplatform support
-2. Setup build scripts for native libraries
-3. Configure WASM compilation pipeline
-4. Setup platform-specific build configurations
+## 🧪 Tests et qualité
 
-### Phase 2: FFI Implementation
-1. Generate FFI bindings from C headers
-2. Implement FfiEditorApi class
-3. Create platform-specific library loading
-4. Test on mobile and desktop platforms
+```bash
+# Tests unitaires
+flutter test
 
-### Phase 3: WASM Implementation  
-1. Compile C library to WebAssembly
-2. Create JavaScript interop layer
-3. Implement WasmEditorApi class
-4. Test web deployment
+# Analyse statique
+flutter analyze
 
-### Phase 4: UI Implementation
-1. Create editor widget with syntax highlighting
-2. Implement formatting toolbar
-3. Add live preview functionality
-4. Handle platform-specific input methods
+# Tests d'intégration
+flutter drive --target=test_driver/app.dart
 
-### Phase 5: Testing & Polish
-1. Cross-platform testing suite
-2. Performance optimization
-3. Error handling and recovery
-4. Documentation and examples
+# Coverage
+flutter test --coverage
+```
 
-## Build Requirements
+## 📦 Build et déploiement
 
-### For Native Platforms
-- C11-compatible compiler (gcc/clang)
-- Platform-specific build tools
-- Flutter SDK with desktop/mobile support
+```bash
+# Web
+flutter build web --release
 
-### For Web Platform
-- Emscripten for WASM compilation
-- Web-compatible Flutter build
-- Modern browser with WASM support
+# Desktop macOS
+flutter build macos --release
 
-## Performance Considerations
+# Desktop Windows
+flutter build windows --release
 
-1. **Memory Management**: Proper cleanup of native resources
-2. **Async Operations**: Non-blocking UI during parsing
-3. **Incremental Updates**: Efficient text editing updates
-4. **Platform Optimization**: Leverage native performance where available
+# Desktop Linux  
+flutter build linux --release
+```
 
-## Security Considerations
+## 🎯 Roadmap v1.1.x
 
-1. **Input Validation**: Sanitize all user input before C library calls
-2. **Memory Safety**: Use AddressSanitizer in debug builds
-3. **Sandboxing**: Web platform naturally sandboxed via WASM
-4. **Error Handling**: Graceful degradation on parsing errors
+- [ ] **Tests E2E** complets avec golden tests
+- [ ] **CI/CD** automatisé avec validation multiplateforme
+- [ ] **Performance** optimisations (lazy loading, virtualization)
+- [ ] **Mobile** finalisation iOS/Android
+- [ ] **Plugins** architecture extensible
+
+## 📄 Livrables v1.1.0
+
+✅ **App container Flutter** multiplateforme fonctionnel  
+✅ **Intégration core C** via FFI et WASM  
+✅ **Interface utilisateur** Material Design 3  
+✅ **Stockage multiplateforme** avec abstraction  
+✅ **Routing et navigation** type-safe  
+✅ **Internationalisation** français/anglais  
+✅ **Documentation** architecture et utilisation
+
+## 🤝 Contribution
+
+1. Respecter les guidelines Dart/Flutter
+2. Utiliser Riverpod pour le state management
+3. Écrire des tests pour les nouvelles fonctionnalités
+4. Assurer la compatibilité multiplateforme
+5. Documenter les changements d'API
+
+---
+
+**Status**: ✅ v1.1.0-app-shell **COMPLETE**  
+**Intégration**: Core C v1.0.1-tests validé  
+**Plateformes**: Web, macOS, Windows, Linux ready

@@ -4,7 +4,7 @@ import 'dart:js' as js;
 import 'dart:js_util' as js_util;
 
 import '../editor_api.dart';
-import '../models/document.dart';
+import 'package:c_editor_flutter/models/models.dart';
 
 /// WASM-based implementation for web platform
 class WasmEditorApi implements EditorApi {

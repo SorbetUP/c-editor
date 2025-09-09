@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:c_editor_flutter/models/models.dart';
 import 'dart:async';
 
 import '../editor_api.dart';
-import '../models/document.dart' as doc;
+import 'adapters.dart';
 
 /// Main editor widget with live markdown editing and preview
 class EditorWidget extends StatefulWidget {
@@ -11,7 +11,7 @@ class EditorWidget extends StatefulWidget {
   final bool showPreview;
   final bool showToolbar;
   final ValueChanged<String>? onChanged;
-  final ValueChanged<doc.Document>? onDocumentChanged;
+  final ValueChanged<Document>? onDocumentChanged;
   
   const EditorWidget({
     Key? key,
@@ -30,7 +30,7 @@ class _EditorWidgetState extends State<EditorWidget> {
   late final TextEditingController _controller;
   late final EditorApi _editorApi;
   
-  doc.Document? _parsedDocument;
+  Document? _parsedDocument;
   String? _parseError;
   bool _isInitialized = false;
   Timer? _parseTimer;
@@ -255,7 +255,7 @@ class _EditorWidgetState extends State<EditorWidget> {
   Widget _buildPreview(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(16.0),
-      color: Theme.of(context).colorScheme.surfaceVariant,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: SingleChildScrollView(
         child: _parsedDocument != null
             ? DocumentRenderer(document: _parsedDocument!)
@@ -288,7 +288,7 @@ class _EditorWidgetState extends State<EditorWidget> {
 
 /// Widget for rendering parsed documents
 class DocumentRenderer extends StatelessWidget {
-  final doc.Document document;
+  final Document document;
   
   const DocumentRenderer({
     Key? key,
@@ -305,20 +305,20 @@ class DocumentRenderer extends StatelessWidget {
     );
   }
   
-  Widget _renderElement(BuildContext context, doc.Element element) {
-    switch (element.type) {
-      case doc.ElementType.text:
-        return _renderTextElement(context, element as doc.TextElement);
-        
-      case doc.ElementType.image:
-        return _renderImageElement(context, element as doc.ImageElement);
-        
-      case doc.ElementType.table:
-        return _renderTableElement(context, element as doc.TableElement);
+  Widget _renderElement(BuildContext context, DocElement element) {
+    switch (element) {
+      case DocTextElement():
+        return _renderTextElement(context, element);
+      case DocImageElement():
+        return _renderImageElement(context, element);
+      case DocTableElement():
+        return _renderTableElement(context, element);
+      default:
+        return const SizedBox.shrink();
     }
   }
   
-  Widget _renderTextElement(BuildContext context, doc.TextElement element) {
+  Widget _renderTextElement(BuildContext context, DocTextElement element) {
     final style = element.level > 0
         ? Theme.of(context).textTheme.headlineMedium?.copyWith(
             fontSize: (24 - element.level * 2).toDouble(),
@@ -328,30 +328,20 @@ class DocumentRenderer extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: RichText(
+        textAlign: mapDocAlign(element.align),
         text: TextSpan(
           style: style,
-          children: element.spans.map((span) {
-            return TextSpan(
-              text: span.text,
-              style: style?.copyWith(
-                fontWeight: span.bold ? FontWeight.bold : null,
-                fontStyle: span.italic ? FontStyle.italic : null,
-                backgroundColor: span.highlight ? span.highlightColor : null,
-                decorationColor: span.underline ? span.underlineColor : null,
-                decoration: span.underline ? TextDecoration.underline : null,
-              ),
-            );
-          }).toList(),
+          children: element.spans.map((span) => mapDocSpan(span)).toList(),
         ),
       ),
     );
   }
   
-  Widget _renderImageElement(BuildContext context, doc.ImageElement element) {
+  Widget _renderImageElement(BuildContext context, DocImageElement element) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Column(
-        crossAxisAlignment: _alignmentFromTextAlign(element.align),
+        crossAxisAlignment: _alignmentFromString(element.align),
         children: [
           Image.network(
             element.src,
@@ -381,7 +371,7 @@ class DocumentRenderer extends StatelessWidget {
     );
   }
   
-  Widget _renderTableElement(BuildContext context, doc.TableElement element) {
+  Widget _renderTableElement(BuildContext context, DocTableElement element) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Table(
@@ -393,14 +383,18 @@ class DocumentRenderer extends StatelessWidget {
           return TableRow(
             decoration: isHeader
                 ? BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceVariant,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   )
                 : null,
             children: row.map((cell) {
               return TableCell(
                 child: Padding(
                   padding: const EdgeInsets.all(8.0),
-                  child: _renderTextElement(context, cell),
+                  child: RichText(
+                    text: TextSpan(
+                      children: cell.map((span) => mapDocSpan(span)).toList(),
+                    ),
+                  ),
                 ),
               );
             }).toList(),
@@ -410,15 +404,15 @@ class DocumentRenderer extends StatelessWidget {
     );
   }
   
-  CrossAxisAlignment _alignmentFromTextAlign(TextAlign align) {
+  CrossAxisAlignment _alignmentFromString(String align) {
     switch (align) {
-      case TextAlign.left:
+      case 'left':
         return CrossAxisAlignment.start;
-      case TextAlign.center:
+      case 'center':
         return CrossAxisAlignment.center;
-      case TextAlign.right:
+      case 'right':
         return CrossAxisAlignment.end;
-      case TextAlign.justify:
+      case 'justify':
         return CrossAxisAlignment.stretch;
       default:
         return CrossAxisAlignment.start;

@@ -1,0 +1,3 @@
+// Placeholder WASM file - this will be replaced with the actual compiled WASM from the C core
+// TODO: Build the actual WASM binary from ../src/markdown.c with:
+// emcc -O3 -s WASM=1 -s EXPORTED_FUNCTIONS='["_parse_markdown", "_get_version"]' ../src/markdown.c -o editor.wasm

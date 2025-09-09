@@ -1,246 +1,170 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:ffi';
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'package:ffi/ffi.dart';
 
-import '../editor_api.dart';
-import '../models/document.dart';
+import 'package:c_editor_flutter/models/models.dart';
 
-/// FFI-based implementation for native platforms
-class FfiEditorApi implements EditorApi {
-  DynamicLibrary? _library;
-  bool _initialized = false;
+// C function signatures
+typedef EditorInitializeC = Int32 Function();
+typedef EditorInitializeDart = int Function();
+
+typedef EditorParseMarkdownC = Int32 Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>);
+typedef EditorParseMarkdownDart = int Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>);
+
+typedef EditorConvertToMarkdownC = Int32 Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>);
+typedef EditorConvertToMarkdownDart = int Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>);
+
+typedef EditorCanonicalizeC = Int32 Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>);
+typedef EditorCanonicalizeDart = int Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>);
+
+typedef EditorFreeStringC = Void Function(Pointer<Utf8>);
+typedef EditorFreeStringDart = void Function(Pointer<Utf8>);
+
+typedef EditorVersionC = Pointer<Utf8> Function();
+typedef EditorVersionDart = Pointer<Utf8> Function();
+
+class EditorFFI {
+  static EditorFFI? _instance;
+  late DynamicLibrary _dylib;
   
-  @override
-  bool get isReady => _initialized && _library != null;
-  
-  @override
-  EditorCapabilities get capabilities => EditorCapabilities.native;
-  
-  @override
-  Future<EditorResult<void>> initialize() async {
-    try {
-      _library = _loadLibrary();
-      _initialized = true;
-      return EditorResult.success(null);
-    } catch (e) {
-      return EditorResult.failure('Failed to initialize FFI: $e');
-    }
+  // Function bindings
+  late EditorInitializeDart _initialize;
+  late EditorParseMarkdownDart _parseMarkdown;
+  late EditorConvertToMarkdownDart _convertToMarkdown;
+  late EditorCanonicalizeDart _canonicalize;
+  late EditorFreeStringDart _freeString;
+  late EditorVersionDart _getVersion;
+
+  EditorFFI._();
+
+  static EditorFFI get instance {
+    _instance ??= EditorFFI._();
+    return _instance!;
   }
-  
-  @override
-  Future<EditorResult<Document>> parseMarkdown(String markdown) async {
-    if (!isReady) {
-      return EditorResult.failure('Editor not initialized');
-    }
-    
-    try {
-      // Allocate native string
-      final markdownPtr = _allocateString(markdown);
-      final jsonPtrPtr = calloc<Pointer<Utf8>>();
-      
-      try {
-        // Call native function
-        final result = _markdownToJson(markdownPtr, jsonPtrPtr);
-        
-        if (result != 0) {
-          return EditorResult.failure('Parse failed with code $result');
-        }
-        
-        // Read JSON result
-        final jsonPtr = jsonPtrPtr.value;
-        if (jsonPtr == nullptr) {
-          return EditorResult.failure('No JSON output received');
-        }
-        
-        final jsonString = jsonPtr.toDartString();
-        final jsonData = jsonDecode(jsonString);
-        final document = Document.fromJson(jsonData);
-        
-        // Free native memory
-        _free(jsonPtr);
-        
-        return EditorResult.success(document);
-        
-      } finally {
-        calloc.free(markdownPtr);
-        calloc.free(jsonPtrPtr);
-      }
-      
-    } catch (e) {
-      return EditorResult.failure('Parse error: $e');
-    }
-  }
-  
-  @override
-  Future<EditorResult<String>> exportToMarkdown(Document document) async {
-    if (!isReady) {
-      return EditorResult.failure('Editor not initialized');
-    }
-    
-    try {
-      // Convert document to JSON
-      final jsonString = jsonEncode(document.toJson());
-      final jsonPtr = _allocateString(jsonString);
-      final markdownPtrPtr = calloc<Pointer<Utf8>>();
-      
-      try {
-        // Call native function  
-        final result = _jsonToMarkdown(jsonPtr, markdownPtrPtr);
-        
-        if (result != 0) {
-          return EditorResult.failure('Export failed with code $result');
-        }
-        
-        // Read markdown result
-        final markdownPtr = markdownPtrPtr.value;
-        if (markdownPtr == nullptr) {
-          return EditorResult.failure('No markdown output received');
-        }
-        
-        final markdown = markdownPtr.toDartString();
-        
-        // Free native memory
-        _free(markdownPtr);
-        
-        return EditorResult.success(markdown);
-        
-      } finally {
-        calloc.free(jsonPtr);
-        calloc.free(markdownPtrPtr);
-      }
-      
-    } catch (e) {
-      return EditorResult.failure('Export error: $e');
-    }
-  }
-  
-  @override
-  Future<EditorResult<String>> exportToJson(Document document) async {
-    try {
-      final jsonString = jsonEncode(document.toJson());
-      return EditorResult.success(jsonString);
-    } catch (e) {
-      return EditorResult.failure('JSON serialization error: $e');
-    }
-  }
-  
-  @override
-  Future<EditorResult<Document>> simulateEditor(List<String> characters) async {
-    if (!isReady) {
-      return EditorResult.failure('Editor not initialized');
-    }
-    
-    try {
-      // Initialize editor state
-      final editorPtr = _editorInit();
-      if (editorPtr == nullptr) {
-        return EditorResult.failure('Failed to initialize editor state');
-      }
-      
-      try {
-        // Process characters one by one
-        for (final char in characters) {
-          if (char.isNotEmpty) {
-            final charCode = char.codeUnitAt(0);
-            _editorInput(editorPtr, charCode);
-          }
-        }
-        
-        // Get final document
-        final jsonPtrPtr = calloc<Pointer<Utf8>>();
-        try {
-          final result = _editorGetDocument(editorPtr, jsonPtrPtr);
-          
-          if (result != 0) {
-            return EditorResult.failure('Failed to get document with code $result');
-          }
-          
-          final jsonPtr = jsonPtrPtr.value;
-          if (jsonPtr == nullptr) {
-            return EditorResult.failure('No document output received');
-          }
-          
-          final jsonString = jsonPtr.toDartString();
-          final jsonData = jsonDecode(jsonString);
-          final document = Document.fromJson(jsonData);
-          
-          _free(jsonPtr);
-          return EditorResult.success(document);
-          
-        } finally {
-          calloc.free(jsonPtrPtr);
-        }
-        
-      } finally {
-        _editorFree(editorPtr);
-      }
-      
-    } catch (e) {
-      return EditorResult.failure('Editor simulation error: $e');
-    }
-  }
-  
-  @override
-  Future<void> dispose() async {
-    _initialized = false;
-    _library = null;
-  }
-  
-  // Private helper methods
-  
-  DynamicLibrary _loadLibrary() {
-    if (Platform.isAndroid) {
-      return DynamicLibrary.open('libeditor.so');
-    } else if (Platform.isIOS) {
-      return DynamicLibrary.executable();
+
+  Future<void> initialize() async {
+    // Load the native library
+    if (Platform.isWindows) {
+      _dylib = DynamicLibrary.open('libeditor.dll');
     } else if (Platform.isMacOS) {
-      return DynamicLibrary.open('libeditor.dylib');
-    } else if (Platform.isWindows) {
-      return DynamicLibrary.open('editor.dll');
+      _dylib = DynamicLibrary.open('../libeditor.a');
     } else if (Platform.isLinux) {
-      return DynamicLibrary.open('libeditor.so');
+      _dylib = DynamicLibrary.open('../libeditor.so');
     } else {
-      throw UnsupportedError('Platform not supported');
+      throw UnsupportedError('Platform not supported for FFI');
+    }
+
+    // Bind functions
+    _initialize = _dylib
+        .lookup<NativeFunction<EditorInitializeC>>('editor_library_init')
+        .asFunction();
+
+    _parseMarkdown = _dylib
+        .lookup<NativeFunction<EditorParseMarkdownC>>('editor_parse_markdown')
+        .asFunction();
+
+    _convertToMarkdown = _dylib
+        .lookup<NativeFunction<EditorConvertToMarkdownC>>('editor_json_to_markdown')
+        .asFunction();
+
+    _canonicalize = _dylib
+        .lookup<NativeFunction<EditorCanonicalizeC>>('editor_json_canonicalize')
+        .asFunction();
+
+    _freeString = _dylib
+        .lookup<NativeFunction<EditorFreeStringC>>('editor_free_string')
+        .asFunction();
+
+    _getVersion = _dylib
+        .lookup<NativeFunction<EditorVersionC>>('editor_version')
+        .asFunction();
+
+    // Initialize the library
+    final result = _initialize();
+    if (result != 0) {
+      throw Exception('Failed to initialize editor library: $result');
     }
   }
-  
-  Pointer<Utf8> _allocateString(String str) {
-    final units = utf8.encode(str);
-    final ptr = calloc<Uint8>(units.length + 1);
-    final bytes = ptr.asTypedList(units.length + 1);
-    bytes.setRange(0, units.length, units);
-    bytes[units.length] = 0; // null terminator
-    return ptr.cast<Utf8>();
+
+  String getVersion() {
+    final versionPtr = _getVersion();
+    final version = versionPtr.toDartString();
+    return version;
   }
-  
-  // Native function bindings
-  late final _markdownToJson = _library!
-      .lookup<NativeFunction<Int32 Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>)>>('markdown_to_json')
-      .asFunction<int Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>)>();
-  
-  late final _jsonToMarkdown = _library!
-      .lookup<NativeFunction<Int32 Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>)>>('json_to_markdown')
-      .asFunction<int Function(Pointer<Utf8>, Pointer<Pointer<Utf8>>)>();
-  
-  late final _editorInit = _library!
-      .lookup<NativeFunction<Pointer<Void> Function()>>('editor_init')
-      .asFunction<Pointer<Void> Function()>();
-  
-  late final _editorInput = _library!
-      .lookup<NativeFunction<Void Function(Pointer<Void>, Int32)>>('editor_input')
-      .asFunction<void Function(Pointer<Void>, int)>();
-  
-  late final _editorGetDocument = _library!
-      .lookup<NativeFunction<Int32 Function(Pointer<Void>, Pointer<Pointer<Utf8>>)>>('editor_get_document')
-      .asFunction<int Function(Pointer<Void>, Pointer<Pointer<Utf8>>)>();
-  
-  late final _editorFree = _library!
-      .lookup<NativeFunction<Void Function(Pointer<Void>)>>('editor_free')
-      .asFunction<void Function(Pointer<Void>)>();
-  
-  late final _free = _library!
-      .lookup<NativeFunction<Void Function(Pointer<Void>)>>('free')
-      .asFunction<void Function(Pointer<Void>)>();
+
+  Document parseMarkdown(String markdown) {
+    final markdownPtr = markdown.toNativeUtf8();
+    final outputPtr = calloc<Pointer<Utf8>>();
+
+    try {
+      final result = _parseMarkdown(markdownPtr, outputPtr);
+      if (result != 0) {
+        throw Exception('Failed to parse markdown: $result');
+      }
+
+      final jsonString = outputPtr.value.toDartString();
+      _freeString(outputPtr.value);
+
+      final json = jsonDecode(jsonString) as Map<String, dynamic>;
+      return Document.fromJson(json);
+    } finally {
+      calloc.free(markdownPtr);
+      calloc.free(outputPtr);
+    }
+  }
+
+  String convertToMarkdown(Document document) {
+    final jsonString = jsonEncode(document.toJson());
+    final jsonPtr = jsonString.toNativeUtf8();
+    final outputPtr = calloc<Pointer<Utf8>>();
+
+    try {
+      final result = _convertToMarkdown(jsonPtr, outputPtr);
+      if (result != 0) {
+        throw Exception('Failed to convert to markdown: $result');
+      }
+
+      final markdown = outputPtr.value.toDartString();
+      _freeString(outputPtr.value);
+
+      return markdown;
+    } finally {
+      calloc.free(jsonPtr);
+      calloc.free(outputPtr);
+    }
+  }
+
+  Document canonicalizeDocument(Document document) {
+    final jsonString = jsonEncode(document.toJson());
+    final jsonPtr = jsonString.toNativeUtf8();
+    final outputPtr = calloc<Pointer<Utf8>>();
+
+    try {
+      final result = _canonicalize(jsonPtr, outputPtr);
+      if (result != 0) {
+        throw Exception('Failed to canonicalize document: $result');
+      }
+
+      final canonicalJsonString = outputPtr.value.toDartString();
+      _freeString(outputPtr.value);
+
+      final json = jsonDecode(canonicalJsonString) as Map<String, dynamic>;
+      return Document.fromJson(json);
+    } finally {
+      calloc.free(jsonPtr);
+      calloc.free(outputPtr);
+    }
+  }
+
+  void dispose() {
+    // No explicit cleanup needed for FFI
+  }
+}
+
+// Helper extension
+extension PointerUtf8Extension on Pointer<Utf8> {
+  String toDartString() {
+    return cast<Utf8>().toDartString();
+  }
 }

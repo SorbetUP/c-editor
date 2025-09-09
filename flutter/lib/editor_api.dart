@@ -1,9 +1,8 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
-
-import 'models/document.dart';
-import 'ffi/editor_ffi.dart';
-import 'wasm/editor_wasm.dart';
+import 'dart:convert';
+import 'package:c_editor_flutter/models/models.dart';
+import 'engine/editor_api.dart' as core;
+import 'engine/bridge.dart' as bridge;
 
 /// Results from editor operations
 class EditorResult<T> {
@@ -12,6 +11,12 @@ class EditorResult<T> {
   final bool success;
   
   const EditorResult._({this.data, this.error, required this.success});
+  
+  /// Check if the result is successful
+  bool get isSuccess => success;
+  
+  /// Check if the result is a failure
+  bool get isFailure => !success;
   
   factory EditorResult.success(T data) => 
       EditorResult._(data: data, success: true);
@@ -50,21 +55,85 @@ class EditorApiFactory {
   
   /// Get singleton instance of the appropriate editor API
   static EditorApi instance() {
-    return _instance ??= _create();
-  }
-  
-  static EditorApi _create() {
-    if (kIsWeb) {
-      return WasmEditorApi();
-    } else {
-      return FfiEditorApi();
-    }
+    return _instance ??= _EditorApiAdapter(bridge.createEditorApi());
   }
   
   /// Reset instance (for testing)
   static void reset() {
     _instance?.dispose();
     _instance = null;
+  }
+}
+
+/// Adapter between the new core.EditorApi and the legacy EditorApi interface
+class _EditorApiAdapter implements EditorApi {
+  final core.EditorApi _coreApi;
+  bool _isInitialized = false;
+  
+  _EditorApiAdapter(this._coreApi);
+
+  @override
+  bool get isReady => _isInitialized;
+
+  @override
+  Future<EditorResult<void>> initialize() async {
+    try {
+      // Try to get version to test connectivity
+      await _coreApi.version();
+      _isInitialized = true;
+      return EditorResult.success(null);
+    } catch (e) {
+      return EditorResult.failure('Failed to initialize: $e');
+    }
+  }
+
+  @override
+  Future<EditorResult<Document>> parseMarkdown(String markdown) async {
+    try {
+      final json = await _coreApi.mdToJson(markdown);
+      final document = Document.fromJson(jsonDecode(json));
+      return EditorResult.success(document);
+    } catch (e) {
+      return EditorResult.failure('Failed to parse markdown: $e');
+    }
+  }
+
+  @override
+  Future<EditorResult<String>> exportToMarkdown(Document document) async {
+    try {
+      final json = jsonEncode(document.toJson());
+      final markdown = await _coreApi.jsonToMd(json);
+      return EditorResult.success(markdown);
+    } catch (e) {
+      return EditorResult.failure('Failed to export to markdown: $e');
+    }
+  }
+
+  @override
+  Future<EditorResult<String>> exportToJson(Document document) async {
+    try {
+      final json = jsonEncode(document.toJson());
+      final canonical = await _coreApi.canonicalize(json);
+      return EditorResult.success(canonical);
+    } catch (e) {
+      return EditorResult.failure('Failed to export to JSON: $e');
+    }
+  }
+
+  @override
+  Future<EditorResult<Document>> simulateEditor(List<String> characters) async {
+    try {
+      // Build markdown incrementally
+      final markdown = characters.join('');
+      return parseMarkdown(markdown);
+    } catch (e) {
+      return EditorResult.failure('Failed to simulate editor: $e');
+    }
+  }
+
+  @override
+  Future<void> dispose() async {
+    _isInitialized = false;
   }
 }
 

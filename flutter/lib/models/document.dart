@@ -1,241 +1,336 @@
-import 'dart:ui';
+import 'package:flutter/foundation.dart';
 
-/// Types of document elements
-enum ElementType { text, image, table }
+// Main document structure
+@immutable
+class Document {
+  final String name;
+  final DocumentMeta meta;
+  final List<DocElement> elements;
 
-/// Base class for all document elements
-abstract class Element {
-  ElementType get type;
-  
-  /// Convert element to JSON representation
+  const Document({
+    required this.name,
+    required this.meta, 
+    required this.elements,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'meta': meta.toJson(),
+      'elements': elements.map((e) => e.toJson()).toList(),
+    };
+  }
+
+  factory Document.fromJson(Map<String, dynamic> json) {
+    return Document(
+      name: json['name'] as String? ?? '',
+      meta: json['meta'] != null 
+          ? DocumentMeta.fromJson(json['meta'] as Map<String, dynamic>)
+          : const DocumentMeta(),
+      elements: (json['elements'] as List?)
+          ?.map((e) => DocElement.fromJson(e as Map<String, dynamic>))
+          .toList() ?? [],
+    );
+  }
+}
+
+// Document metadata
+@immutable
+class DocumentMeta {
+  final String font;
+  final int fontSize;
+  final List<double> defaultTextColor;
+  final String? title;
+  final String? author;
+  final DateTime? created;
+  final DateTime? modified;
+
+  const DocumentMeta({
+    this.font = "Helvetica",
+    this.fontSize = 11,
+    this.defaultTextColor = const [0, 0, 0, 1],
+    this.title,
+    this.author,
+    this.created,
+    this.modified,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'font': font,
+      'fontSize': fontSize,
+      'defaultTextColor': defaultTextColor,
+      if (title != null) 'title': title,
+      if (author != null) 'author': author,
+      if (created != null) 'created': created!.toIso8601String(),
+      if (modified != null) 'modified': modified!.toIso8601String(),
+    };
+  }
+
+  factory DocumentMeta.fromJson(Map<String, dynamic> json) {
+    return DocumentMeta(
+      font: json['font'] as String? ?? "Helvetica",
+      fontSize: json['fontSize'] as int? ?? 11,
+      defaultTextColor: (json['defaultTextColor'] as List?)
+          ?.map((e) => (e as num).toDouble()).toList() ?? [0, 0, 0, 1],
+      title: json['title'] as String?,
+      author: json['author'] as String?,
+      created: json['created'] != null ? DateTime.parse(json['created']) : null,
+      modified: json['modified'] != null ? DateTime.parse(json['modified']) : null,
+    );
+  }
+}
+
+// Base element
+@immutable
+abstract class DocElement {
+  const DocElement();
+
   Map<String, dynamic> toJson();
   
-  /// Create element from JSON
-  static Element fromJson(Map<String, dynamic> json) {
+  factory DocElement.fromJson(Map<String, dynamic> json) {
     final type = json['type'] as String;
+    
     switch (type) {
       case 'text':
-        return TextElement.fromJson(json);
+        return DocTextElement.fromJson(json);
       case 'image':
-        return ImageElement.fromJson(json);
+        return DocImageElement.fromJson(json);
       case 'table':
-        return TableElement.fromJson(json);
+        return DocTableElement.fromJson(json);
       default:
         throw ArgumentError('Unknown element type: $type');
     }
   }
 }
 
-/// Text element with inline formatting spans
-class TextElement extends Element {
-  @override
-  ElementType get type => ElementType.text;
-  
-  final List<TextSpan> spans;
-  final int level; // Header level: 0=normal, 1-6=headers
-  
-  const TextElement(this.spans, {this.level = 0});
-  
+// Text span
+@immutable
+class DocTextSpan {
+  final String text;
+  final bool bold;
+  final bool italic;
+  final DocUnderline? underline;
+  final DocHighlight? highlight;
+
+  const DocTextSpan({
+    required this.text,
+    this.bold = false,
+    this.italic = false,
+    this.underline,
+    this.highlight,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'text': text,
+      'bold': bold,
+      'italic': italic,
+      if (underline != null) 'underline': underline!.toJson(),
+      if (highlight != null) 'highlight': highlight!.toJson(),
+    };
+  }
+
+  factory DocTextSpan.fromJson(Map<String, dynamic> json) {
+    return DocTextSpan(
+      text: json['text'] as String,
+      bold: json['bold'] as bool? ?? false,
+      italic: json['italic'] as bool? ?? false,
+      underline: json['underline'] != null 
+          ? DocUnderline.fromJson(json['underline'] as Map<String, dynamic>)
+          : null,
+      highlight: json['highlight'] != null
+          ? DocHighlight.fromJson(json['highlight'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+}
+
+// Text element
+@immutable
+class DocTextElement extends DocElement {
+  final List<DocTextSpan> spans;
+  final String align;
+  final String? font;
+  final int? fontSize;
+  final List<double>? color;
+  final int level;
+
+  const DocTextElement({
+    required this.spans,
+    this.align = "left",
+    this.font,
+    this.fontSize,
+    this.color,
+    this.level = 0,
+  });
+
   @override
   Map<String, dynamic> toJson() {
     return {
       'type': 'text',
-      'level': level,
       'spans': spans.map((s) => s.toJson()).toList(),
+      'align': align,
+      if (font != null) 'font': font,
+      if (fontSize != null) 'fontSize': fontSize,
+      if (color != null) 'color': color,
+      'level': level,
     };
   }
-  
-  static TextElement fromJson(Map<String, dynamic> json) {
-    final spansList = json['spans'] as List? ?? [];
-    final spans = spansList.map((s) => TextSpan.fromJson(s)).toList();
-    final level = json['level'] as int? ?? 0;
-    return TextElement(spans, level: level);
+
+  factory DocTextElement.fromJson(Map<String, dynamic> json) {
+    return DocTextElement(
+      spans: (json['spans'] as List?)
+          ?.map((s) => DocTextSpan.fromJson(s as Map<String, dynamic>))
+          .toList() ?? [DocTextSpan(text: json['text'] as String? ?? '')],
+      align: json['align'] as String? ?? "left",
+      font: json['font'] as String?,
+      fontSize: json['fontSize'] as int?,
+      color: (json['color'] as List?)
+          ?.map((e) => (e as num).toDouble()).toList(),
+      level: json['level'] as int? ?? 0,
+    );
   }
 }
 
-/// Image element with attributes
-class ImageElement extends Element {
-  @override
-  ElementType get type => ElementType.image;
-  
+// Image element  
+@immutable
+class DocImageElement extends DocElement {
   final String src;
   final String alt;
+  final String align;
   final int? width;
   final int? height;
   final double alpha;
-  final TextAlign align;
-  
-  const ImageElement({
+
+  const DocImageElement({
     required this.src,
-    required this.alt,
+    this.alt = "",
+    this.align = "left",
     this.width,
     this.height,
     this.alpha = 1.0,
-    this.align = TextAlign.left,
   });
-  
+
   @override
   Map<String, dynamic> toJson() {
     return {
       'type': 'image',
       'src': src,
       'alt': alt,
+      'align': align,
       if (width != null) 'width': width,
       if (height != null) 'height': height,
       'alpha': alpha,
-      'align': _alignToString(align),
     };
   }
-  
-  static ImageElement fromJson(Map<String, dynamic> json) {
-    return ImageElement(
-      src: json['src'] as String? ?? '',
-      alt: json['alt'] as String? ?? '',
+
+  factory DocImageElement.fromJson(Map<String, dynamic> json) {
+    return DocImageElement(
+      src: json['src'] as String,
+      alt: json['alt'] as String? ?? "",
+      align: json['align'] as String? ?? "left",
       width: json['width'] as int?,
       height: json['height'] as int?,
-      alpha: (json['alpha'] as double?) ?? 1.0,
-      align: _alignFromString(json['align'] as String? ?? 'left'),
+      alpha: (json['alpha'] as num?)?.toDouble() ?? 1.0,
     );
-  }
-  
-  static String _alignToString(TextAlign align) {
-    switch (align) {
-      case TextAlign.left: return 'left';
-      case TextAlign.center: return 'center';
-      case TextAlign.right: return 'right';
-      case TextAlign.justify: return 'justify';
-      default: return 'left';
-    }
-  }
-  
-  static TextAlign _alignFromString(String align) {
-    switch (align) {
-      case 'left': return TextAlign.left;
-      case 'center': return TextAlign.center;
-      case 'right': return TextAlign.right;
-      case 'justify': return TextAlign.justify;
-      default: return TextAlign.left;
-    }
   }
 }
 
-/// Table element
-class TableElement extends Element {
-  @override
-  ElementType get type => ElementType.table;
-  
-  final List<List<TextElement>> rows;
-  
-  const TableElement(this.rows);
-  
+// Table element
+@immutable  
+class DocTableElement extends DocElement {
+  final List<List<List<DocTextSpan>>> rows;
+  final List<double> gridColor;
+  final int gridSize;
+  final List<double> backgroundColor;
+
+  const DocTableElement({
+    required this.rows,
+    this.gridColor = const [0, 0, 0, 0],
+    this.gridSize = 1,
+    this.backgroundColor = const [1, 1, 1, 1],
+  });
+
   @override
   Map<String, dynamic> toJson() {
     return {
       'type': 'table',
       'rows': rows.map((row) => 
-        row.map((cell) => cell.toJson()).toList()
+          row.map((cell) => 
+              cell.map((span) => span.toJson()).toList()
+          ).toList()
       ).toList(),
+      'gridColor': gridColor,
+      'gridSize': gridSize,
+      'backgroundColor': backgroundColor,
     };
   }
-  
-  static TableElement fromJson(Map<String, dynamic> json) {
-    final rowsList = json['rows'] as List? ?? [];
-    final rows = rowsList.map((row) {
-      final cellsList = row as List;
-      return cellsList.map((cell) => TextElement.fromJson(cell)).toList();
-    }).toList();
-    return TableElement(rows);
-  }
-}
 
-/// Individual text span with formatting
-class TextSpan {
-  final String text;
-  final bool bold;
-  final bool italic;
-  final bool highlight;
-  final bool underline;
-  final Color? highlightColor;
-  final Color? underlineColor;
-  final int? underlineGap;
-  
-  const TextSpan({
-    required this.text,
-    this.bold = false,
-    this.italic = false,
-    this.highlight = false,
-    this.underline = false,
-    this.highlightColor,
-    this.underlineColor,
-    this.underlineGap,
-  });
-  
-  Map<String, dynamic> toJson() {
-    return {
-      'text': text,
-      'bold': bold,
-      'italic': italic,
-      'highlight': highlight,
-      'underline': underline,
-      if (highlightColor != null) 'highlight_color': _colorToRgba(highlightColor!),
-      if (underlineColor != null) 'underline_color': _colorToRgba(underlineColor!),
-      if (underlineGap != null) 'underline_gap': underlineGap,
-    };
-  }
-  
-  static TextSpan fromJson(Map<String, dynamic> json) {
-    return TextSpan(
-      text: json['text'] as String? ?? '',
-      bold: json['bold'] as bool? ?? false,
-      italic: json['italic'] as bool? ?? false,
-      highlight: json['highlight'] as bool? ?? false,
-      underline: json['underline'] as bool? ?? false,
-      highlightColor: json['highlight_color'] != null 
-          ? _colorFromRgba(json['highlight_color']) 
-          : null,
-      underlineColor: json['underline_color'] != null
-          ? _colorFromRgba(json['underline_color'])
-          : null,
-      underlineGap: json['underline_gap'] as int?,
+  factory DocTableElement.fromJson(Map<String, dynamic> json) {
+    return DocTableElement(
+      rows: (json['rows'] as List).map((row) =>
+          (row as List).map((cell) =>
+              (cell as List).map((span) =>
+                  DocTextSpan.fromJson(span as Map<String, dynamic>)
+              ).toList()
+          ).toList()
+      ).toList(),
+      gridColor: (json['gridColor'] as List?)
+          ?.map((e) => (e as num).toDouble()).toList() ?? [0, 0, 0, 0],
+      gridSize: json['gridSize'] as int? ?? 1,
+      backgroundColor: (json['backgroundColor'] as List?)
+          ?.map((e) => (e as num).toDouble()).toList() ?? [1, 1, 1, 1],
     );
   }
-  
-  static List<double> _colorToRgba(Color color) {
-    return [
-      color.red / 255.0,
-      color.green / 255.0,
-      color.blue / 255.0,
-      color.alpha / 255.0,
-    ];
+}
+
+// Underline style
+@immutable
+class DocUnderline {
+  final List<double> color;
+  final int gap;
+
+  const DocUnderline({
+    this.color = const [0, 0, 0, 0.4],
+    this.gap = 7,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'color': color,
+      'gap': gap,
+    };
   }
-  
-  static Color _colorFromRgba(dynamic rgba) {
-    if (rgba is List && rgba.length >= 4) {
-      final r = (rgba[0] as double).clamp(0.0, 1.0);
-      final g = (rgba[1] as double).clamp(0.0, 1.0);
-      final b = (rgba[2] as double).clamp(0.0, 1.0);
-      final a = (rgba[3] as double).clamp(0.0, 1.0);
-      return Color.from(alpha: a, red: r, green: g, blue: b);
-    }
-    return const Color(0xFF000000);
+
+  factory DocUnderline.fromJson(Map<String, dynamic> json) {
+    return DocUnderline(
+      color: (json['color'] as List?)
+          ?.map((e) => (e as num).toDouble()).toList() ?? [0, 0, 0, 0.4],
+      gap: json['gap'] as int? ?? 7,
+    );
   }
 }
 
-/// Complete document containing elements
-class Document {
-  final List<Element> elements;
-  
-  const Document(this.elements);
-  
+// Highlight style
+@immutable
+class DocHighlight {
+  final List<double> color;
+
+  const DocHighlight({
+    this.color = const [1, 1, 0, 0.3],
+  });
+
   Map<String, dynamic> toJson() {
     return {
-      'elements': elements.map((e) => e.toJson()).toList(),
+      'color': color,
     };
   }
-  
-  static Document fromJson(Map<String, dynamic> json) {
-    final elementsList = json['elements'] as List? ?? [];
-    final elements = elementsList.map((e) => Element.fromJson(e)).toList();
-    return Document(elements);
+
+  factory DocHighlight.fromJson(Map<String, dynamic> json) {
+    return DocHighlight(
+      color: (json['color'] as List?)
+          ?.map((e) => (e as num).toDouble()).toList() ?? [1, 1, 0, 0.3],
+    );
   }
 }
