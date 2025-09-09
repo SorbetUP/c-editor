@@ -3,22 +3,25 @@ import 'dart:io' show Platform;
 import 'package:ffi/ffi.dart';
 import 'editor_api.dart';
 
-// FFI function signatures
-typedef CStrFn = ffi.Pointer<ffi.Utf8> Function(ffi.Pointer<ffi.Utf8>, ffi.Size);
-typedef CFreeFn = ffi.Void Function(ffi.Pointer<ffi.Utf8>);
-typedef CVersionFn = ffi.Void Function(ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>);
+// FFI function signatures - Native side
+typedef CStrFnNative = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, ffi.Int);
+typedef CFreeFnNative = ffi.Void Function(ffi.Pointer<Utf8>);
+typedef CVersionFnNative = ffi.Void Function(ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>);
+
+// FFI function signatures - Dart side
+typedef CStrFnDart = ffi.Pointer<Utf8> Function(ffi.Pointer<Utf8>, int);
+typedef CFreeFnDart = void Function(ffi.Pointer<Utf8>);
+typedef CVersionFnDart = void Function(ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>);
 
 /// FFI implementation for desktop and mobile platforms
 class EditorApiFfi implements EditorApi {
   final ffi.DynamicLibrary _lib;
   
-  late final _mdToJson = _lib.lookupFunction<CStrFn, CStrFn>('note_md_to_json');
-  late final _jsonToMd = _lib.lookupFunction<CStrFn, CStrFn>('note_json_to_md');
-  late final _canon = _lib.lookupFunction<CStrFn, CStrFn>('note_json_canonicalize');
-  late final void Function(ffi.Pointer<ffi.Utf8>) _free =
-      _lib.lookupFunction<CFreeFn, void Function(ffi.Pointer<ffi.Utf8>)>('note_free');
-  late final void Function(ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>) _version =
-      _lib.lookupFunction<CVersionFn, void Function(ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>, ffi.Pointer<ffi.Int>)>('note_version');
+  late final CStrFnDart _mdToJson = _lib.lookupFunction<CStrFnNative, CStrFnDart>('note_md_to_json');
+  late final CStrFnDart _jsonToMd = _lib.lookupFunction<CStrFnNative, CStrFnDart>('note_json_to_md');
+  late final CStrFnDart _canon = _lib.lookupFunction<CStrFnNative, CStrFnDart>('note_json_canonicalize');
+  late final CFreeFnDart _free = _lib.lookupFunction<CFreeFnNative, CFreeFnDart>('note_free');
+  late final CVersionFnDart _version = _lib.lookupFunction<CVersionFnNative, CVersionFnDart>('note_version');
 
   EditorApiFfi(this._lib);
 
@@ -27,7 +30,7 @@ class EditorApiFfi implements EditorApi {
     final p = md.toNativeUtf8();
     try {
       final out = _mdToJson(p, md.length);
-      final s = out.toDartString();
+      final s = out.cast<Utf8>().toDartString();
       _free(out);
       return s;
     } finally {
@@ -40,7 +43,7 @@ class EditorApiFfi implements EditorApi {
     final p = json.toNativeUtf8();
     try {
       final out = _jsonToMd(p, json.length);
-      final s = out.toDartString();
+      final s = out.cast<Utf8>().toDartString();
       _free(out);
       return s;
     } finally {
@@ -53,7 +56,7 @@ class EditorApiFfi implements EditorApi {
     final p = json.toNativeUtf8();
     try {
       final out = _canon(p, json.length);
-      final s = out.toDartString();
+      final s = out.cast<Utf8>().toDartString();
       _free(out);
       return s;
     } finally {
