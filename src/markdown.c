@@ -135,12 +135,17 @@ static char *strip_all_markers(const char *text) {
   for (size_t i = 0; i < len;) {
     bool skipped = false;
 
-    // Skip ** markers
-    if (i + 1 < len && text[i] == '*' && text[i + 1] == '*') {
+    // Skip *** markers (bold+italic)
+    if (i + 2 < len && text[i] == '*' && text[i + 1] == '*' && text[i + 2] == '*') {
+      i += 3;
+      skipped = true;
+    }
+    // Skip ** markers (bold)  
+    else if (i + 1 < len && text[i] == '*' && text[i + 1] == '*') {
       i += 2;
       skipped = true;
     }
-    // Skip * markers
+    // Skip * markers (italic)
     else if (text[i] == '*') {
       i++;
       skipped = true;
@@ -170,8 +175,7 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
                                       size_t span_count, size_t *out_count) {
   if (span_count == 0) {
     TextSpan *result = malloc(sizeof(TextSpan));
-    result[0].text =
-        strdup_safe(text); // Keep original text with unmatched markers
+    result[0].text = strip_all_markers(text); // Clean up unmatched markers
     result[0].bold = false;
     result[0].italic = false;
     result[0].has_highlight = false;
