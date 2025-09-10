@@ -18,7 +18,7 @@ TEST_EXECUTABLE = run_tests
 
 .PHONY: all clean test debug sanitize
 
-all: $(LIBRARY)
+all: $(LIBRARY) test_abi
 
 $(LIBRARY): $(OBJECTS) | $(OBJDIR)
 	ar rcs $@ $^

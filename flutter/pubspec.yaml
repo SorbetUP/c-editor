@@ -26,10 +26,10 @@ dependencies:
   file_picker: ^5.3.2
   shared_preferences: ^2.2.0
   
-  # UI & Internationalization
-  flutter_localizations:
-    sdk: flutter
-  intl: ^0.20.2
+  # UI & Internationalization (commented out for CI compatibility)
+  # flutter_localizations:
+  #   sdk: flutter
+  # intl: ^0.18.1
 
 dev_dependencies:
   flutter_test:
