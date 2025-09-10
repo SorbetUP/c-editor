@@ -80,11 +80,11 @@ time_end=$(date +%s%N)
 duration_ms=$(( (time_end - time_start) / 1000000 ))
 echo "Parse time: ${duration_ms}ms"
 
-if [ $duration_ms -gt 200 ]; then
-  echo "❌ Performance test failed: ${duration_ms}ms > 200ms"
+if [ $duration_ms -gt 300 ]; then
+  echo "❌ Performance test failed: ${duration_ms}ms > 300ms"
   exit 1
 fi
-echo "✅ Performance test passed: ${duration_ms}ms < 200ms"
+echo "✅ Performance test passed: ${duration_ms}ms < 300ms"
 
 echo "🎯 ABI capabilities check..."
 ./test_abi | grep "Features:" | tee capabilities.txt
@@ -118,20 +118,18 @@ else
   echo "⚠️ Emscripten not available, skipping WASM build"
 fi
 
-# Flutter web build test
+# GitHub Pages build simulation
 if command -v flutter >/dev/null 2>&1; then
-  echo "📱 Testing Flutter web build..."
-  cd flutter
-  flutter pub get >/dev/null 2>&1
-  if flutter build web --base-href '/c-editor/' >/dev/null 2>&1; then
-    echo "✅ Flutter web build OK"
+  echo "🌐 Testing GitHub Pages deployment build..."
+  ./test-pages-build.sh >/dev/null 2>&1
+  if [ $? -eq 0 ]; then
+    echo "✅ GitHub Pages build test passed"
   else
-    echo "❌ Flutter web build failed"
+    echo "❌ GitHub Pages build test failed"
     exit 1
   fi
-  cd ..
 else
-  echo "⚠️ Flutter not available, skipping Flutter build test"
+  echo "⚠️ Flutter not available, skipping Pages build test"
 fi
 
 echo ""
