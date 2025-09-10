@@ -39,8 +39,7 @@ jobs:
       run: |
         cd flutter
         flutter pub get
-        flutter config --enable-native-assets
-        flutter build web --base-href '/c-editor/'
+        flutter build web --base-href '/c-editor/' --no-native-assets
         
     - name: Setup Pages
       uses: actions/configure-pages@v4
