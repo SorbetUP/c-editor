@@ -8,8 +8,10 @@ SOURCES = $(wildcard $(SRCDIR)/*.c)
 OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
 HEADERS = $(wildcard $(SRCDIR)/*.h)
 
-TEST_SOURCES = $(wildcard $(TESTDIR)/*.c)
-TEST_OBJECTS = $(TEST_SOURCES:$(TESTDIR)/%.c=$(OBJDIR)/test_%.o)
+# Only use test_main.c for the unified test runner
+# Other test files are standalone programs with their own main() functions
+TEST_SOURCES = $(TESTDIR)/test_main.c
+TEST_OBJECTS = $(OBJDIR)/test_main.o
 
 LIBRARY = libeditor.a
 TEST_EXECUTABLE = run_tests
@@ -25,7 +27,8 @@ $(LIBRARY): $(OBJECTS) | $(OBJDIR)
 $(OBJDIR)/%.o: $(SRCDIR)/%.c $(HEADERS) | $(OBJDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJDIR)/test_%.o: $(TESTDIR)/%.c $(HEADERS) | $(OBJDIR)
+# Specific rule for test_main.c
+$(OBJDIR)/test_main.o: $(TESTDIR)/test_main.c $(HEADERS) | $(OBJDIR)
 	$(CC) $(CFLAGS) -I$(SRCDIR) -c $< -o $@
 
 $(OBJDIR):
