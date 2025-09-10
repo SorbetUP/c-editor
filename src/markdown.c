@@ -136,11 +136,12 @@ static char *strip_all_markers(const char *text) {
     bool skipped = false;
 
     // Skip *** markers (bold+italic)
-    if (i + 2 < len && text[i] == '*' && text[i + 1] == '*' && text[i + 2] == '*') {
+    if (i + 2 < len && text[i] == '*' && text[i + 1] == '*' &&
+        text[i + 2] == '*') {
       i += 3;
       skipped = true;
     }
-    // Skip ** markers (bold)  
+    // Skip ** markers (bold)
     else if (i + 1 < len && text[i] == '*' && text[i + 1] == '*') {
       i += 2;
       skipped = true;
