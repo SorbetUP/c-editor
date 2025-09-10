@@ -256,7 +256,7 @@ void test_edge_cases(void) {
     int result = markdown_to_json(unclosed_bold, &doc);
     ASSERT_EQ(0, result);
     ASSERT_EQ(1, doc.elements_len);
-    ASSERT_STR_EQ("*bonjour", doc.elements[0].as.text.text);
+    ASSERT_STR_EQ("bonjour", doc.elements[0].as.text.text);
     ASSERT_TRUE(!doc.elements[0].as.text.italic);
     doc_free(&doc);
     

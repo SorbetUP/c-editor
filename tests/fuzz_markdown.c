@@ -10,6 +10,11 @@
 #include "../src/markdown.h"
 #include "../src/json.h"
 
+#ifdef __has_feature
+#if __has_feature(fuzzer)
+// LibFuzzer mode - no utility functions needed
+#else
+// Standalone mode - utility functions
 static unsigned S=0xABCD1234u;
 static unsigned u(void){ S^=S<<13; S^=S>>17; S^=S<<5; return S?S:0xBEEFCAFE; }
 static int ri(int a,int b){ return a + (int)(u()%(unsigned)(b-a+1)); }
@@ -47,6 +52,8 @@ static void adversarial_line(char **s,size_t *c,size_t *l){
   }
   pc(s,c,l,'\n');
 }
+#endif
+#endif
 
 #ifdef __has_feature
 #if __has_feature(fuzzer)
