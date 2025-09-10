@@ -12,7 +12,7 @@
 #include "../src/markdown.h"
 
 #ifdef LIBFUZZER_MODE
-// LibFuzzer/AFL mode - no utility functions needed  
+// LibFuzzer/AFL mode - no utility functions needed
 #else
 // Standalone mode - utility functions
 static unsigned S = 0xABCD1234u;
@@ -86,9 +86,14 @@ static void adversarial_line(char **s, size_t *c, size_t *l) {
       case 2:
         pc(s, c, l, ' ');
         break;
-      case 3:
-        pc(s, c, l, (char)ri(33, 126));
+      case 3: {
+        char ch = (char)ri(33, 126);
+        // Don't generate '|' as it breaks table structure
+        if (ch != '|') {
+          pc(s, c, l, ch);
+        }
         break; // ASCII divers
+      }
       }
     }
   }
