@@ -191,6 +191,7 @@ jobs:
     - name: Run Flutter unit tests
       run: |
         cd flutter
+        flutter config --enable-native-assets
         flutter test
         
     - name: Golden tests (mock - requires actual fixtures)

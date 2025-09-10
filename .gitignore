@@ -9,6 +9,7 @@ run_tests
 # Debug and test binaries
 debug_*
 test_*
+!test_abi.c
 simple_test
 ultra_simple_test
 fuzz_md
