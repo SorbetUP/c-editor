@@ -310,6 +310,35 @@ free(markdown);
 
 Ces limitations sont documentées et seront adressées en v2.
 
-## Licence
+## 🌟 **Final Web Editor**
 
-Domaine public - Aucune restriction d'usage.
+Le projet inclut maintenant un **éditeur web complet** optimisé pour GitHub Pages dans le dossier `final-editor/`:
+
+- **WYSIWYG Editor**: Rendu visuel en temps réel
+- **Interface 3 panneaux**: Éditeur principal + Markdown + JSON
+- **Import/Export**: Fichiers .md et .json
+- **Persistence IndexedDB**: Sauvegarde automatique avec récupération crash
+- **Intégration WASM**: Core C via WebAssembly
+- **Responsive Design**: Compatible desktop, tablet, mobile
+
+**🚀 Demo live**: https://sorbetup.github.io/c-editor/
+
+Voir [final-editor/README.md](./final-editor/README.md) pour la documentation complète.
+
+## 🏗️ **Applications Flutter**
+
+Le projet propose également des applications Flutter multiplateformes dans le dossier `flutter/`:
+
+- **Desktop**: macOS avec support FFI natif
+- **Playground**: Interface de test et développement  
+- **Tests complets**: Unités, intégration, golden tests
+- **Autosave avancé**: Versioning et récupération automatique
+
+## 📄 **Licence**
+
+**C-Editor License (CeL) v1.0** - Dual license:
+
+- ✅ **GRATUIT** pour usage personnel, éducation, recherche, non-profit
+- 💼 **License commerciale** requise pour entreprises et produits commerciaux
+
+Voir [LICENSE](./LICENSE) pour les termes complets. Cette licence assure un accès libre pour la communauté tout en soutenant le développement durable du projet.
