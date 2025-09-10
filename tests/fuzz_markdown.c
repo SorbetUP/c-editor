@@ -11,8 +11,7 @@
 #include "../src/json.h"
 #include "../src/markdown.h"
 
-#ifdef __has_feature
-#if __has_feature(fuzzer)
+#if defined(__has_feature) && __has_feature(fuzzer)
 // LibFuzzer mode - no utility functions needed
 #else
 // Standalone mode - utility functions
@@ -98,8 +97,7 @@ static void adversarial_line(char **s, size_t *c, size_t *l) {
 #endif
 #endif
 
-#ifdef __has_feature
-#if __has_feature(fuzzer)
+#if defined(__has_feature) && __has_feature(fuzzer)
 // LibFuzzer mode
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   if (Size == 0 || Size > 4096)
