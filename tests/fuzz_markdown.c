@@ -59,8 +59,10 @@ int main(int argc,char**argv){
     for(int L=0;L<lines;L++){
       if (ri(0,5)==0){ // table bloc
         int cols=ri(2,5);
-        for(int c=0;c<cols;c++) push(&md,&cap,&len,"| H "); push(&md,&cap,&len,"|\n");
-        for(int c=0;c<cols;c++) push(&md,&cap,&len,"|---"); push(&md,&cap,&len,"|\n");
+        for(int c=0;c<cols;c++) push(&md,&cap,&len,"| H ");
+        push(&md,&cap,&len,"|\n");
+        for(int c=0;c<cols;c++) push(&md,&cap,&len,"|---");
+        push(&md,&cap,&len,"|\n");
         int rows=ri(1,4);
         for(int r=0;r<rows;r++){
           for(int c=0;c<cols;c++){ push(&md,&cap,&len,"| "); adversarial_line(&md,&cap,&len); md[len-1]=' '; } // remplacer '\n'
