@@ -55,6 +55,10 @@ bin/prop_roundtrip: tests/prop_roundtrip.c $(LIBRARY) | bin/
 bin/fuzz_markdown: tests/fuzz_markdown.c $(LIBRARY) | bin/
 	$(CC) $(CFLAGS) -std=c11 -Wall -Wextra -I./$(SRCDIR) $< $(LIBRARY) -o $@ -lm
 
+# ABI test
+test_abi: test_abi.c $(LIBRARY)
+	$(CC) $(CFLAGS) -std=c11 -Wall -Wextra -I./$(SRCDIR) $< $(LIBRARY) -o $@ -lm
+
 bin/:
 	mkdir -p bin
 
