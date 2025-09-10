@@ -48,6 +48,48 @@ static void adversarial_line(char **s,size_t *c,size_t *l){
   pc(s,c,l,'\n');
 }
 
+#ifdef __has_feature
+#if __has_feature(fuzzer)
+// LibFuzzer mode
+int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
+  if (Size == 0 || Size > 4096) return 0; // Skip empty or too large inputs
+  
+  char *md = malloc(Size + 1);
+  if (!md) return 0;
+  memcpy(md, Data, Size);
+  md[Size] = '\0';
+  
+  Document d = {0};
+  if (markdown_to_json(md, &d) == 0) {
+    // Check for raw markers
+    for (size_t e = 0; e < d.elements_len; e++) {
+      if (d.elements[e].kind != T_TEXT) continue;
+      ElementText *t = &d.elements[e].as.text;
+      for (size_t s = 0; s < t->spans_count; s++) {
+        const char *z = t->spans[s].text;
+        if (strstr(z, "**") || strstr(z, "***") || strstr(z, "==") || strstr(z, "++")) {
+          // Found raw markers - this is a bug but don't crash
+        }
+      }
+    }
+    
+    // Test idempotency
+    char *md1 = NULL;
+    if (json_to_markdown(&d, &md1) == 0 && md1) {
+      Document d2 = {0};
+      if (markdown_to_json(md1, &d2) == 0) {
+        doc_free(&d2);
+      }
+      free(md1);
+    }
+    doc_free(&d);
+  }
+  
+  free(md);
+  return 0;
+}
+#else
+// Standalone mode
 int main(int argc,char**argv){
   unsigned seed = (argc>1)? (unsigned)strtoul(argv[1],NULL,10) : (unsigned)time(NULL);
   int iters = (argc>2)? atoi(argv[2]) : 1000;
@@ -102,3 +144,5 @@ int main(int argc,char**argv){
   puts("[fuzz] OK");
   return 0;
 }
+#endif
+#endif

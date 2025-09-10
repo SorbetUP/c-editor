@@ -1,5 +1,10 @@
 CC = gcc
 CFLAGS = -std=c11 -Wall -Wextra -Werror -pedantic -g
+
+# Windows-specific flags for DLL export
+ifeq ($(OS),Windows_NT)
+    CFLAGS += -DBUILDING_EDITOR_DLL
+endif
 SRCDIR = src
 TESTDIR = tests
 OBJDIR = obj
