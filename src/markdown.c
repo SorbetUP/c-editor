@@ -30,12 +30,7 @@ static void trim_whitespace(char *str) {
   }
 }
 
-static void to_uppercase(char *str) {
-  while (*str) {
-    *str = toupper(*str);
-    str++;
-  }
-}
+// Removed uppercase conversion for idempotence
 
 int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
   if (!text || !spans || max_spans == 0)
@@ -574,7 +569,26 @@ int parse_table_block(MarkdownParser *parser, ElementTable *table) {
     memcpy(line, line_start, line_end - line_start);
     line[line_end - line_start] = '\0';
 
-    if (count_table_columns(line) == 0) {
+    // Check if this line looks like a table row (must contain '|' or start with
+    // '|')
+    bool is_table_line = false;
+    const char *p = line;
+    while (*p && isspace(*p))
+      p++; // skip whitespace
+    if (*p == '|') {
+      is_table_line = true;
+    } else {
+      // Check if line contains any '|' characters
+      while (*p && *p != '\n') {
+        if (*p == '|') {
+          is_table_line = true;
+          break;
+        }
+        p++;
+      }
+    }
+
+    if (!is_table_line || count_table_columns(line) == 0) {
       free(line);
       break;
     }
@@ -646,6 +660,27 @@ int markdown_to_json(const char *markdown, Document *doc) {
 
     size_t line_len = line_end - pos;
     if (line_len == 0) {
+      // Create empty text element for empty line
+      if (doc->elements_len >= doc->elements_capacity) {
+        size_t new_cap =
+            doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
+        doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
+        doc->elements_capacity = new_cap;
+      }
+
+      doc->elements[doc->elements_len].kind = T_TEXT;
+      ElementText *text_element = &doc->elements[doc->elements_len].as.text;
+      text_element->text = strdup("");
+      text_element->level = 0;
+      text_element->bold = false;
+      text_element->italic = false;
+      text_element->has_highlight = false;
+      text_element->has_underline = false;
+      text_element->font_size = 16;
+      text_element->spans = NULL;
+      text_element->spans_count = 0;
+      doc->elements_len++;
+
       pos = line_end < end ? line_end + 1 : end;
       continue;
     }
@@ -656,6 +691,27 @@ int markdown_to_json(const char *markdown, Document *doc) {
     trim_whitespace(line);
 
     if (strlen(line) == 0) {
+      // Treat empty lines as empty text elements
+      if (doc->elements_len >= doc->elements_capacity) {
+        size_t new_cap =
+            doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
+        doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
+        doc->elements_capacity = new_cap;
+      }
+
+      doc->elements[doc->elements_len].kind = T_TEXT;
+      ElementText *text_element = &doc->elements[doc->elements_len].as.text;
+      text_element->text = strdup("");
+      text_element->level = 0;
+      text_element->bold = false;
+      text_element->italic = false;
+      text_element->has_highlight = false;
+      text_element->has_underline = false;
+      text_element->font_size = 16;
+      text_element->spans = NULL;
+      text_element->spans_count = 0;
+      doc->elements_len++;
+
       free(line);
       pos = line_end < end ? line_end + 1 : end;
       continue;
@@ -718,12 +774,7 @@ int markdown_to_json(const char *markdown, Document *doc) {
             convert_spans_to_text_spans(text.text, NULL, 0, &text.spans_count);
       }
 
-      // For headers, apply uppercase to all span texts
-      if (text.level > 0) {
-        for (size_t i = 0; i < text.spans_count; i++) {
-          to_uppercase(text.spans[i].text);
-        }
-      }
+      // Headers keep original case for idempotence
 
       // Replace text.text with cleaned text (without markdown markers)
       free(text.text);
@@ -818,6 +869,15 @@ int json_to_markdown(const Document *doc, char **out_markdown) {
 
       // Check if this text element has any actual content
       bool has_content = false;
+
+      // Check if element has explicit text content (for empty lines)
+      if (text->text && strlen(text->text) == 0 && text->spans_count == 0) {
+        // This is an empty line - output as empty line
+        fprintf(fp, "\n");
+        break;
+      }
+
+      // Check spans for content
       for (size_t s = 0; s < text->spans_count; s++) {
         const char *span_text = text->spans[s].text ? text->spans[s].text : "";
         if (strlen(span_text) > 0) {
