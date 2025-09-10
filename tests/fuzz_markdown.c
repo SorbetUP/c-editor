@@ -11,8 +11,8 @@
 #include "../src/json.h"
 #include "../src/markdown.h"
 
-#if defined(__has_feature) && __has_feature(fuzzer)
-// LibFuzzer mode - no utility functions needed
+#ifdef LIBFUZZER_MODE
+// LibFuzzer/AFL mode - no utility functions needed  
 #else
 // Standalone mode - utility functions
 static unsigned S = 0xABCD1234u;
@@ -97,7 +97,7 @@ static void adversarial_line(char **s, size_t *c, size_t *l) {
 #endif
 #endif
 
-#if defined(__has_feature) && __has_feature(fuzzer)
+#ifdef LIBFUZZER_MODE
 // LibFuzzer mode
 int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
   if (Size == 0 || Size > 4096)
