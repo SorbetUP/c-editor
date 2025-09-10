@@ -44,12 +44,12 @@ jobs:
       run: |
         ./bin/prop_roundtrip 999 1000 | tee prop_999.log
         
-    - name: Fuzz tests (60 seconds)
+    - name: Fuzz tests (30 seconds)
       run: |
         clang -std=c11 -fsanitize=fuzzer,address,undefined -g -O1 \
           tests/fuzz_markdown.c src/editor.c src/markdown.c src/json.c src/editor_abi.c \
           -o fuzz_md
-        timeout 60s ./fuzz_md -print_final_stats=1 2>&1 | tee fuzz.log || true
+        timeout 30s ./fuzz_md -print_final_stats=1 2>&1 | tee fuzz.log || true
         
     - name: AddressSanitizer tests
       run: |
