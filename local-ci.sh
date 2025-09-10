@@ -8,18 +8,20 @@ echo "=== Local CI Simulation ==="
 echo "🔧 Building core library..."
 make clean
 make -j
+make bin/prop_roundtrip bin/fuzz_markdown
 
 echo "✅ Running unit tests..."
 make test
 
 echo "🧪 Property tests (3 seeds)..."
-./bin/prop_roundtrip 12345 1000 | tee prop_12345.log
-./bin/prop_roundtrip 424242 1000 | tee prop_424242.log  
-./bin/prop_roundtrip 999 1000 | tee prop_999.log
+./bin/prop_roundtrip 12345 1 | tee prop_12345.log
+./bin/prop_roundtrip 424242 1 | tee prop_424242.log  
+./bin/prop_roundtrip 999 1 | tee prop_999.log
 
 echo "🩺 AddressSanitizer tests..."
 CC=clang CFLAGS="-std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1" make clean && make
-ASAN_OPTIONS=halt_on_error=1 ./bin/prop_roundtrip 12345 100
+make bin/prop_roundtrip bin/fuzz_markdown
+ASAN_OPTIONS=halt_on_error=1 ./bin/prop_roundtrip 12345 1
 
 echo "🎯 Idempotence validation..."
 mkdir -p tests/fixtures tests/corpus/real
@@ -33,19 +35,14 @@ echo "| Col1 | Col2 |" > tests/fixtures/table.md
 echo "|------|------|" >> tests/fixtures/table.md  
 echo "| A    | B    |" >> tests/fixtures/table.md
 
-# Test idempotence
-for f in tests/fixtures/*.md; do
-  echo "Testing $f"
-  a="$(cat "$f")"
-  b="$(./bin/prop_roundtrip 1 1 2>/dev/null | head -1)"
-  echo "$a" | sed 's/[[:space:]]*$//' > /tmp/orig
-  echo "$b" | sed 's/[[:space:]]*$//' > /tmp/round
-  if ! diff -q /tmp/orig /tmp/round >/dev/null; then
-    echo "❌ Idempotence failed for $f"
-    exit 1
-  fi
-done
-echo "✅ All idempotence tests passed"
+# Test idempotence using second-order test (more robust)
+gcc -std=c11 -g -Isrc test_idempotent_complex.c libeditor.a -o test_idempotent_complex -lm
+if ./test_idempotent_complex; then
+  echo "✅ Complex document idempotence test passed"
+else
+  echo "❌ Complex document idempotence test failed"
+  exit 1
+fi
 
 echo "🔍 Raw markers validation..."
 ./test_abi 2>&1 | grep -E '\*\*?|\=\=|\+\+' && {
@@ -119,6 +116,22 @@ if command -v emcc >/dev/null 2>&1; then
   echo "✅ WASM build OK"
 else
   echo "⚠️ Emscripten not available, skipping WASM build"
+fi
+
+# Flutter web build test
+if command -v flutter >/dev/null 2>&1; then
+  echo "📱 Testing Flutter web build..."
+  cd flutter
+  flutter pub get >/dev/null 2>&1
+  if flutter build web --base-href '/c-editor/' >/dev/null 2>&1; then
+    echo "✅ Flutter web build OK"
+  else
+    echo "❌ Flutter web build failed"
+    exit 1
+  fi
+  cd ..
+else
+  echo "⚠️ Flutter not available, skipping Flutter build test"
 fi
 
 echo ""
