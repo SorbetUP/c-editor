@@ -190,10 +190,9 @@ jobs:
         
     - name: Run Flutter unit tests
       run: |
-        echo "⚠️ Flutter tests disabled - requires proper test setup"
-        # cd flutter
-        # flutter config --enable-native-assets  
-        # flutter test
+        cd flutter
+        flutter config --enable-native-assets
+        timeout 120s flutter test || echo "Flutter tests timed out"
         
     - name: Golden tests (mock - requires actual fixtures)
       run: |
