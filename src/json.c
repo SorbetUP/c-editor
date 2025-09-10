@@ -306,6 +306,10 @@ int json_stringify(const Document *doc, char **out_json) {
     fprintf(fp, "\"fontsize\":%d", doc->default_fontsize);
     fprintf(fp, ",\"font\":");
     write_escaped_string(fp, doc->default_font ? doc->default_font : "Helvetica");
+    fprintf(fp, ",\"text_color\":");
+    write_rgba_array(fp, &doc->default_text_color);
+    fprintf(fp, ",\"highlight_color\":");
+    write_rgba_array(fp, &doc->default_highlight_color);
     fprintf(fp, "}");
     fprintf(fp, ",\"icon\":\"\"");
     fprintf(fp, ",\"updated\":%ld", doc->updated);

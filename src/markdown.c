@@ -165,7 +165,7 @@ static char* strip_all_markers(const char* text) {
 TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans, size_t span_count, size_t *out_count) {
     if (span_count == 0) {
         TextSpan *result = malloc(sizeof(TextSpan));
-        result[0].text = strip_all_markers(text);
+        result[0].text = strdup_safe(text);  // Keep original text with unmatched markers
         result[0].bold = false;
         result[0].italic = false;
         result[0].has_highlight = false;
@@ -616,6 +616,30 @@ int markdown_to_json(const char *markdown, Document *doc) {
             doc->elements[doc->elements_len].kind = T_IMAGE;
             doc->elements[doc->elements_len].as.image = image;
             doc->elements_len++;
+        } else if (strchr(line, '|')) {
+            // Check if this could be a table
+            MarkdownParser parser;
+            parser.text = pos;
+            parser.pos = 0;
+            parser.len = end - pos;
+            
+            ElementTable table;
+            if (parse_table_block(&parser, &table) == 0) {
+                if (doc->elements_len >= doc->elements_capacity) {
+                    size_t new_cap = doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
+                    doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
+                    doc->elements_capacity = new_cap;
+                }
+                
+                doc->elements[doc->elements_len].kind = T_TABLE;
+                doc->elements[doc->elements_len].as.table = table;
+                doc->elements_len++;
+                
+                // Advance position to after the table
+                pos = pos + parser.pos;
+                free(line);
+                continue;
+            }
         } else {
             ElementText text;
             if (parse_header_line(line, &text) != 0) {
@@ -641,8 +665,45 @@ int markdown_to_json(const char *markdown, Document *doc) {
                 }
             }
             
+            // Replace text.text with cleaned text (without markdown markers)
             free(text.text);
             text.text = NULL;
+            
+            // Reconstruct clean text from spans
+            size_t total_len = 0;
+            for (size_t i = 0; i < text.spans_count; i++) {
+                if (text.spans[i].text) {
+                    total_len += strlen(text.spans[i].text);
+                }
+            }
+            
+            text.text = malloc(total_len + 1);
+            text.text[0] = '\0';
+            for (size_t i = 0; i < text.spans_count; i++) {
+                if (text.spans[i].text) {
+                    strcat(text.text, text.spans[i].text);
+                }
+            }
+            
+            // Set global style flags based on spans (preserve existing flags for headers)
+            bool preserve_bold = text.bold;  // Headers already have bold=true
+            text.bold = preserve_bold;
+            text.italic = false;
+            text.has_highlight = false;
+            text.has_underline = false;
+            for (size_t i = 0; i < text.spans_count; i++) {
+                if (text.spans[i].bold) text.bold = true;
+                if (text.spans[i].italic) text.italic = true;
+                if (text.spans[i].has_highlight) {
+                    text.has_highlight = true;
+                    text.highlight_color = text.spans[i].highlight_color;
+                }
+                if (text.spans[i].has_underline) {
+                    text.has_underline = true;
+                    text.underline_color = text.spans[i].underline_color;
+                    text.underline_gap = text.spans[i].underline_gap;
+                }
+            }
             
             if (doc->elements_len >= doc->elements_capacity) {
                 size_t new_cap = doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;

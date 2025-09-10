@@ -276,6 +276,42 @@ void editor_commit_line(Document *doc) {
         free(text_elem.text);
         text_elem.text = NULL;
         
+        // Reconstruct clean text from spans
+        size_t total_len = 0;
+        for (size_t i = 0; i < text_elem.spans_count; i++) {
+            if (text_elem.spans[i].text) {
+                total_len += strlen(text_elem.spans[i].text);
+            }
+        }
+        
+        text_elem.text = malloc(total_len + 1);
+        text_elem.text[0] = '\0';
+        for (size_t i = 0; i < text_elem.spans_count; i++) {
+            if (text_elem.spans[i].text) {
+                strcat(text_elem.text, text_elem.spans[i].text);
+            }
+        }
+        
+        // Set global style flags based on spans (preserve existing flags for headers)
+        bool preserve_bold = text_elem.bold;  // Headers already have bold=true
+        text_elem.bold = preserve_bold;
+        text_elem.italic = false;
+        text_elem.has_highlight = false;
+        text_elem.has_underline = false;
+        for (size_t i = 0; i < text_elem.spans_count; i++) {
+            if (text_elem.spans[i].bold) text_elem.bold = true;
+            if (text_elem.spans[i].italic) text_elem.italic = true;
+            if (text_elem.spans[i].has_highlight) {
+                text_elem.has_highlight = true;
+                text_elem.highlight_color = text_elem.spans[i].highlight_color;
+            }
+            if (text_elem.spans[i].has_underline) {
+                text_elem.has_underline = true;
+                text_elem.underline_color = text_elem.spans[i].underline_color;
+                text_elem.underline_gap = text_elem.spans[i].underline_gap;
+            }
+        }
+        
         ensure_elements_capacity(doc, doc->elements_len + 1);
         doc->elements[doc->elements_len].kind = T_TEXT;
         doc->elements[doc->elements_len].as.text = text_elem;
