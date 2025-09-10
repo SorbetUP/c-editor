@@ -670,7 +670,7 @@ int markdown_to_json(const char *markdown, Document *doc) {
 
       doc->elements[doc->elements_len].kind = T_TEXT;
       ElementText *text_element = &doc->elements[doc->elements_len].as.text;
-      text_element->text = strdup("");
+      text_element->text = strdup_safe("");
       text_element->level = 0;
       text_element->bold = false;
       text_element->italic = false;
@@ -701,7 +701,7 @@ int markdown_to_json(const char *markdown, Document *doc) {
 
       doc->elements[doc->elements_len].kind = T_TEXT;
       ElementText *text_element = &doc->elements[doc->elements_len].as.text;
-      text_element->text = strdup("");
+      text_element->text = strdup_safe("");
       text_element->level = 0;
       text_element->bold = false;
       text_element->italic = false;
