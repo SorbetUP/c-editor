@@ -95,7 +95,6 @@ static void adversarial_line(char **s, size_t *c, size_t *l) {
   pc(s, c, l, '\n');
 }
 #endif
-#endif
 
 #ifdef LIBFUZZER_MODE
 // LibFuzzer mode
@@ -216,5 +215,4 @@ int main(int argc, char **argv) {
   puts("[fuzz] OK");
   return 0;
 }
-#endif
 #endif
