@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C Editor Web - Éditeur Markdown</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            background: #2d2d2d;
+            padding: 10px 20px;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            color: #fff;
+        }
+
+        .header .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff6b6b;
+        }
+
+        .status-indicator.ready {
+            background: #51cf66;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            background: #4c6ef5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #364fc7;
+        }
+
+        .btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        .main-content {
+            display: flex;
+            height: calc(100vh - 60px);
+        }
+
+        .editor-pane, .preview-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pane-header {
+            background: #2d2d2d;
+            padding: 10px 20px;
+            border-bottom: 1px solid #444;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .editor-container, .preview-container {
+            flex: 1;
+            padding: 20px;
+        }
+
+        #editor {
+            width: 100%;
+            height: 100%;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 20px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            resize: none;
+            outline: none;
+        }
+
+        #editor:focus {
+            border-color: #4c6ef5;
+        }
+
+        #preview {
+            width: 100%;
+            height: 100%;
+            background: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 20px;
+            overflow-y: auto;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .divider {
+            width: 1px;
+            background: #444;
+        }
+
+        /* Markdown styling */
+        #preview h1, #preview h2, #preview h3, #preview h4, #preview h5, #preview h6 {
+            margin: 20px 0 10px 0;
+            color: #fff;
+        }
+
+        #preview h1 { font-size: 28px; }
+        #preview h2 { font-size: 24px; }
+        #preview h3 { font-size: 20px; }
+
+        #preview p {
+            margin: 10px 0;
+        }
+
+        #preview strong {
+            color: #fff;
+        }
+
+        #preview em {
+            color: #ffd93d;
+        }
+
+        #preview table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+
+        #preview th, #preview td {
+            border: 1px solid #444;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        #preview th {
+            background: #2d2d2d;
+            color: #fff;
+        }
+
+        .footer {
+            background: #2d2d2d;
+            padding: 8px 20px;
+            border-top: 1px solid #444;
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+        }
+
+        /* File input hidden */
+        #fileInput {
+            display: none;
+        }
+
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            right: 0;
+            background: #2d2d2d;
+            min-width: 150px;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            border: 1px solid #444;
+            border-radius: 4px;
+            z-index: 1;
+        }
+
+        .dropdown-content button {
+            color: #e0e0e0;
+            padding: 10px 16px;
+            text-decoration: none;
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .dropdown-content button:hover {
+            background: #404040;
+        }
+
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>C Editor Web</h1>
+        <div class="status">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="statusText">Chargement...</span>
+        </div>
+        <div class="buttons">
+            <div class="dropdown">
+                <button class="btn">Export ▾</button>
+                <div class="dropdown-content">
+                    <button onclick="exportMarkdown()">📄 Export Markdown</button>
+                    <button onclick="exportJSON()">📋 Export JSON</button>
+                    <button onclick="exportHTML()">🌐 Export HTML</button>
+                </div>
+            </div>
+            <button class="btn" onclick="importFile()">📁 Import</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="editor-pane">
+            <div class="pane-header">Éditeur</div>
+            <div class="editor-container">
+                <textarea id="editor" placeholder="# Titre&#10;&#10;Écrivez votre markdown ici...&#10;&#10;Exemple:&#10;- **Gras**&#10;- *Italique*&#10;- ==Surligné==&#10;&#10;| Colonne 1 | Colonne 2 |&#10;|-----------|-----------|&#10;| Donnée A  | Donnée B  |"></textarea>
+            </div>
+        </div>
+        
+        <div class="divider"></div>
+
+        <div class="preview-pane">
+            <div class="pane-header">Aperçu en temps réel</div>
+            <div class="preview-container">
+                <div id="preview">Le rendu apparaîtra ici en temps réel...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        C Editor Web - Powered by Emscripten WASM | 
+        <a href="https://github.com/SorbetUP/c-editor" style="color: #4c6ef5;">GitHub</a>
+    </div>
+
+    <input type="file" id="fileInput" accept=".md,.json,.txt" style="display: none;">
+
+    <script src="editor.js"></script>
+    <script>
+        let editorModule = null;
+        let isWasmReady = false;
+        
+        const editor = document.getElementById('editor');
+        const preview = document.getElementById('preview');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+
+        // Initialize WASM module
+        async function initializeWasm() {
+            try {
+                statusText.textContent = 'Chargement WASM...';
+                
+                // Wait for EditorModule to be available
+                let attempts = 0;
+                const maxAttempts = 50;
+                
+                while (typeof EditorModule === 'undefined' && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                    console.log('Waiting for EditorModule... attempt', attempts);
+                }
+                
+                if (typeof EditorModule !== 'undefined') {
+                    console.log('EditorModule found, initializing...');
+                    editorModule = await EditorModule();
+                    isWasmReady = true;
+                    statusIndicator.classList.add('ready');
+                    statusText.textContent = 'WASM Ready';
+                    console.log('WASM module loaded successfully');
+                    
+                    // Re-render si il y a déjà du contenu
+                    if (editor.value.trim()) {
+                        console.log('Re-rendering with WASM now ready...');
+                        await updatePreview();
+                    }
+                } else {
+                    throw new Error('EditorModule not found after ' + maxAttempts + ' attempts');
+                }
+            } catch (error) {
+                console.warn('WASM not available:', error);
+                statusIndicator.style.background = '#ff6b6b';
+                statusText.textContent = '❌ WASM indisponible';
+                isWasmReady = false;
+            }
+        }
+
+        // Simple markdown renderer fallback
+        function renderMarkdownFallback(text) {
+            if (!text) return 'Le rendu apparaîtra ici en temps réel...';
+            
+            const lines = text.split('\n');
+            let html = '';
+            let inTable = false;
+            let tableHtml = '';
+            
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i];
+                
+                // Handle tables
+                if (line.includes('|') && line.trim().length > 0 && !line.match(/^\s*\|?\s*-+\s*\|/)) {
+                    if (!inTable) {
+                        if (html) html += '\n';
+                        tableHtml = '<table>';
+                        inTable = true;
+                    }
+                    
+                    const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell !== '');
+                    
+                    const isHeader = i === 0 || (i > 0 && lines[i+1] && lines[i+1].match(/^\s*\|?\s*-+\s*\|/));
+                    const tag = isHeader ? 'th' : 'td';
+                    
+                    tableHtml += '<tr>';
+                    cells.forEach(cell => {
+                        // Apply inline formatting to cell content
+                        let cellContent = cell
+                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                            .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                            .replace(/==(.*?)==/g, '<mark style="background: #ffd93d; color: #000;">$1</mark>')
+                            .replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
+                        tableHtml += `<${tag}>${cellContent}</${tag}>`;
+                    });
+                    tableHtml += '</tr>';
+                    continue;
+                } else if (inTable && !line.match(/^\s*\|?\s*-+\s*\|/)) {
+                    // End table
+                    tableHtml += '</table>';
+                    html += tableHtml;
+                    tableHtml = '';
+                    inTable = false;
+                }
+                
+                // Skip table separator lines
+                if (line.match(/^\s*\|?\s*-+\s*\|/)) {
+                    continue;
+                }
+                
+                // Handle headers
+                if (line.match(/^#{1,6}\s/)) {
+                    const level = line.match(/^#+/)[0].length;
+                    const content = line.replace(/^#+\s*/, '');
+                    html += `<h${level}>${content}</h${level}>`;
+                }
+                // Handle empty lines
+                else if (line.trim() === '') {
+                    if (!inTable) html += '<br>';
+                }
+                // Handle regular text
+                else if (!inTable) {
+                    // Apply inline formatting
+                    let formattedLine = line
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        .replace(/==(.*?)==/g, '<mark style="background: #ffd93d; color: #000;">$1</mark>')
+                        .replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
+                    
+                    html += `<p>${formattedLine}</p>`;
+                }
+            }
+            
+            // Close any open table
+            if (inTable) {
+                tableHtml += '</table>';
+                html += tableHtml;
+            }
+
+            return html;
+        }
+
+        // Convert JSON from C engine to HTML
+        function jsonToHtml(jsonStr) {
+            try {
+                const doc = JSON.parse(jsonStr);
+                if (!doc.elements) {
+                    return 'Erreur: pas d\'éléments trouvés';
+                }
+                
+                let html = '';
+                
+                // Group elements by lines based on patterns in the original markdown
+                let lines = [];
+                let currentLine = [];
+                
+                for (let i = 0; i < doc.elements.length; i++) {
+                    const element = doc.elements[i];
+                    if (element.type === 'text') {
+                        
+                        // Start new line for headers
+                        if (element.level > 0) {
+                            if (currentLine.length > 0) {
+                                lines.push([...currentLine]);
+                                currentLine = [];
+                            }
+                            currentLine.push(element);
+                            lines.push([...currentLine]);
+                            currentLine = [];
+                        } else {
+                            // For level 0 elements, detect line breaks from markdown patterns
+                            // Based on your input: "== le chat ==", "*l*", "**le**", "***le***", "++le++"
+                            
+                            if (element.text.trim() && currentLine.length > 0) {
+                                // Check if this looks like a new markdown line
+                                const prevElement = currentLine[currentLine.length - 1];
+                                
+                                // New line if:
+                                // 1. Text doesn't start with space and previous doesn't end with space
+                                // 2. Significant style change
+                                if (!element.text.startsWith(' ') && !prevElement.text.endsWith(' ')) {
+                                    // Looks like separate markdown elements -> new line
+                                    lines.push([...currentLine]);
+                                    currentLine = [element];
+                                } else {
+                                    currentLine.push(element);
+                                }
+                            } else {
+                                currentLine.push(element);
+                            }
+                        }
+                    }
+                }
+                
+                // Add remaining line
+                if (currentLine.length > 0) {
+                    lines.push(currentLine);
+                }
+                
+                // Render each line
+                for (const line of lines) {
+                    if (line.length === 0) continue;
+                    
+                    let lineHtml = '';
+                    let lineLevel = line[0].level;
+                    
+                    for (const element of line) {
+                        lineHtml += renderTextElement(element);
+                    }
+                    
+                    html += wrapLine(lineHtml, lineLevel);
+                }
+                
+                return html || 'Rendu vide';
+            } catch (error) {
+                console.warn('JSON parsing error:', error);
+                return 'Erreur de parsing JSON: ' + error.message;
+            }
+        }
+        
+        function renderTextElement(element) {
+            // If element has spans, render each span separately
+            if (element.spans && element.spans.length > 0) {
+                let html = '';
+                for (const span of element.spans) {
+                    html += renderSpan(span);
+                }
+                return html;
+            }
+            
+            // Fallback to element-level formatting
+            let text = element.text || '';
+            let html = text;
+            
+            // Apply formatting
+            if (element.bold && element.italic) {
+                html = `<strong><em>${html}</em></strong>`;
+            } else if (element.bold) {
+                html = `<strong>${html}</strong>`;
+            } else if (element.italic) {
+                html = `<em>${html}</em>`;
+            }
+            
+            // Apply highlight
+            if (element.highlight) {
+                const [r, g, b, a] = element.highlight.color;
+                const bgColor = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
+                html = `<mark style="background-color: ${bgColor};">${html}</mark>`;
+            }
+            
+            // Apply underline
+            if (element.underline) {
+                const [r, g, b, a] = element.underline.color;
+                const underlineColor = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
+                html = `<u style="text-decoration-color: ${underlineColor};">${html}</u>`;
+            }
+            
+            // Apply color
+            if (element.color) {
+                const [r, g, b, a] = element.color;
+                const color = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
+                html = `<span style="color: ${color};">${html}</span>`;
+            }
+            
+            return html;
+        }
+        
+        function renderSpan(span) {
+            let text = span.text || '';
+            let html = text;
+            
+            // Apply formatting
+            if (span.bold && span.italic) {
+                html = `<strong><em>${html}</em></strong>`;
+            } else if (span.bold) {
+                html = `<strong>${html}</strong>`;
+            } else if (span.italic) {
+                html = `<em>${html}</em>`;
+            }
+            
+            // Apply highlight
+            if (span.has_highlight && span.highlight_color) {
+                const [r, g, b, a] = span.highlight_color;
+                const bgColor = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
+                html = `<mark style="background: ${bgColor}; color: #000;">${html}</mark>`;
+            }
+            
+            // Apply underline
+            if (span.has_underline) {
+                html = `<u>${html}</u>`;
+            }
+            
+            return html;
+        }
+        
+        function wrapLine(content, level) {
+            if (level > 0) {
+                // Header level
+                return `<h${Math.min(level, 6)}>${content}</h${Math.min(level, 6)}>`;
+            } else {
+                // Regular paragraph
+                return `<p>${content}</p>`;
+            }
+        }
+        
+        // Parse inline formatting and create separate elements
+        function fixInlineFormatting(originalText, jsonStr) {
+            try {
+                const doc = JSON.parse(jsonStr);
+                
+                if (!doc.elements || doc.elements.length === 0) {
+                    return jsonStr;
+                }
+                
+                // Parse the original text and create separate elements
+                const parsedElements = parseInlineElements(originalText, doc.elements[0]);
+                
+                if (parsedElements.length > 1) {
+                    doc.elements = parsedElements;
+                    console.log(`Separated into ${parsedElements.length} elements:`, parsedElements.map(e => `"${e.text}"`));
+                }
+                
+                return JSON.stringify(doc);
+            } catch (error) {
+                console.warn('Error fixing inline formatting:', error);
+                return jsonStr;
+            }
+        }
+        
+        // Parse text with inline formatting into separate elements
+        function parseInlineElements(text, baseElement) {
+            const elements = [];
+            let currentIndex = 0;
+            
+            // Define formatting patterns in order of precedence
+            const patterns = [
+                { regex: /\*\*\*(.+?)\*\*\*/, bold: true, italic: true },
+                { regex: /\*\*(.+?)\*\*/, bold: true, italic: false },
+                { regex: /\*(.+?)\*/, bold: false, italic: true },
+                { regex: /==(.+?)==/, highlight: true },
+                { regex: /\+\+(.+?)\+\+/, underline: true }
+            ];
+            
+            while (currentIndex < text.length) {
+                let foundMatch = false;
+                let earliestMatch = null;
+                let earliestIndex = text.length;
+                
+                // Find the earliest formatting pattern
+                for (const pattern of patterns) {
+                    const match = text.slice(currentIndex).match(pattern.regex);
+                    if (match && match.index < earliestIndex - currentIndex) {
+                        earliestMatch = {
+                            ...pattern,
+                            match: match,
+                            startIndex: currentIndex + match.index,
+                            endIndex: currentIndex + match.index + match[0].length
+                        };
+                        earliestIndex = earliestMatch.startIndex;
+                    }
+                }
+                
+                if (earliestMatch) {
+                    // Add text before the formatting (if any)
+                    if (earliestMatch.startIndex > currentIndex) {
+                        const beforeText = text.slice(currentIndex, earliestMatch.startIndex);
+                        elements.push({
+                            type: "text",
+                            text: beforeText,
+                            align: baseElement.align,
+                            color: baseElement.color,
+                            bold: false,
+                            italic: false,
+                            level: baseElement.level
+                        });
+                    }
+                    
+                    // Add the formatted element
+                    const formattedElement = {
+                        type: "text",
+                        text: earliestMatch.match[1],
+                        align: baseElement.align,
+                        color: baseElement.color,
+                        bold: earliestMatch.bold || false,
+                        italic: earliestMatch.italic || false,
+                        level: baseElement.level
+                    };
+                    
+                    if (earliestMatch.highlight) {
+                        formattedElement.highlight = { color: [1.000, 1.000, 0.000, 0.300] };
+                    }
+                    if (earliestMatch.underline) {
+                        formattedElement.underline = { color: [0.000, 0.000, 0.000, 0.400], gap: 7 };
+                    }
+                    
+                    elements.push(formattedElement);
+                    currentIndex = earliestMatch.endIndex;
+                    foundMatch = true;
+                } else {
+                    // No more formatting, add remaining text
+                    const remainingText = text.slice(currentIndex);
+                    if (remainingText) {
+                        elements.push({
+                            type: "text",
+                            text: remainingText,
+                            align: baseElement.align,
+                            color: baseElement.color,
+                            bold: false,
+                            italic: false,
+                            level: baseElement.level
+                        });
+                    }
+                    break;
+                }
+            }
+            
+            return elements.length > 0 ? elements : [baseElement];
+        }
+        
+        // Pre-process text to separate inline formatting for the C engine
+        function preprocessInlineFormatting(text) {
+            // This is a workaround: instead of sending "***le*** ==chat==" as one line,
+            // we could try to hint the C parser to separate elements
+            // But this approach might be complex. Let's try a different strategy.
+            
+            // For now, return the original text and handle the separation in post-processing
+            console.log('Preprocessing text:', text);
+            return text;
+        }
+
+        // Render markdown using WASM or fallback
+        async function renderMarkdown(text) {
+            // Si WASM n'est pas encore prêt, attendre un peu
+            if (!isWasmReady && !editorModule) {
+                let attempts = 0;
+                const maxWait = 10; // 1 seconde max
+                
+                while (!isWasmReady && attempts < maxWait) {
+                    console.log('Waiting for WASM to be ready...', attempts);
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+            }
+            
+            console.log('renderMarkdown called with:', text.substring(0, 50));
+            console.log('isWasmReady:', isWasmReady, 'editorModule:', !!editorModule);
+            
+            if (isWasmReady && editorModule) {
+                try {
+                    console.log('Trying WASM functions...');
+                    
+                    // Initialize library (idempotent)
+                    editorModule.ccall('editor_library_init', null, [], []);
+                    
+                    // Pre-process text to separate inline formatting
+                    const processedText = preprocessInlineFormatting(text);
+                    
+                    // Utiliser la fonction simple qui retourne directement le JSON
+                    const jsonResult = editorModule.ccall('editor_parse_markdown_simple', 'string', ['string'], [processedText]);
+                    
+                    if (jsonResult) {
+                        console.log('Using C markdown engine ✅');
+                        console.log('Full JSON from C engine:', jsonResult);
+                        
+                        return jsonToHtml(jsonResult);
+                    } else {
+                        console.log('C function returned null');
+                        const errorMsg = editorModule.ccall('editor_get_error_message', 'string', [], []);
+                        console.log('Error message:', errorMsg || 'No error message available');
+                        return '<p style="color: orange;">⚠️ Résultat vide du moteur C</p>';
+                    }
+                } catch (error) {
+                    console.warn('WASM render failed:', error);
+                    return '<p style="color: orange;">⚠️ Erreur moteur markdown C: ' + error.message + '</p>';
+                }
+            }
+            
+            console.log('WASM not available - showing loading message');
+            return '<p style="color: #ffd93d;">🔄 Chargement du moteur markdown...</p>';
+        }
+
+        // Cache for rendered lines
+        let cachedLines = [];
+        let lastText = '';
+        
+        // Update preview - only re-render changed lines
+        async function updatePreview() {
+            const text = editor.value;
+            const lines = text.split('\n');
+            
+            // Find which line changed
+            const lastLines = lastText.split('\n');
+            
+            // Create array to hold rendered lines
+            let renderedLines = [...cachedLines];
+            
+            // Extend arrays to match current length
+            while (renderedLines.length < lines.length) {
+                renderedLines.push('');
+            }
+            
+            // Check each line for changes
+            for (let i = 0; i < lines.length; i++) {
+                const currentLine = lines[i];
+                const lastLine = i < lastLines.length ? lastLines[i] : '';
+                
+                // Only re-render if line changed
+                if (currentLine !== lastLine) {
+                    console.log(`Re-rendering line ${i}: "${currentLine}"`);
+                    
+                    if (currentLine.trim()) {
+                        const lineHtml = await renderMarkdown(currentLine.trim());
+                        renderedLines[i] = lineHtml;
+                    } else {
+                        renderedLines[i] = '<br>'; // Empty line
+                    }
+                }
+            }
+            
+            // Remove excess lines if text got shorter
+            if (renderedLines.length > lines.length) {
+                renderedLines = renderedLines.slice(0, lines.length);
+            }
+            
+            // Update cache
+            cachedLines = [...renderedLines];
+            lastText = text;
+            
+            // Update DOM
+            preview.innerHTML = renderedLines.join('');
+        }
+
+        // Export functions
+        function exportMarkdown() {
+            const content = editor.value;
+            downloadFile('document.md', content);
+        }
+
+        function exportJSON() {
+            const content = editor.value;
+            if (isWasmReady && editorModule) {
+                try {
+                    const json = editorModule.ccall('editor_parse_markdown', 'string', ['string'], [content]);
+                    downloadFile('document.json', json || JSON.stringify({content}));
+                    return;
+                } catch (error) {
+                    console.warn('WASM JSON export failed:', error);
+                }
+            }
+            
+            // Fallback JSON export
+            const jsonData = {
+                content: content,
+                timestamp: new Date().toISOString(),
+                version: "1.0"
+            };
+            downloadFile('document.json', JSON.stringify(jsonData, null, 2));
+        }
+
+        function exportHTML() {
+            const content = editor.value;
+            const html = renderMarkdown(content);
+            const fullHtml = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+               max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1, h2, h3, h4, h5, h6 { margin-top: 2em; margin-bottom: 0.5em; }
+        table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+        th { background: #f5f5f5; }
+        mark { background: #ffd93d; }
+    </style>
+</head>
+<body>
+${html}
+</body>
+</html>`;
+            downloadFile('document.html', fullHtml);
+        }
+
+        function importFile() {
+            document.getElementById('fileInput').click();
+        }
+
+        function downloadFile(filename, content) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Event listeners
+        editor.addEventListener('input', updatePreview);
+        editor.addEventListener('keydown', function(e) {
+            // Tab key support
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = this.selectionStart;
+                const end = this.selectionEnd;
+                this.value = this.value.substring(0, start) + '    ' + this.value.substring(end);
+                this.selectionStart = this.selectionEnd = start + 4;
+                updatePreview();
+            }
+        });
+
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    editor.value = e.target.result;
+                    updatePreview();
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeWasm();
+            updatePreview();
+        });
+    </script>
+</body>
+</html>

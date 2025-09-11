@@ -143,6 +143,27 @@ EDITOR_API EditorResult editor_parse_markdown(const char *markdown,
   return EDITOR_SUCCESS;
 }
 
+// Simple wrapper for WASM that returns JSON directly
+EDITOR_API const char *editor_parse_markdown_simple(const char *markdown) {
+  static char *last_result = NULL;
+  
+  // Libérer le résultat précédent
+  if (last_result) {
+    g_allocator.free_fn(last_result);
+    last_result = NULL;
+  }
+  
+  char *json_result = NULL;
+  EditorResult result = editor_parse_markdown(markdown, &json_result);
+  
+  if (result == EDITOR_SUCCESS && json_result) {
+    last_result = json_result;
+    return json_result;
+  }
+  
+  return NULL;
+}
+
 EDITOR_API EditorResult editor_export_markdown(const char *json,
                                                char **out_markdown) {
   if (!g_initialized) {

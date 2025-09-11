@@ -46,6 +46,7 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
   while (i < len && span_count < max_spans) {
     bool matched = false;
 
+    // Parse *** (bold+italic) with higher priority
     if (i + 2 < len && text[i] == '*' && text[i + 1] == '*' &&
         text[i + 2] == '*') {
       size_t start = i;
@@ -60,7 +61,9 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
           break;
         }
       }
-    } else if (i + 1 < len && text[i] == '*' && text[i + 1] == '*') {
+    } 
+    // Parse ** (bold)
+    else if (i + 1 < len && text[i] == '*' && text[i + 1] == '*') {
       size_t start = i;
       for (size_t j = i + 2; j + 1 < len; j++) {
         if (text[j] == '*' && text[j + 1] == '*') {
@@ -73,7 +76,9 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
           break;
         }
       }
-    } else if (text[i] == '*') {
+    } 
+    // Parse * (italic)
+    else if (text[i] == '*') {
       size_t start = i;
       for (size_t j = i + 1; j < len; j++) {
         if (text[j] == '*') {
@@ -86,7 +91,9 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
           break;
         }
       }
-    } else if (i + 1 < len && text[i] == '=' && text[i + 1] == '=') {
+    } 
+    // Parse == (highlight)
+    else if (i + 1 < len && text[i] == '=' && text[i + 1] == '=') {
       size_t start = i;
       for (size_t j = i + 2; j + 1 < len; j++) {
         if (text[j] == '=' && text[j + 1] == '=') {
@@ -99,7 +106,9 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
           break;
         }
       }
-    } else if (i + 1 < len && text[i] == '+' && text[i + 1] == '+') {
+    } 
+    // Parse ++ (underline)
+    else if (i + 1 < len && text[i] == '+' && text[i + 1] == '+') {
       size_t start = i;
       for (size_t j = i + 2; j + 1 < len; j++) {
         if (text[j] == '+' && text[j + 1] == '+') {

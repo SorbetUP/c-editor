@@ -18,8 +18,8 @@ echo "🔨 Compiling C sources..."
 SOURCES="../src/editor.c ../src/markdown.c ../src/json.c ../src/editor_abi.c"
 
 # Output files
-OUTPUT_JS="../flutter/web/editor.js"
-OUTPUT_WASM="../flutter/web/editor.wasm"
+OUTPUT_JS="../docs/editor.js"
+OUTPUT_WASM="../docs/editor.wasm"
 
 echo "⚙️  Building with flags:"
 echo "  Sources: $SOURCES"
@@ -30,7 +30,7 @@ EMCC_FLAGS=(
     -O3
     -s WASM=1
     -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap"]'
-    -s EXPORTED_FUNCTIONS='["_malloc","_free","_editor_library_init","_editor_library_cleanup","_editor_get_version_string","_editor_parse_markdown","_editor_export_markdown","_editor_state_create","_editor_state_destroy","_editor_state_input_char","_editor_state_input_string","_editor_state_get_document","_editor_state_get_markdown","_editor_free_string","_editor_get_error_message"]'
+    -s EXPORTED_FUNCTIONS='["_malloc","_free","_editor_library_init","_editor_library_cleanup","_editor_get_version_string","_editor_parse_markdown","_editor_parse_markdown_simple","_editor_export_markdown","_editor_state_create","_editor_state_destroy","_editor_state_input_char","_editor_state_input_string","_editor_state_get_document","_editor_state_get_markdown","_editor_free_string","_editor_get_error_message"]'
     -s ALLOW_MEMORY_GROWTH=1
     -s INITIAL_MEMORY=1MB
     -s STACK_SIZE=512KB

@@ -267,6 +267,38 @@ static int write_element_text(FILE *fp, const ElementText *text) {
     fprintf(fp, "}");
   }
 
+  if (text->spans && text->spans_count > 0) {
+    fprintf(fp, ",\"spans\":[");
+    for (size_t i = 0; i < text->spans_count; i++) {
+      if (i > 0) fprintf(fp, ",");
+      fprintf(fp, "{");
+      
+      fprintf(fp, "\"text\":");
+      write_escaped_string(fp, text->spans[i].text ? text->spans[i].text : "");
+      
+      fprintf(fp, ",\"bold\":%s", text->spans[i].bold ? "true" : "false");
+      fprintf(fp, ",\"italic\":%s", text->spans[i].italic ? "true" : "false");
+      
+      if (text->spans[i].has_underline) {
+        fprintf(fp, ",\"has_underline\":true,\"underline_color\":");
+        write_rgba_array(fp, &text->spans[i].underline_color);
+        fprintf(fp, ",\"underline_gap\":%d", text->spans[i].underline_gap);
+      } else {
+        fprintf(fp, ",\"has_underline\":false");
+      }
+      
+      if (text->spans[i].has_highlight) {
+        fprintf(fp, ",\"has_highlight\":true,\"highlight_color\":");
+        write_rgba_array(fp, &text->spans[i].highlight_color);
+      } else {
+        fprintf(fp, ",\"has_highlight\":false");
+      }
+      
+      fprintf(fp, "}");
+    }
+    fprintf(fp, "]");
+  }
+
   fprintf(fp, ",\"level\":%d}", text->level);
   return 0;
 }

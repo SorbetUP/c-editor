@@ -67,6 +67,8 @@ EDITOR_API const char *editor_get_version_string(void);
 // Document parsing - stateless API
 EDITOR_API EditorResult editor_parse_markdown(const char *markdown,
                                               char **out_json);
+// Simple wrapper for WASM that returns JSON directly
+EDITOR_API const char *editor_parse_markdown_simple(const char *markdown);
 EDITOR_API EditorResult editor_export_markdown(const char *json,
                                                char **out_markdown);
 EDITOR_API EditorResult editor_export_json_canonical(const char *json,

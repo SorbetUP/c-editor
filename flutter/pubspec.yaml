@@ -1,6 +1,6 @@
-name: c_editor_flutter
-description: A Flutter UI for the C Markdown Editor with multiplatform support
-version: 1.1.0+1
+name: c_editor_web
+description: A simple web editor for C Markdown using Flutter
+version: 1.0.0+1
 publish_to: 'none'
 
 environment:
@@ -10,40 +10,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
-  # State management
-  flutter_riverpod: ^2.4.0
-  riverpod_annotation: ^2.2.0
-  
-  # Routing
-  go_router: ^12.0.0
-  
-  # Platform integration
-  ffi: ^2.1.0
-  path: ^1.8.3
   js: ^0.6.7
-  path_provider: ^2.0.15
-  file_picker: ^5.3.2
-  shared_preferences: ^2.2.0
-  
-  # UI & Internationalization (commented out for CI compatibility)
-  # flutter_localizations:
-  #   sdk: flutter
-  # intl: ^0.18.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
-  ffigen: ^8.0.2
-  integration_test:
-    sdk: flutter
-  
-  # Code generation
-  riverpod_generator: ^2.3.0
-  build_runner: ^2.4.6
-  custom_lint: ^0.5.0
-  riverpod_lint: ^2.3.0
 
 flutter:
   uses-material-design: true
@@ -51,15 +23,4 @@ flutter:
   # Assets for WASM
   assets:
     - web/editor.wasm
-    - web/editor_wasm.js
-
-# FFI configuration
-ffigen:
-  output: 'lib/ffi/generated/editor_bindings.dart'
-  headers:
-    entry-points:
-      - '../src/editor.h'
-      - '../src/markdown.h' 
-      - '../src/json.h'
-  name: 'EditorBindings'
-  description: 'Bindings for C Editor Library'
+    - web/editor.js

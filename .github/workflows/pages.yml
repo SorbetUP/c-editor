@@ -1,6 +1,8 @@
 name: Deploy to GitHub Pages
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -17,27 +19,34 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v4
-    
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential clang
+        
     - name: Setup Emscripten
       uses: mymindstorm/setup-emsdk@v13
       with:
         version: 'latest'
         
+    - name: Build C library
+      run: |
+        make clean
+        make -j$(nproc)
+        
     - name: Build WASM
       run: |
         cd wasm
-        ./build.sh
+        ./build-wasm.sh
         
-    - uses: subosito/flutter-action@v2
-      with:
-        flutter-version: '3.16.0'
-        
-    - name: Build Flutter web
+    - name: Copy WASM files to docs
       run: |
-        cd flutter
-        flutter pub get
-        flutter build web --base-href '/c-editor/'
+        cp flutter/web/editor.wasm docs/
+        cp flutter/web/editor.js docs/
+        ls -la docs/
         
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -45,7 +54,7 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        path: flutter/build/web
+        path: 'docs'
 
   deploy:
     environment:
