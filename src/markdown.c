@@ -304,15 +304,21 @@ int parse_image_line(const char *line, ElementImage *image) {
   image->alt[alt_len] = '\0';
 
   p++;
-  if (*p != '(')
+  if (*p != '(') {
+    free(image->alt);
+    image->alt = NULL;
     return -1;
+  }
   p++;
 
   const char *src_start = p;
   while (*p && *p != ')')
     p++;
-  if (*p != ')')
+  if (*p != ')') {
+    free(image->alt);
+    image->alt = NULL;
     return -1;
+  }
 
   size_t src_len = p - src_start;
   image->src = malloc(src_len + 1);
