@@ -145,22 +145,35 @@ EDITOR_API EditorResult editor_parse_markdown(const char *markdown,
 
 // Simple wrapper for WASM that returns JSON directly
 EDITOR_API const char *editor_parse_markdown_simple(const char *markdown) {
+  log_debug("editor_parse_markdown_simple called with: %s", markdown ? markdown : "NULL");
+  
   static char *last_result = NULL;
   
   // Libérer le résultat précédent
   if (last_result) {
+    log_debug("Freeing previous result");
     g_allocator.free_fn(last_result);
     last_result = NULL;
+  }
+  
+  if (!markdown) {
+    printf("[EDITOR ERROR] Input markdown is NULL\n");
+    return NULL;
   }
   
   char *json_result = NULL;
   EditorResult result = editor_parse_markdown(markdown, &json_result);
   
+  log_debug("editor_parse_markdown returned: %d", result);
+  log_debug("json_result pointer: %p", (void*)json_result);
+  
   if (result == EDITOR_SUCCESS && json_result) {
     last_result = json_result;
+    log_debug("Returning JSON result of length: %zu", strlen(json_result));
     return json_result;
   }
   
+  printf("[EDITOR ERROR] Failed to parse markdown: result=%d, json_result=%p\n", result, (void*)json_result);
   return NULL;
 }
 
@@ -485,4 +498,162 @@ EDITOR_API EditorResult editor_get_config(EditorConfig *config) {
 
   *config = g_config;
   return EDITOR_SUCCESS;
+}
+
+// Convert markdown directly to HTML - WASM optimized
+EDITOR_API const char *editor_markdown_to_html(const char *markdown) {
+  log_debug("editor_markdown_to_html called with: %s", markdown ? markdown : "NULL");
+  
+  static char *last_html_result = NULL;
+  
+  // Libérer le résultat précédent
+  if (last_html_result) {
+    log_debug("Freeing previous HTML result");
+    g_allocator.free_fn(last_html_result);
+    last_html_result = NULL;
+  }
+  
+  if (!markdown || !g_initialized) {
+    printf("[EDITOR ERROR] Invalid input or not initialized\n");
+    return NULL;
+  }
+  
+  // Parse to JSON first
+  char *json_result = NULL;
+  EditorResult result = editor_parse_markdown(markdown, &json_result);
+  
+  if (result != EDITOR_SUCCESS || !json_result) {
+    printf("[EDITOR ERROR] Failed to parse markdown to JSON\n");
+    return NULL;
+  }
+  
+  // Allocate HTML buffer
+  size_t html_len = strlen(json_result) * 3 + 1024; // Large estimate
+  char *html_buffer = (char*)g_allocator.malloc_fn(html_len);
+  if (!html_buffer) {
+    g_allocator.free_fn(json_result);
+    return NULL;
+  }
+  
+  // Simple approach: extract text and spans from JSON
+  html_buffer[0] = '\0';
+  char *html_pos = html_buffer;
+  size_t remaining = html_len - 1;
+  
+  // Find spans array in JSON
+  const char *spans_start = strstr(json_result, "\"spans\":[");
+  if (spans_start) {
+    spans_start += 9; // Skip "spans":[
+    const char *current = spans_start;
+    
+    while (*current && *current != ']') {
+      if (*current == '{') {
+        // Parse span object
+        const char *span_end = strchr(current, '}');
+        if (!span_end) break;
+        
+        // Extract text
+        const char *text_start = strstr(current, "\"text\":\"");
+        if (text_start && text_start < span_end) {
+          text_start += 8;
+          const char *text_end = strchr(text_start, '"');
+          if (text_end && text_end < span_end) {
+            
+            // Check formatting
+            bool is_bold = strstr(current, "\"bold\":true") && strstr(current, "\"bold\":true") < span_end;
+            bool is_italic = strstr(current, "\"italic\":true") && strstr(current, "\"italic\":true") < span_end;
+            bool has_underline = strstr(current, "\"has_underline\":true") && strstr(current, "\"has_underline\":true") < span_end;
+            bool has_highlight = strstr(current, "\"has_highlight\":true") && strstr(current, "\"has_highlight\":true") < span_end;
+            
+            // Open tags
+            if (is_bold && remaining > 8) {
+              strcpy(html_pos, "<strong>");
+              html_pos += 8; remaining -= 8;
+            }
+            if (is_italic && remaining > 4) {
+              strcpy(html_pos, "<em>");
+              html_pos += 4; remaining -= 4;
+            }
+            if (has_underline && remaining > 3) {
+              strcpy(html_pos, "<u>");
+              html_pos += 3; remaining -= 3;
+            }
+            if (has_highlight && remaining > 6) {
+              strcpy(html_pos, "<mark>");
+              html_pos += 6; remaining -= 6;
+            }
+            
+            // Copy text
+            size_t text_len = text_end - text_start;
+            if (text_len > 0 && remaining > text_len) {
+              memcpy(html_pos, text_start, text_len);
+              html_pos += text_len; remaining -= text_len;
+            }
+            
+            // Close tags (reverse order)
+            if (has_highlight && remaining > 7) {
+              strcpy(html_pos, "</mark>");
+              html_pos += 7; remaining -= 7;
+            }
+            if (has_underline && remaining > 4) {
+              strcpy(html_pos, "</u>");
+              html_pos += 4; remaining -= 4;
+            }
+            if (is_italic && remaining > 5) {
+              strcpy(html_pos, "</em>");
+              html_pos += 5; remaining -= 5;
+            }
+            if (is_bold && remaining > 9) {
+              strcpy(html_pos, "</strong>");
+              html_pos += 9; remaining -= 9;
+            }
+          }
+        }
+        current = span_end + 1;
+      } else {
+        current++;
+      }
+    }
+  } else {
+    // Fallback: just extract main text
+    const char *text_start = strstr(json_result, "\"text\":\"");
+    if (text_start) {
+      text_start += 8;
+      const char *text_end = strchr(text_start, '"');
+      if (text_end) {
+        size_t text_len = text_end - text_start;
+        if (text_len > 0 && remaining > text_len) {
+          memcpy(html_pos, text_start, text_len);
+          html_pos += text_len;
+        }
+      }
+    }
+  }
+  
+  // Set null terminator FIRST
+  *html_pos = '\0';
+  
+  // Check for header level
+  const char *level_str = strstr(json_result, "\"level\":");
+  if (level_str) {
+    int level = atoi(level_str + 8);
+    if (level > 0 && level <= 6) {
+      // Wrap in header tags
+      size_t current_len = strlen(html_buffer);
+      if (current_len > 0 && current_len < html_len - 20) { // Ensure space for header tags
+        char temp_buffer[html_len];
+        strcpy(temp_buffer, html_buffer);
+        snprintf(html_buffer, html_len, "<h%d>%s</h%d>", level, temp_buffer, level);
+      }
+    }
+  }
+  
+  // Clean up
+  g_allocator.free_fn(json_result);
+  
+  // Store result
+  last_html_result = html_buffer;
+  
+  log_debug("Generated HTML result: %s", html_buffer);
+  return html_buffer;
 }

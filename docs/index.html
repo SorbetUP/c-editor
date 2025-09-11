@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>C Editor Web - Éditeur Markdown</title>
+    <title>C Editor Web - Éditeur Hybride</title>
     <style>
         * {
             margin: 0;
@@ -12,9 +12,9 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #1a1a1a;
             color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             height: 100vh;
             overflow: hidden;
         }
@@ -22,29 +22,28 @@
         .header {
             background: #2d2d2d;
             padding: 10px 20px;
-            border-bottom: 1px solid #444;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            border-bottom: 1px solid #444;
         }
 
         .header h1 {
-            font-size: 18px;
-            color: #fff;
+            font-size: 16px;
+            font-weight: 600;
         }
 
-        .header .status {
+        .status {
             display: flex;
             align-items: center;
             gap: 8px;
-            font-size: 12px;
         }
 
         .status-indicator {
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: #ff6b6b;
+            background: #ffa500;
         }
 
         .status-indicator.ready {
@@ -71,17 +70,12 @@
             background: #364fc7;
         }
 
-        .btn:disabled {
-            background: #555;
-            cursor: not-allowed;
-        }
-
         .main-content {
             display: flex;
             height: calc(100vh - 60px);
         }
 
-        .editor-pane, .preview-pane {
+        .hybrid-editor {
             flex: 1;
             display: flex;
             flex-direction: column;
@@ -95,12 +89,12 @@
             font-size: 14px;
         }
 
-        .editor-container, .preview-container {
+        .hybrid-editor-container {
             flex: 1;
             padding: 20px;
         }
 
-        #editor {
+        #hybridEditor {
             width: 100%;
             height: 100%;
             background: #1e1e1e;
@@ -110,69 +104,68 @@
             padding: 20px;
             font-family: 'Monaco', 'Consolas', monospace;
             font-size: 14px;
-            line-height: 1.5;
-            resize: none;
+            line-height: 1.8;
+            overflow-y: auto;
             outline: none;
         }
 
-        #editor:focus {
+        #hybridEditor:focus {
             border-color: #4c6ef5;
         }
 
-        #preview {
-            width: 100%;
-            height: 100%;
-            background: #1e1e1e;
-            border: 1px solid #444;
-            border-radius: 4px;
-            padding: 20px;
-            overflow-y: auto;
-            font-size: 14px;
-            line-height: 1.6;
+        .editor-line {
+            min-height: 1.8em;
+            padding: 4px 8px;
+            margin: 0;
+            border-radius: 3px;
+            transition: background-color 0.2s ease;
+            cursor: text;
         }
 
-        .divider {
-            width: 1px;
-            background: #444;
+        .editor-line.current-line {
+            background-color: rgba(76, 110, 245, 0.1);
+            border-left: 3px solid #4c6ef5;
+            padding-left: 15px;
         }
 
-        /* Markdown styling */
-        #preview h1, #preview h2, #preview h3, #preview h4, #preview h5, #preview h6 {
-            margin: 20px 0 10px 0;
+        .editor-line.rendered-line {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .editor-line:empty::before {
+            content: '\200B';
+            color: transparent;
+        }
+
+        /* Styling for rendered HTML */
+        .editor-line h1, .editor-line h2, .editor-line h3, .editor-line h4, .editor-line h5, .editor-line h6 {
+            margin: 0;
             color: #fff;
+            display: inline;
         }
 
-        #preview h1 { font-size: 28px; }
-        #preview h2 { font-size: 24px; }
-        #preview h3 { font-size: 20px; }
+        .editor-line h1 { font-size: 24px; }
+        .editor-line h2 { font-size: 20px; }
+        .editor-line h3 { font-size: 18px; }
 
-        #preview p {
-            margin: 10px 0;
-        }
-
-        #preview strong {
+        .editor-line strong {
             color: #fff;
+            font-weight: bold;
         }
 
-        #preview em {
+        .editor-line em {
             color: #ffd93d;
+            font-style: italic;
         }
 
-        #preview table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 20px 0;
+        .editor-line u {
+            text-decoration: underline;
         }
 
-        #preview th, #preview td {
-            border: 1px solid #444;
-            padding: 8px 12px;
-            text-align: left;
-        }
-
-        #preview th {
-            background: #2d2d2d;
-            color: #fff;
+        .editor-line mark {
+            background: #ffd93d;
+            color: #000;
+            padding: 1px 2px;
         }
 
         .footer {
@@ -183,85 +176,37 @@
             color: #888;
             text-align: center;
         }
-
-        /* File input hidden */
-        #fileInput {
-            display: none;
-        }
-
-        .dropdown {
-            position: relative;
-            display: inline-block;
-        }
-
-        .dropdown-content {
-            display: none;
-            position: absolute;
-            right: 0;
-            background: #2d2d2d;
-            min-width: 150px;
-            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-            border: 1px solid #444;
-            border-radius: 4px;
-            z-index: 1;
-        }
-
-        .dropdown-content button {
-            color: #e0e0e0;
-            padding: 10px 16px;
-            text-decoration: none;
-            display: block;
-            width: 100%;
-            text-align: left;
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 12px;
-        }
-
-        .dropdown-content button:hover {
-            background: #404040;
-        }
-
-        .dropdown:hover .dropdown-content {
-            display: block;
-        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>C Editor Web</h1>
+        <h1>C Editor Web - Éditeur Hybride</h1>
         <div class="status">
             <span class="status-indicator" id="statusIndicator"></span>
             <span id="statusText">Chargement...</span>
         </div>
         <div class="buttons">
-            <div class="dropdown">
-                <button class="btn">Export ▾</button>
-                <div class="dropdown-content">
-                    <button onclick="exportMarkdown()">📄 Export Markdown</button>
-                    <button onclick="exportJSON()">📋 Export JSON</button>
-                    <button onclick="exportHTML()">🌐 Export HTML</button>
-                </div>
-            </div>
-            <button class="btn" onclick="importFile()">📁 Import</button>
+            <button class="btn" onclick="exportMarkdown()">📄 Export MD</button>
+            <button class="btn" onclick="exportJSON()">📋 Export JSON</button>
+            <button class="btn" onclick="exportHTML()">🌐 Export HTML</button>
         </div>
     </div>
 
     <div class="main-content">
-        <div class="editor-pane">
-            <div class="pane-header">Éditeur</div>
-            <div class="editor-container">
-                <textarea id="editor" placeholder="# Titre&#10;&#10;Écrivez votre markdown ici...&#10;&#10;Exemple:&#10;- **Gras**&#10;- *Italique*&#10;- ==Surligné==&#10;&#10;| Colonne 1 | Colonne 2 |&#10;|-----------|-----------|&#10;| Donnée A  | Donnée B  |"></textarea>
-            </div>
-        </div>
-        
-        <div class="divider"></div>
-
-        <div class="preview-pane">
-            <div class="pane-header">Aperçu en temps réel</div>
-            <div class="preview-container">
-                <div id="preview">Le rendu apparaîtra ici en temps réel...</div>
+        <div class="hybrid-editor">
+            <div class="pane-header">Éditeur Hybride - Ligne courante en Markdown, autres lignes rendues</div>
+            <div class="hybrid-editor-container">
+                <div id="hybridEditor" contenteditable="true" spellcheck="false">
+                    <div class="editor-line" data-line="0"># Titre</div>
+                    <div class="editor-line" data-line="1"></div>
+                    <div class="editor-line" data-line="2">Écrivez votre markdown ici...</div>
+                    <div class="editor-line" data-line="3"></div>
+                    <div class="editor-line" data-line="4">Exemple:</div>
+                    <div class="editor-line" data-line="5">- **Gras**</div>
+                    <div class="editor-line" data-line="6">- *Italique*</div>
+                    <div class="editor-line" data-line="7">- ==Surligné==</div>
+                    <div class="editor-line" data-line="8">- ++Souligné++</div>
+                </div>
             </div>
         </div>
     </div>
@@ -271,17 +216,18 @@
         <a href="https://github.com/SorbetUP/c-editor" style="color: #4c6ef5;">GitHub</a>
     </div>
 
-    <input type="file" id="fileInput" accept=".md,.json,.txt" style="display: none;">
-
     <script src="editor.js"></script>
     <script>
         let editorModule = null;
         let isWasmReady = false;
         
-        const editor = document.getElementById('editor');
-        const preview = document.getElementById('preview');
+        const hybridEditor = document.getElementById('hybridEditor');
         const statusIndicator = document.getElementById('statusIndicator');
         const statusText = document.getElementById('statusText');
+        
+        let currentLineIndex = -1;
+        let editorLines = [];
+        let lineContents = [];
 
         // Initialize WASM module
         async function initializeWasm() {
@@ -295,7 +241,6 @@
                 while (typeof EditorModule === 'undefined' && attempts < maxAttempts) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     attempts++;
-                    console.log('Waiting for EditorModule... attempt', attempts);
                 }
                 
                 if (typeof EditorModule !== 'undefined') {
@@ -306,10 +251,39 @@
                     statusText.textContent = 'WASM Ready';
                     console.log('WASM module loaded successfully');
                     
-                    // Re-render si il y a déjà du contenu
-                    if (editor.value.trim()) {
-                        console.log('Re-rendering with WASM now ready...');
-                        await updatePreview();
+                    // Initialize C engine first
+                    console.log('🔧 Initializing C engine...');
+                    try {
+                        const initResult = editorModule.ccall('editor_library_init', 'number', [], []);
+                        console.log('✅ C ENGINE INIT RESULT:', initResult);
+                        
+                        // Enable debug logging
+                        try {
+                            editorModule.ccall('editor_enable_debug_logging', 'void', ['boolean'], [true]);
+                            console.log('✅ C ENGINE DEBUG ENABLED');
+                        } catch (error) {
+                            console.warn('Debug logging not available:', error);
+                        }
+                        
+                        // Test C engine immediately
+                        console.log('🧪 Testing C engine...');
+                        const testJson = editorModule.ccall('editor_parse_markdown_simple', 'string', ['string'], ['**test**']);
+                        console.log('✅ C ENGINE JSON TEST:', testJson);
+                        
+                        // Test new HTML function
+                        const testHtml = editorModule.ccall('editor_markdown_to_html', 'string', ['string'], ['**test**']);
+                        console.log('✅ C ENGINE HTML TEST:', testHtml);
+                    } catch (error) {
+                        console.error('❌ C ENGINE TEST FAILED:', error);
+                    }
+                    
+                    // Re-render lines with C engine
+                    if (editorLines.length > 0) {
+                        editorLines.forEach((line, index) => {
+                            if (index !== currentLineIndex) {
+                                renderLineAsHTML(index);
+                            }
+                        });
                     }
                 } else {
                     throw new Error('EditorModule not found after ' + maxAttempts + ' attempts');
@@ -317,491 +291,664 @@
             } catch (error) {
                 console.warn('WASM not available:', error);
                 statusIndicator.style.background = '#ff6b6b';
-                statusText.textContent = '❌ WASM indisponible';
+                statusText.textContent = '❌ WASM indisponible - Mode JavaScript';
                 isWasmReady = false;
             }
         }
 
-        // Simple markdown renderer fallback
-        function renderMarkdownFallback(text) {
-            if (!text) return 'Le rendu apparaîtra ici en temps réel...';
-            
-            const lines = text.split('\n');
-            let html = '';
-            let inTable = false;
-            let tableHtml = '';
-            
-            for (let i = 0; i < lines.length; i++) {
-                let line = lines[i];
-                
-                // Handle tables
-                if (line.includes('|') && line.trim().length > 0 && !line.match(/^\s*\|?\s*-+\s*\|/)) {
-                    if (!inTable) {
-                        if (html) html += '\n';
-                        tableHtml = '<table>';
-                        inTable = true;
-                    }
-                    
-                    const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell !== '');
-                    
-                    const isHeader = i === 0 || (i > 0 && lines[i+1] && lines[i+1].match(/^\s*\|?\s*-+\s*\|/));
-                    const tag = isHeader ? 'th' : 'td';
-                    
-                    tableHtml += '<tr>';
-                    cells.forEach(cell => {
-                        // Apply inline formatting to cell content
-                        let cellContent = cell
-                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                            .replace(/==(.*?)==/g, '<mark style="background: #ffd93d; color: #000;">$1</mark>')
-                            .replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
-                        tableHtml += `<${tag}>${cellContent}</${tag}>`;
-                    });
-                    tableHtml += '</tr>';
-                    continue;
-                } else if (inTable && !line.match(/^\s*\|?\s*-+\s*\|/)) {
-                    // End table
-                    tableHtml += '</table>';
-                    html += tableHtml;
-                    tableHtml = '';
-                    inTable = false;
-                }
-                
-                // Skip table separator lines
-                if (line.match(/^\s*\|?\s*-+\s*\|/)) {
-                    continue;
-                }
-                
-                // Handle headers
-                if (line.match(/^#{1,6}\s/)) {
-                    const level = line.match(/^#+/)[0].length;
-                    const content = line.replace(/^#+\s*/, '');
-                    html += `<h${level}>${content}</h${level}>`;
-                }
-                // Handle empty lines
-                else if (line.trim() === '') {
-                    if (!inTable) html += '<br>';
-                }
-                // Handle regular text
-                else if (!inTable) {
-                    // Apply inline formatting
-                    let formattedLine = line
-                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                        .replace(/==(.*?)==/g, '<mark style="background: #ffd93d; color: #000;">$1</mark>')
-                        .replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
-                    
-                    html += `<p>${formattedLine}</p>`;
-                }
-            }
-            
-            // Close any open table
-            if (inTable) {
-                tableHtml += '</table>';
-                html += tableHtml;
-            }
+        // FALLBACK COMPLETELY REMOVED - ONLY C ENGINE ALLOWED
 
-            return html;
-        }
-
-        // Convert JSON from C engine to HTML
-        function jsonToHtml(jsonStr) {
+        // Simple JSON to HTML - using C engine JSON output (NOT JavaScript markdown)
+        function jsonToHtmlSimple(jsonStr) {
             try {
                 const doc = JSON.parse(jsonStr);
-                if (!doc.elements) {
-                    return 'Erreur: pas d\'éléments trouvés';
+                if (!doc.elements || doc.elements.length === 0) {
+                    return '';
                 }
                 
                 let html = '';
-                
-                // Group elements by lines based on patterns in the original markdown
-                let lines = [];
-                let currentLine = [];
-                
-                for (let i = 0; i < doc.elements.length; i++) {
-                    const element = doc.elements[i];
+                for (const element of doc.elements) {
                     if (element.type === 'text') {
+                        let text = element.text || '';
                         
-                        // Start new line for headers
-                        if (element.level > 0) {
-                            if (currentLine.length > 0) {
-                                lines.push([...currentLine]);
-                                currentLine = [];
-                            }
-                            currentLine.push(element);
-                            lines.push([...currentLine]);
-                            currentLine = [];
-                        } else {
-                            // For level 0 elements, detect line breaks from markdown patterns
-                            // Based on your input: "== le chat ==", "*l*", "**le**", "***le***", "++le++"
-                            
-                            if (element.text.trim() && currentLine.length > 0) {
-                                // Check if this looks like a new markdown line
-                                const prevElement = currentLine[currentLine.length - 1];
+                        // Use spans if available (C engine output)
+                        if (element.spans && element.spans.length > 0) {
+                            for (const span of element.spans) {
+                                let spanText = span.text || '';
                                 
-                                // New line if:
-                                // 1. Text doesn't start with space and previous doesn't end with space
-                                // 2. Significant style change
-                                if (!element.text.startsWith(' ') && !prevElement.text.endsWith(' ')) {
-                                    // Looks like separate markdown elements -> new line
-                                    lines.push([...currentLine]);
-                                    currentLine = [element];
-                                } else {
-                                    currentLine.push(element);
-                                }
-                            } else {
-                                currentLine.push(element);
+                                if (span.bold) spanText = `<strong>${spanText}</strong>`;
+                                if (span.italic) spanText = `<em>${spanText}</em>`;
+                                if (span.has_underline) spanText = `<u>${spanText}</u>`;
+                                if (span.has_highlight) spanText = `<mark>${spanText}</mark>`;
+                                
+                                html += spanText;
                             }
+                        } else {
+                            // Apply element-level formatting
+                            if (element.bold) text = `<strong>${text}</strong>`;
+                            if (element.italic) text = `<em>${text}</em>`;
+                            if (element.underline) text = `<u>${text}</u>`;
+                            if (element.highlight) text = `<mark>${text}</mark>`;
+                            html += text;
+                        }
+                        
+                        // Handle headers
+                        if (element.level > 0) {
+                            html = `<h${element.level}>${html}</h${element.level}>`;
                         }
                     }
                 }
                 
-                // Add remaining line
-                if (currentLine.length > 0) {
-                    lines.push(currentLine);
-                }
-                
-                // Render each line
-                for (const line of lines) {
-                    if (line.length === 0) continue;
-                    
-                    let lineHtml = '';
-                    let lineLevel = line[0].level;
-                    
-                    for (const element of line) {
-                        lineHtml += renderTextElement(element);
-                    }
-                    
-                    html += wrapLine(lineHtml, lineLevel);
-                }
-                
-                return html || 'Rendu vide';
-            } catch (error) {
-                console.warn('JSON parsing error:', error);
-                return 'Erreur de parsing JSON: ' + error.message;
-            }
-        }
-        
-        function renderTextElement(element) {
-            // If element has spans, render each span separately
-            if (element.spans && element.spans.length > 0) {
-                let html = '';
-                for (const span of element.spans) {
-                    html += renderSpan(span);
-                }
                 return html;
-            }
-            
-            // Fallback to element-level formatting
-            let text = element.text || '';
-            let html = text;
-            
-            // Apply formatting
-            if (element.bold && element.italic) {
-                html = `<strong><em>${html}</em></strong>`;
-            } else if (element.bold) {
-                html = `<strong>${html}</strong>`;
-            } else if (element.italic) {
-                html = `<em>${html}</em>`;
-            }
-            
-            // Apply highlight
-            if (element.highlight) {
-                const [r, g, b, a] = element.highlight.color;
-                const bgColor = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
-                html = `<mark style="background-color: ${bgColor};">${html}</mark>`;
-            }
-            
-            // Apply underline
-            if (element.underline) {
-                const [r, g, b, a] = element.underline.color;
-                const underlineColor = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
-                html = `<u style="text-decoration-color: ${underlineColor};">${html}</u>`;
-            }
-            
-            // Apply color
-            if (element.color) {
-                const [r, g, b, a] = element.color;
-                const color = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
-                html = `<span style="color: ${color};">${html}</span>`;
-            }
-            
-            return html;
-        }
-        
-        function renderSpan(span) {
-            let text = span.text || '';
-            let html = text;
-            
-            // Apply formatting
-            if (span.bold && span.italic) {
-                html = `<strong><em>${html}</em></strong>`;
-            } else if (span.bold) {
-                html = `<strong>${html}</strong>`;
-            } else if (span.italic) {
-                html = `<em>${html}</em>`;
-            }
-            
-            // Apply highlight
-            if (span.has_highlight && span.highlight_color) {
-                const [r, g, b, a] = span.highlight_color;
-                const bgColor = `rgba(${r*255}, ${g*255}, ${b*255}, ${a})`;
-                html = `<mark style="background: ${bgColor}; color: #000;">${html}</mark>`;
-            }
-            
-            // Apply underline
-            if (span.has_underline) {
-                html = `<u>${html}</u>`;
-            }
-            
-            return html;
-        }
-        
-        function wrapLine(content, level) {
-            if (level > 0) {
-                // Header level
-                return `<h${Math.min(level, 6)}>${content}</h${Math.min(level, 6)}>`;
-            } else {
-                // Regular paragraph
-                return `<p>${content}</p>`;
-            }
-        }
-        
-        // Parse inline formatting and create separate elements
-        function fixInlineFormatting(originalText, jsonStr) {
-            try {
-                const doc = JSON.parse(jsonStr);
-                
-                if (!doc.elements || doc.elements.length === 0) {
-                    return jsonStr;
-                }
-                
-                // Parse the original text and create separate elements
-                const parsedElements = parseInlineElements(originalText, doc.elements[0]);
-                
-                if (parsedElements.length > 1) {
-                    doc.elements = parsedElements;
-                    console.log(`Separated into ${parsedElements.length} elements:`, parsedElements.map(e => `"${e.text}"`));
-                }
-                
-                return JSON.stringify(doc);
             } catch (error) {
-                console.warn('Error fixing inline formatting:', error);
-                return jsonStr;
+                console.warn('C ENGINE JSON parsing error:', error);
+                return '';
+            }
+        }
+
+        // Get current cursor line
+        function getCurrentLineElement() {
+            const selection = window.getSelection();
+            if (selection.rangeCount === 0) return null;
+            
+            let node = selection.anchorNode;
+            
+            // Find the parent .editor-line element
+            while (node && node !== hybridEditor) {
+                if (node.classList && node.classList.contains('editor-line')) {
+                    return node;
+                }
+                node = node.parentNode;
+            }
+            
+            return null;
+        }
+        
+        // Update line states (current vs rendered)
+        function updateLineStates() {
+            const currentLine = getCurrentLineElement();
+            const newLineIndex = currentLine ? parseInt(currentLine.dataset.line) : -1;
+            
+            if (newLineIndex === currentLineIndex) return; // No change
+            
+            console.log('Line changed from', currentLineIndex, 'to', newLineIndex);
+            
+            // Render the previously current line (if any)
+            if (currentLineIndex >= 0 && editorLines[currentLineIndex]) {
+                renderLineAsHTML(currentLineIndex);
+            }
+            
+            // Calculate cursor position in the new line BEFORE switching it to markdown
+            let targetCursorPosition = 0;
+            if (newLineIndex >= 0 && editorLines[newLineIndex]) {
+                const newLine = editorLines[newLineIndex];
+                const selection = window.getSelection();
+                if (selection.rangeCount > 0) {
+                    try {
+                        const range = selection.getRangeAt(0);
+                        if (newLine.contains(range.startContainer) || range.startContainer === newLine) {
+                            const htmlPosition = calculatePlainTextPosition(newLine);
+                            const markdownContent = lineContents[newLineIndex] || '';
+                            targetCursorPosition = mapHtmlPositionToMarkdown(htmlPosition, markdownContent);
+                            console.log(`📍 HTML position: ${htmlPosition}, Markdown position: ${targetCursorPosition}`);
+                        }
+                    } catch (error) {
+                        console.warn('Error calculating cursor position:', error);
+                    }
+                }
+            }
+            
+            // Switch new current line to raw markdown
+            currentLineIndex = newLineIndex;
+            if (currentLineIndex >= 0 && editorLines[currentLineIndex]) {
+                showLineAsMarkdownWithPosition(currentLineIndex, targetCursorPosition);
+            }
+            
+            updateLineClasses();
+        }
+        
+        // Update CSS classes for current/rendered lines
+        function updateLineClasses() {
+            editorLines.forEach((line, index) => {
+                line.classList.remove('current-line', 'rendered-line');
+                if (index === currentLineIndex) {
+                    line.classList.add('current-line');
+                } else {
+                    line.classList.add('rendered-line');
+                }
+            });
+        }
+        
+        // C ENGINE HTML - TRY DIRECT HTML FIRST, FALLBACK TO JSON TEMPORARILY
+        function renderSingleLine(line) {
+            if (!line.trim()) return '&nbsp;';
+            
+            // C engine MUST be ready - no fallback
+            if (!isWasmReady || !editorModule) {
+                console.error('❌ C ENGINE NOT READY - CANNOT RENDER');
+                throw new Error('C ENGINE NOT READY');
+            }
+            
+            // Try direct HTML function first
+            try {
+                const html = editorModule.ccall('editor_markdown_to_html', 'string', ['string'], [line]);
+                if (html) {
+                    console.log(`✅ C ENGINE HTML DIRECT: "${line}" -> "${html}"`);
+                    return html;
+                }
+            } catch (error) {
+                console.warn('HTML function failed, trying JSON approach:', error);
+            }
+            
+            // Fallback to JSON approach (still using C engine)
+            try {
+                const jsonStr = editorModule.ccall('editor_parse_markdown_simple', 'string', ['string'], [line]);
+                if (jsonStr) {
+                    const html = jsonToHtmlSimple(jsonStr);
+                    console.log(`✅ C ENGINE JSON: "${line}" -> "${html}"`);
+                    return html;
+                }
+            } catch (error) {
+                console.error('❌ C ENGINE COMPLETELY FAILED:', error);
+                throw new Error('C ENGINE FAILED');
+            }
+            
+            throw new Error('C ENGINE RETURNED EMPTY');
+        }
+        
+        // Escape HTML characters
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Calculate cursor position in plain text from HTML cursor position
+        function calculatePlainTextPosition(htmlElement) {
+            try {
+                const selection = window.getSelection();
+                if (selection.rangeCount === 0) return 0;
+                
+                const range = selection.getRangeAt(0);
+                const preCaretRange = range.cloneRange();
+                preCaretRange.selectNodeContents(htmlElement);
+                preCaretRange.setEnd(range.startContainer, range.startOffset);
+                
+                // Get the text content up to the cursor position
+                const textBeforeCursor = preCaretRange.toString();
+                return textBeforeCursor.length;
+            } catch (error) {
+                console.warn('Error calculating plain text position:', error);
+                return 0;
             }
         }
         
-        // Parse text with inline formatting into separate elements
-        function parseInlineElements(text, baseElement) {
-            const elements = [];
-            let currentIndex = 0;
-            
-            // Define formatting patterns in order of precedence
+        // Map position from rendered HTML text to markdown text position
+        function mapHtmlPositionToMarkdown(htmlPosition, markdownText) {
+            // Common markdown patterns and their adjustments
             const patterns = [
-                { regex: /\*\*\*(.+?)\*\*\*/, bold: true, italic: true },
-                { regex: /\*\*(.+?)\*\*/, bold: true, italic: false },
-                { regex: /\*(.+?)\*/, bold: false, italic: true },
-                { regex: /==(.+?)==/, highlight: true },
-                { regex: /\+\+(.+?)\+\+/, underline: true }
+                // Headers: # Title -> position needs +2 (# + space)
+                { regex: /^(#{1,6})\s+/, prefix: true },
+                // Bold: **text** -> position in middle needs +2 for **
+                { regex: /\*\*(.*?)\*\*/, wrapper: true, chars: 2 },
+                // Italic: *text* -> position in middle needs +1 for *
+                { regex: /\*([^*]*?)\*/, wrapper: true, chars: 1 },
+                // Strikethrough: ~~text~~ -> position in middle needs +2 for ~~
+                { regex: /~~(.*?)~~/, wrapper: true, chars: 2 },
+                // Highlight: ==text== -> position in middle needs +2 for ==
+                { regex: /==(.*?)==/, wrapper: true, chars: 2 },
+                // Underline: ++text++ -> position in middle needs +2 for ++
+                { regex: /\+\+(.*?)\+\+/, wrapper: true, chars: 2 },
             ];
             
-            while (currentIndex < text.length) {
-                let foundMatch = false;
-                let earliestMatch = null;
-                let earliestIndex = text.length;
-                
-                // Find the earliest formatting pattern
-                for (const pattern of patterns) {
-                    const match = text.slice(currentIndex).match(pattern.regex);
-                    if (match && match.index < earliestIndex - currentIndex) {
-                        earliestMatch = {
-                            ...pattern,
-                            match: match,
-                            startIndex: currentIndex + match.index,
-                            endIndex: currentIndex + match.index + match[0].length
-                        };
-                        earliestIndex = earliestMatch.startIndex;
+            let adjustedPosition = htmlPosition;
+            let currentOffset = 0;
+            
+            // Handle prefix patterns (like headers)
+            for (const pattern of patterns) {
+                if (pattern.prefix) {
+                    const match = markdownText.match(pattern.regex);
+                    if (match) {
+                        // For headers, all positions after the prefix need adjustment
+                        const prefixLength = match[1].length + 1; // # + space
+                        adjustedPosition += prefixLength;
+                        console.log(`📊 Header detected: adding ${prefixLength} chars`);
+                        break;
                     }
-                }
-                
-                if (earliestMatch) {
-                    // Add text before the formatting (if any)
-                    if (earliestMatch.startIndex > currentIndex) {
-                        const beforeText = text.slice(currentIndex, earliestMatch.startIndex);
-                        elements.push({
-                            type: "text",
-                            text: beforeText,
-                            align: baseElement.align,
-                            color: baseElement.color,
-                            bold: false,
-                            italic: false,
-                            level: baseElement.level
-                        });
-                    }
-                    
-                    // Add the formatted element
-                    const formattedElement = {
-                        type: "text",
-                        text: earliestMatch.match[1],
-                        align: baseElement.align,
-                        color: baseElement.color,
-                        bold: earliestMatch.bold || false,
-                        italic: earliestMatch.italic || false,
-                        level: baseElement.level
-                    };
-                    
-                    if (earliestMatch.highlight) {
-                        formattedElement.highlight = { color: [1.000, 1.000, 0.000, 0.300] };
-                    }
-                    if (earliestMatch.underline) {
-                        formattedElement.underline = { color: [0.000, 0.000, 0.000, 0.400], gap: 7 };
-                    }
-                    
-                    elements.push(formattedElement);
-                    currentIndex = earliestMatch.endIndex;
-                    foundMatch = true;
-                } else {
-                    // No more formatting, add remaining text
-                    const remainingText = text.slice(currentIndex);
-                    if (remainingText) {
-                        elements.push({
-                            type: "text",
-                            text: remainingText,
-                            align: baseElement.align,
-                            color: baseElement.color,
-                            bold: false,
-                            italic: false,
-                            level: baseElement.level
-                        });
-                    }
-                    break;
                 }
             }
             
-            return elements.length > 0 ? elements : [baseElement];
-        }
-        
-        // Pre-process text to separate inline formatting for the C engine
-        function preprocessInlineFormatting(text) {
-            // This is a workaround: instead of sending "***le*** ==chat==" as one line,
-            // we could try to hint the C parser to separate elements
-            // But this approach might be complex. Let's try a different strategy.
-            
-            // For now, return the original text and handle the separation in post-processing
-            console.log('Preprocessing text:', text);
-            return text;
-        }
-
-        // Render markdown using WASM or fallback
-        async function renderMarkdown(text) {
-            // Si WASM n'est pas encore prêt, attendre un peu
-            if (!isWasmReady && !editorModule) {
-                let attempts = 0;
-                const maxWait = 10; // 1 seconde max
-                
-                while (!isWasmReady && attempts < maxWait) {
-                    console.log('Waiting for WASM to be ready...', attempts);
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    attempts++;
-                }
-            }
-            
-            console.log('renderMarkdown called with:', text.substring(0, 50));
-            console.log('isWasmReady:', isWasmReady, 'editorModule:', !!editorModule);
-            
-            if (isWasmReady && editorModule) {
-                try {
-                    console.log('Trying WASM functions...');
+            // Handle wrapper patterns (like bold, italic, etc.)
+            for (const pattern of patterns) {
+                if (pattern.wrapper) {
+                    let match;
+                    let searchFrom = 0;
                     
-                    // Initialize library (idempotent)
-                    editorModule.ccall('editor_library_init', null, [], []);
-                    
-                    // Pre-process text to separate inline formatting
-                    const processedText = preprocessInlineFormatting(text);
-                    
-                    // Utiliser la fonction simple qui retourne directement le JSON
-                    const jsonResult = editorModule.ccall('editor_parse_markdown_simple', 'string', ['string'], [processedText]);
-                    
-                    if (jsonResult) {
-                        console.log('Using C markdown engine ✅');
-                        console.log('Full JSON from C engine:', jsonResult);
+                    while ((match = pattern.regex.exec(markdownText)) !== null) {
+                        const fullMatch = match[0];
+                        const innerText = match[1];
+                        const startPos = match.index;
+                        const innerStartPos = startPos + pattern.chars;
+                        const innerEndPos = innerStartPos + innerText.length;
                         
-                        return jsonToHtml(jsonResult);
-                    } else {
-                        console.log('C function returned null');
-                        const errorMsg = editorModule.ccall('editor_get_error_message', 'string', [], []);
-                        console.log('Error message:', errorMsg || 'No error message available');
-                        return '<p style="color: orange;">⚠️ Résultat vide du moteur C</p>';
+                        // If cursor is inside this wrapper, add the prefix chars
+                        const renderedStart = startPos - currentOffset;
+                        const renderedEnd = renderedStart + innerText.length;
+                        
+                        if (htmlPosition >= renderedStart && htmlPosition <= renderedEnd) {
+                            adjustedPosition += pattern.chars;
+                            console.log(`📊 Wrapper detected (${fullMatch}): adding ${pattern.chars} chars`);
+                            break;
+                        }
+                        
+                        // If cursor is after this wrapper, account for hidden chars
+                        if (htmlPosition > renderedEnd) {
+                            currentOffset += pattern.chars * 2; // opening + closing
+                        }
+                        
+                        // Prevent infinite loop
+                        if (pattern.regex.lastIndex === 0) break;
                     }
-                } catch (error) {
-                    console.warn('WASM render failed:', error);
-                    return '<p style="color: orange;">⚠️ Erreur moteur markdown C: ' + error.message + '</p>';
-                }
-            }
-            
-            console.log('WASM not available - showing loading message');
-            return '<p style="color: #ffd93d;">🔄 Chargement du moteur markdown...</p>';
-        }
-
-        // Cache for rendered lines
-        let cachedLines = [];
-        let lastText = '';
-        
-        // Update preview - only re-render changed lines
-        async function updatePreview() {
-            const text = editor.value;
-            const lines = text.split('\n');
-            
-            // Find which line changed
-            const lastLines = lastText.split('\n');
-            
-            // Create array to hold rendered lines
-            let renderedLines = [...cachedLines];
-            
-            // Extend arrays to match current length
-            while (renderedLines.length < lines.length) {
-                renderedLines.push('');
-            }
-            
-            // Check each line for changes
-            for (let i = 0; i < lines.length; i++) {
-                const currentLine = lines[i];
-                const lastLine = i < lastLines.length ? lastLines[i] : '';
-                
-                // Only re-render if line changed
-                if (currentLine !== lastLine) {
-                    console.log(`Re-rendering line ${i}: "${currentLine}"`);
                     
-                    if (currentLine.trim()) {
-                        const lineHtml = await renderMarkdown(currentLine.trim());
-                        renderedLines[i] = lineHtml;
-                    } else {
-                        renderedLines[i] = '<br>'; // Empty line
-                    }
+                    // Reset regex lastIndex for next pattern
+                    pattern.regex.lastIndex = 0;
                 }
             }
             
-            // Remove excess lines if text got shorter
-            if (renderedLines.length > lines.length) {
-                renderedLines = renderedLines.slice(0, lines.length);
+            console.log(`📍 Position mapping: HTML ${htmlPosition} -> Markdown ${adjustedPosition}`);
+            return adjustedPosition;
+        }
+        
+        // Show line as raw markdown text with specific cursor position
+        function showLineAsMarkdownWithPosition(lineIndex, targetCursorPosition = 0) {
+            const line = editorLines[lineIndex];
+            if (!line) return;
+            
+            // Get the stored markdown content
+            const markdownContent = lineContents[lineIndex] || '';
+            
+            // Set as plain text (markdown source)
+            line.innerHTML = '';
+            line.textContent = markdownContent;
+            
+            // Ensure line is focusable and editable
+            line.setAttribute('contenteditable', 'true');
+            
+            // Restore cursor position if specified
+            if (targetCursorPosition > 0) {
+                setTimeout(() => {
+                    try {
+                        line.focus();
+                        
+                        const range = document.createRange();
+                        const newSelection = window.getSelection();
+                        
+                        // Ensure we don't exceed the text length
+                        const textNode = line.firstChild;
+                        if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+                            const maxPos = textNode.textContent.length;
+                            const safePosition = Math.min(targetCursorPosition, maxPos);
+                            
+                            range.setStart(textNode, safePosition);
+                            range.collapse(true);
+                            newSelection.removeAllRanges();
+                            newSelection.addRange(range);
+                            
+                            console.log(`✅ Cursor restored to position ${safePosition} in markdown`);
+                        }
+                    } catch (error) {
+                        console.warn('Error restoring cursor position:', error);
+                    }
+                }, 10);
             }
             
-            // Update cache
-            cachedLines = [...renderedLines];
-            lastText = text;
+            console.log(`✅ Line ${lineIndex} switched to markdown: "${markdownContent}"`);
+        }
+        
+        // Show line as raw markdown text (legacy function for compatibility)
+        function showLineAsMarkdown(lineIndex) {
+            showLineAsMarkdownWithPosition(lineIndex, 0);
+        }
+        
+        // Render line as HTML - C ENGINE ONLY
+        function renderLineAsHTML(lineIndex) {
+            const line = editorLines[lineIndex];
+            if (!line) return;
             
-            // Update DOM
-            preview.innerHTML = renderedLines.join('');
+            // ALWAYS update content from current line text when it was in markdown mode
+            if (lineIndex === currentLineIndex) {
+                lineContents[lineIndex] = line.textContent || '';
+                console.log(`💾 Saved line ${lineIndex} content:`, lineContents[lineIndex]);
+            }
+            
+            const markdownText = lineContents[lineIndex] || '';
+            console.log(`🔄 Rendering line ${lineIndex} as HTML:`, markdownText);
+            
+            if (!markdownText.trim()) {
+                line.innerHTML = '&nbsp;';
+                return;
+            }
+            
+            // C ENGINE ONLY - if it fails, we debug and fix the C code
+            try {
+                const renderedHtml = renderSingleLine(markdownText);
+                line.innerHTML = renderedHtml;
+                console.log(`✅ Line ${lineIndex} rendered:`, renderedHtml);
+            } catch (error) {
+                console.error(`❌ C ENGINE FAILED for line ${lineIndex}:`, error);
+                console.error('❌ MUST DEBUG AND FIX C ENGINE');
+                line.innerHTML = `<span style="color: red;">❌ C ENGINE ERROR</span>`;
+            }
+        }
+        
+        // Handle Enter key - create new line
+        function handleEnterKey() {
+            console.log('🔄 Enter key pressed');
+            
+            // Save current line content
+            if (currentLineIndex >= 0 && editorLines[currentLineIndex]) {
+                lineContents[currentLineIndex] = editorLines[currentLineIndex].textContent || '';
+            }
+            
+            // Create new line element
+            const newLine = document.createElement('div');
+            newLine.className = 'editor-line';
+            newLine.textContent = '';
+            
+            // Insert after current line
+            const currentLine = editorLines[currentLineIndex];
+            if (currentLine && currentLine.nextSibling) {
+                hybridEditor.insertBefore(newLine, currentLine.nextSibling);
+            } else {
+                hybridEditor.appendChild(newLine);
+            }
+            
+            // Update arrays
+            editorLines.splice(currentLineIndex + 1, 0, newLine);
+            lineContents.splice(currentLineIndex + 1, 0, '');
+            
+            // Update line numbers
+            editorLines.forEach((line, index) => {
+                line.dataset.line = index;
+            });
+            
+            // Move to new line
+            currentLineIndex++;
+            updateLineStates();
+            
+            // Focus new line
+            const range = document.createRange();
+            const selection = window.getSelection();
+            range.setStart(newLine, 0);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+        }
+        
+        // Check if cursor is at line start
+        function isAtLineStart(lineElement) {
+            const selection = window.getSelection();
+            if (selection.rangeCount === 0) return true; // Default to true for empty selection
+            
+            const range = selection.getRangeAt(0);
+            const offset = range.startOffset;
+            
+            // If empty line, cursor is at start
+            if (!lineElement.textContent || lineElement.textContent.length === 0) {
+                return true;
+            }
+            
+            return offset === 0;
+        }
+        
+        // Check if cursor is at line end
+        function isAtLineEnd(lineElement) {
+            const selection = window.getSelection();
+            if (selection.rangeCount === 0) return true; // Default to true for empty selection
+            
+            const range = selection.getRangeAt(0);
+            const textLength = lineElement.textContent ? lineElement.textContent.length : 0;
+            
+            // If empty line, cursor is at end
+            if (textLength === 0) {
+                return true;
+            }
+            
+            return range.startOffset >= textLength;
+        }
+        
+        // Handle backspace at line start (merge with previous line)
+        function handleBackspaceAtLineStart(lineIndex) {
+            console.log(`🔄 Backspace at line start: ${lineIndex}`);
+            
+            if (lineIndex === 0) return; // Can't merge first line
+            
+            const currentLine = editorLines[lineIndex];
+            const previousLine = editorLines[lineIndex - 1];
+            
+            // Get content of both lines
+            const currentContent = lineContents[lineIndex] || currentLine.textContent || '';
+            const previousContent = lineContents[lineIndex - 1] || '';
+            
+            // Merge content
+            const mergedContent = previousContent + currentContent;
+            
+            console.log(`🔗 Merging: "${previousContent}" + "${currentContent}" = "${mergedContent}"`);
+            
+            // Update previous line content
+            lineContents[lineIndex - 1] = mergedContent;
+            
+            // Remove current line
+            currentLine.remove();
+            editorLines.splice(lineIndex, 1);
+            lineContents.splice(lineIndex, 1);
+            
+            // Re-index remaining lines
+            editorLines.forEach((line, index) => {
+                line.dataset.line = index;
+            });
+            
+            // Move to previous line and position cursor at merge point
+            currentLineIndex = lineIndex - 1;
+            const mergeLine = editorLines[currentLineIndex];
+            
+            // Switch to markdown mode
+            showLineAsMarkdown(currentLineIndex);
+            updateLineStates();
+            
+            // Position cursor at merge point
+            setTimeout(() => {
+                mergeLine.focus();
+                const range = document.createRange();
+                const selection = window.getSelection();
+                range.setStart(mergeLine.firstChild || mergeLine, previousContent.length);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }, 10);
+        }
+        
+        // Handle delete at line end (merge with next line)
+        function handleDeleteAtLineEnd(lineIndex) {
+            console.log(`🔄 Delete at line end: ${lineIndex}`);
+            
+            if (lineIndex >= editorLines.length - 1) return; // Can't merge last line
+            
+            const currentLine = editorLines[lineIndex];
+            const nextLine = editorLines[lineIndex + 1];
+            
+            // Get content of both lines
+            const currentContent = lineContents[lineIndex] || currentLine.textContent || '';
+            const nextContent = lineContents[lineIndex + 1] || '';
+            
+            // Merge content
+            const mergedContent = currentContent + nextContent;
+            
+            console.log(`🔗 Merging: "${currentContent}" + "${nextContent}" = "${mergedContent}"`);
+            
+            // Update current line content
+            lineContents[lineIndex] = mergedContent;
+            currentLine.textContent = mergedContent;
+            
+            // Remove next line
+            nextLine.remove();
+            editorLines.splice(lineIndex + 1, 1);
+            lineContents.splice(lineIndex + 1, 1);
+            
+            // Re-index remaining lines
+            editorLines.forEach((line, index) => {
+                line.dataset.line = index;
+            });
+            
+            // Position cursor at merge point
+            setTimeout(() => {
+                currentLine.focus();
+                const range = document.createRange();
+                const selection = window.getSelection();
+                range.setStart(currentLine.firstChild || currentLine, currentContent.length);
+                range.collapse(true);
+                selection.removeAllRanges();
+                selection.addRange(range);
+            }, 10);
+        }
+        
+        // Handle line changes (for other cases)
+        function handleLineChange() {
+            console.log('🔄 Line change detected');
+            
+            // Re-scan editor lines
+            const newEditorLines = Array.from(hybridEditor.querySelectorAll('.editor-line'));
+            
+            if (newEditorLines.length !== editorLines.length) {
+                console.log(`📊 Line count changed: ${editorLines.length} -> ${newEditorLines.length}`);
+                
+                // Update arrays
+                editorLines = newEditorLines;
+                
+                // Re-index lines
+                editorLines.forEach((line, index) => {
+                    line.dataset.line = index;
+                });
+                
+                // Adjust currentLineIndex if necessary
+                if (currentLineIndex >= editorLines.length) {
+                    currentLineIndex = editorLines.length - 1;
+                }
+                
+                updateLineStates();
+            }
+        }
+        
+        // Initialize hybrid editor
+        function initializeHybridEditor() {
+            console.log('Initializing hybrid editor...');
+            
+            // Get all editor lines
+            editorLines = Array.from(hybridEditor.querySelectorAll('.editor-line'));
+            
+            // Initialize line contents array
+            editorLines.forEach((line, index) => {
+                lineContents[index] = line.textContent || '';
+                line.dataset.line = index;
+            });
+            
+            // Set up event listeners
+            hybridEditor.addEventListener('click', () => {
+                setTimeout(updateLineStates, 10); // Small delay for cursor to settle
+            });
+            
+            hybridEditor.addEventListener('keyup', () => {
+                setTimeout(updateLineStates, 10);
+            });
+            
+            hybridEditor.addEventListener('focus', () => {
+                setTimeout(updateLineStates, 10);
+            });
+            
+            // Handle keyboard events
+            hybridEditor.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleEnterKey();
+                } else if (e.key === 'Backspace') {
+                    // Handle backspace specially for line merging
+                    const currentLine = getCurrentLineElement();
+                    if (currentLine) {
+                        const lineIndex = parseInt(currentLine.dataset.line);
+                        const currentContent = currentLine.textContent || '';
+                        const cursorAtStart = isAtLineStart(currentLine);
+                        
+                        console.log(`🔍 Backspace: line ${lineIndex}, content: "${currentContent}", at start: ${cursorAtStart}`);
+                        
+                        // If line is empty OR cursor is at start, merge with previous line
+                        if ((currentContent.trim() === '' || cursorAtStart) && lineIndex > 0) {
+                            e.preventDefault();
+                            handleBackspaceAtLineStart(lineIndex);
+                        }
+                    }
+                } else if (e.key === 'Delete') {
+                    // Handle delete key for line merging
+                    const currentLine = getCurrentLineElement();
+                    if (currentLine) {
+                        const lineIndex = parseInt(currentLine.dataset.line);
+                        const currentContent = currentLine.textContent || '';
+                        const cursorAtEnd = isAtLineEnd(currentLine);
+                        
+                        console.log(`🔍 Delete: line ${lineIndex}, content: "${currentContent}", at end: ${cursorAtEnd}`);
+                        
+                        // If cursor is at end and there's a next line to merge
+                        if (cursorAtEnd && lineIndex < editorLines.length - 1) {
+                            e.preventDefault();
+                            handleDeleteAtLineEnd(lineIndex);
+                        }
+                    }
+                }
+            });
+            
+            // Handle input changes
+            hybridEditor.addEventListener('input', () => {
+                // Update line contents for current line
+                if (currentLineIndex >= 0 && editorLines[currentLineIndex]) {
+                    lineContents[currentLineIndex] = editorLines[currentLineIndex].textContent || '';
+                    console.log(`📝 Updated line ${currentLineIndex}:`, lineContents[currentLineIndex]);
+                }
+            });
+            
+            // Initial render - render all lines as HTML first
+            editorLines.forEach((line, index) => {
+                renderLineAsHTML(index);
+            });
+            
+            // Then set first line as current (markdown)
+            setTimeout(() => {
+                currentLineIndex = 0;
+                showLineAsMarkdown(0);
+                updateLineClasses();
+                
+                // Focus first line
+                if (editorLines[0]) {
+                    editorLines[0].focus();
+                    
+                    // Place cursor at start
+                    const range = document.createRange();
+                    const selection = window.getSelection();
+                    range.setStart(editorLines[0], 0);
+                    range.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
+            }, 100);
         }
 
         // Export functions
         function exportMarkdown() {
-            const content = editor.value;
+            // Collect all line contents as markdown
+            const content = lineContents.join('\n');
             downloadFile('document.md', content);
         }
 
         function exportJSON() {
-            const content = editor.value;
+            const content = lineContents.join('\n');
             if (isWasmReady && editorModule) {
                 try {
                     const json = editorModule.ccall('editor_parse_markdown', 'string', ['string'], [content]);
@@ -822,8 +969,17 @@
         }
 
         function exportHTML() {
-            const content = editor.value;
-            const html = renderMarkdown(content);
+            let html = '';
+            
+            lineContents.forEach(line => {
+                if (line.trim()) {
+                    const renderedLine = renderSingleLine(line);
+                    html += renderedLine + '\n';
+                } else {
+                    html += '<br>\n';
+                }
+            });
+            
             const fullHtml = `<!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -834,10 +990,8 @@
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
                max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
         h1, h2, h3, h4, h5, h6 { margin-top: 2em; margin-bottom: 0.5em; }
-        table { border-collapse: collapse; width: 100%; margin: 20px 0; }
-        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
-        th { background: #f5f5f5; }
         mark { background: #ffd93d; }
+        u { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -845,10 +999,6 @@ ${html}
 </body>
 </html>`;
             downloadFile('document.html', fullHtml);
-        }
-
-        function importFile() {
-            document.getElementById('fileInput').click();
         }
 
         function downloadFile(filename, content) {
@@ -863,36 +1013,10 @@ ${html}
             window.URL.revokeObjectURL(url);
         }
 
-        // Event listeners
-        editor.addEventListener('input', updatePreview);
-        editor.addEventListener('keydown', function(e) {
-            // Tab key support
-            if (e.key === 'Tab') {
-                e.preventDefault();
-                const start = this.selectionStart;
-                const end = this.selectionEnd;
-                this.value = this.value.substring(0, start) + '    ' + this.value.substring(end);
-                this.selectionStart = this.selectionEnd = start + 4;
-                updatePreview();
-            }
-        });
-
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    editor.value = e.target.result;
-                    updatePreview();
-                };
-                reader.readAsText(file);
-            }
-        });
-
         // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeWasm();
-            updatePreview();
+        document.addEventListener('DOMContentLoaded', async function() {
+            await initializeWasm();
+            initializeHybridEditor();
         });
     </script>
 </body>
