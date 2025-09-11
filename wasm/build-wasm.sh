@@ -36,7 +36,6 @@ EMCC_FLAGS=(
     -s STACK_SIZE=512KB
     -s MODULARIZE=1
     -s EXPORT_NAME='"EditorModule"'
-    -s USE_ES6_IMPORT_META=0
     --no-entry
 )
 
