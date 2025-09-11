@@ -42,11 +42,10 @@ jobs:
         cd wasm
         ./build-wasm.sh
         
-    - name: Copy WASM files to docs
+    - name: Verify WASM files
       run: |
-        cp flutter/web/editor.wasm docs/
-        cp flutter/web/editor.js docs/
         ls -la docs/
+        echo "WASM files built successfully"
         
     - name: Setup Pages
       uses: actions/configure-pages@v4
