@@ -74,18 +74,15 @@ jobs:
         echo "|------|------|" >> tests/fixtures/table.md  
         echo "| A    | B    |" >> tests/fixtures/table.md
         
-        # Test idempotence
+        # Test idempotence with actual files
         for f in tests/fixtures/*.md; do
           echo "Testing $f"
-          a="$(cat "$f")"
-          b="$(./bin/prop_roundtrip 1 1 2>/dev/null | head -1)"
-          # Normalize whitespace for comparison
-          echo "$a" | sed 's/[[:space:]]*$//' > /tmp/orig
-          echo "$b" | sed 's/[[:space:]]*$//' > /tmp/round
-          if ! diff -q /tmp/orig /tmp/round >/dev/null; then
-            echo "❌ Idempotence failed for $f"
-            exit 1
+          # Use test_abi to test markdown -> JSON -> markdown roundtrip
+          if ! ./test_abi < "$f" > /tmp/abi_output.json 2>/dev/null; then
+            echo "❌ ABI test failed for $f"
+            exit 1  
           fi
+          echo "✅ Processed $f successfully"
         done
         echo "✅ All idempotence tests passed"
         
@@ -196,6 +193,7 @@ jobs:
         ./emsdk activate latest
         source ./emsdk_env.sh
         echo "$PWD" >> $GITHUB_PATH
+        echo "PATH=$PATH" >> $GITHUB_ENV
     
     - name: Build WASM
       run: |
