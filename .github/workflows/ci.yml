@@ -39,8 +39,10 @@ jobs:
     - name: Build with sanitizers
       run: |
         make clean
-        ${{ matrix.compiler }} -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -Wall -Wextra -Werror -Isrc tests/test_inline_loop.c src/*.c -o test_asan -lm
-        ASAN_OPTIONS=halt_on_error=1:strict_string_checks=1 ./test_asan
+        CC=${{ matrix.compiler }} CFLAGS="-std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -Wall -Wextra -Werror" make -j
+        mkdir -p bin
+        ${{ matrix.compiler }} -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -Wall -Wextra -Werror -I./src tests/prop_roundtrip.c libeditor.a -o bin/prop_roundtrip -lm
+        ASAN_OPTIONS=halt_on_error=1:strict_string_checks=1 ./bin/prop_roundtrip 12345 100
     
     - name: Run Valgrind (Ubuntu only)
       if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc'
@@ -62,14 +64,16 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Build library
+    - name: Build library with sanitizers
       run: |
         make clean
-        CC=clang CFLAGS="-std=c11 -Wall -Wextra -Werror -O1 -g" make -j
+        CC=clang CFLAGS="-std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" make -j
     
     - name: Build fuzz tests with sanitizers
       run: |
-        CC=clang CFLAGS="-std=c11 -Wall -Wextra -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" make bin/prop_roundtrip bin/fuzz_markdown
+        mkdir -p bin
+        clang -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I./src tests/prop_roundtrip.c libeditor.a -o bin/prop_roundtrip -lm
+        clang -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -I./src tests/fuzz_markdown.c libeditor.a -o bin/fuzz_markdown -lm
     
     - name: Run property tests (fast)
       run: |

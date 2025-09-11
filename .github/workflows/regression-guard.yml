@@ -27,6 +27,8 @@ jobs:
       run: |
         make clean
         make -j$(nproc)
+        mkdir -p bin
+        gcc -std=c11 -Wall -Wextra -I./src tests/prop_roundtrip.c libeditor.a -o bin/prop_roundtrip -lm
         
     - name: Unit tests
       run: |
@@ -44,14 +46,18 @@ jobs:
       run: |
         ./bin/prop_roundtrip 999 1000 | tee prop_999.log
         
-    - name: Fuzz tests (disabled)
+    - name: Fuzz tests
       run: |
-        echo "⚠️ LibFuzzer tests disabled - compilation issues with CI environment"
+        mkdir -p bin
+        clang -std=c11 -Wall -Wextra -g -O1 -I./src tests/fuzz_markdown.c libeditor.a -o bin/fuzz_markdown -lm
+        ./bin/fuzz_markdown 98765 500
         
     - name: AddressSanitizer tests
       run: |
         CC=clang CFLAGS="-std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1" \
           make clean && make
+        mkdir -p bin
+        clang -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g -O1 -Wall -Wextra -I./src tests/prop_roundtrip.c libeditor.a -o bin/prop_roundtrip -lm
         ASAN_OPTIONS=halt_on_error=1 ./bin/prop_roundtrip 12345 100
         
     - name: Idempotence validation
@@ -176,9 +182,34 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
-    - name: Skip Flutter tests
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.24.0'
+        channel: 'stable'
+    
+    - name: Install Emscripten
       run: |
-        echo "⚠️ Flutter tests skipped - requires proper test setup and FFI configuration"
+        git clone https://github.com/emscripten-core/emsdk.git
+        cd emsdk
+        ./emsdk install latest
+        ./emsdk activate latest
+        source ./emsdk_env.sh
+        echo "$PWD" >> $GITHUB_PATH
+    
+    - name: Build WASM
+      run: |
+        cd wasm && ./build-wasm.sh
+    
+    - name: Test Flutter build
+      run: |
+        cd flutter
+        flutter pub get
+        flutter build web --web-renderer html
+    
+    - name: Test GitHub Pages functionality
+      run: |
+        ./test-page-functionality.sh
 
   performance-smoke:
     name: Performance Smoke Tests
