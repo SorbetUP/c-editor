@@ -1016,7 +1016,8 @@ int json_to_markdown(const Document *doc, char **out_markdown) {
   fseek(fp, 0, SEEK_SET);
 
   *out_markdown = malloc(len + 1);
-  fread(*out_markdown, 1, len, fp);
+  size_t bytes_read = fread(*out_markdown, 1, len, fp);
+  (void)bytes_read; // Suppress unused variable warning
   (*out_markdown)[len] = '\0';
 
   fclose(fp);

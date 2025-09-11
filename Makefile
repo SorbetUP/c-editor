@@ -23,7 +23,7 @@ TEST_EXECUTABLE = run_tests
 
 .PHONY: all clean test debug sanitize
 
-all: $(LIBRARY) test_abi
+all: $(LIBRARY) test_abi $(FUZZ_TESTS_BIN)
 
 $(LIBRARY): $(OBJECTS) | $(OBJDIR)
 	ar rcs $@ $^
