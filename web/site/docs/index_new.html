@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C Editor Web - Éditeur Hybride</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .header {
+            background: #2d2d2d;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #444;
+        }
+
+        .header h1 {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ffa500;
+        }
+
+        .status-indicator.ready {
+            background: #51cf66;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            background: #4c6ef5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #364fc7;
+        }
+
+        .main-content {
+            display: flex;
+            height: calc(100vh - 60px);
+        }
+
+        .hybrid-editor {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pane-header {
+            background: #2d2d2d;
+            padding: 10px 20px;
+            border-bottom: 1px solid #444;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .hybrid-editor-container {
+            flex: 1;
+            padding: 20px;
+            display: flex;
+            gap: 20px;
+        }
+
+        #hybridEditor {
+            width: 50%;
+            height: 100%;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 20px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.8;
+            overflow-y: auto;
+            outline: none;
+            resize: none;
+        }
+
+        #hybridEditor:focus {
+            border-color: #4c6ef5;
+        }
+
+        #hybridPreview {
+            width: 50%;
+            height: 100%;
+            background: #1e1e1e;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 20px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.8;
+            overflow-y: auto;
+        }
+
+        .hybrid-line {
+            min-height: 1.8em;
+            padding: 2px 0;
+            margin: 0;
+        }
+
+        .hybrid-line.current {
+            background-color: rgba(76, 110, 245, 0.1);
+            border-left: 3px solid #4c6ef5;
+            padding-left: 10px;
+        }
+
+        /* Styling for rendered HTML */
+        .hybrid-line h1, .hybrid-line h2, .hybrid-line h3, .hybrid-line h4, .hybrid-line h5, .hybrid-line h6 {
+            margin: 0;
+            color: #fff;
+        }
+
+        .hybrid-line h1 { font-size: 24px; }
+        .hybrid-line h2 { font-size: 20px; }
+        .hybrid-line h3 { font-size: 18px; }
+
+        .hybrid-line strong {
+            color: #fff;
+            font-weight: bold;
+        }
+
+        .hybrid-line em {
+            color: #ffd93d;
+            font-style: italic;
+        }
+
+        .hybrid-line u {
+            text-decoration: underline;
+        }
+
+        .hybrid-line mark {
+            background: #ffd93d;
+            color: #000;
+            padding: 1px 2px;
+        }
+
+        .footer {
+            background: #2d2d2d;
+            padding: 8px 20px;
+            border-top: 1px solid #444;
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>C Editor Web - Éditeur Hybride</h1>
+        <div class="status">
+            <span class="status-indicator" id="statusIndicator"></span>
+            <span id="statusText">Chargement...</span>
+        </div>
+        <div class="buttons">
+            <button class="btn" onclick="exportMarkdown()">📄 Export MD</button>
+            <button class="btn" onclick="exportJSON()">📋 Export JSON</button>
+            <button class="btn" onclick="exportHTML()">🌐 Export HTML</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="hybrid-editor">
+            <div class="pane-header">Éditeur Hybride - Ligne courante en Markdown, autres lignes rendues</div>
+            <div class="hybrid-editor-container">
+                <textarea id="hybridEditor" spellcheck="false" placeholder="Écrivez votre markdown ici..."># Titre
+
+Écrivez votre markdown ici...
+
+Exemple:
+- **Gras**
+- *Italique*
+- ==Surligné==
+- ++Souligné++</textarea>
+                <div id="hybridPreview"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        C Editor Web - Powered by Emscripten WASM | 
+        <a href="https://github.com/SorbetUP/c-editor" style="color: #4c6ef5;">GitHub</a>
+    </div>
+
+    <script src="editor.js"></script>
+    <script>
+        let editorModule = null;
+        let isWasmReady = false;
+        
+        const hybridEditor = document.getElementById('hybridEditor');
+        const hybridPreview = document.getElementById('hybridPreview');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        
+        let currentCursorLine = 0;
+
+        // Initialize WASM module
+        async function initializeWasm() {
+            try {
+                statusText.textContent = 'Chargement WASM...';
+                
+                // Wait for EditorModule to be available
+                let attempts = 0;
+                const maxAttempts = 50;
+                
+                while (typeof EditorModule === 'undefined' && attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    attempts++;
+                }
+                
+                if (typeof EditorModule !== 'undefined') {
+                    console.log('EditorModule found, initializing...');
+                    editorModule = await EditorModule();
+                    isWasmReady = true;
+                    statusIndicator.classList.add('ready');
+                    statusText.textContent = 'WASM Ready';
+                    console.log('WASM module loaded successfully');
+                    
+                    // Update preview with C engine
+                    updateHybridPreview();
+                } else {
+                    throw new Error('EditorModule not found after ' + maxAttempts + ' attempts');
+                }
+            } catch (error) {
+                console.warn('WASM not available:', error);
+                statusIndicator.style.background = '#ff6b6b';
+                statusText.textContent = '❌ WASM indisponible - Mode JavaScript';
+                isWasmReady = false;
+            }
+        }
+
+        // Simple markdown renderer fallback
+        function renderMarkdownFallback(text) {
+            if (!text.trim()) return '';
+            
+            let html = text
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                .replace(/==(.*?)==/g, '<mark>$1</mark>')
+                .replace(/\+\+(.*?)\+\+/g, '<u>$1</u>');
+            
+            // Handle headers
+            if (html.match(/^#{1,6}\s/)) {
+                const level = html.match(/^#+/)[0].length;
+                const content = html.replace(/^#+\s*/, '');
+                return `<h${level}>${content}</h${level}>`;
+            }
+            
+            return html;
+        }
+
+        // Convert JSON from C engine to HTML
+        function jsonToHtml(jsonStr) {
+            try {
+                const doc = JSON.parse(jsonStr);
+                if (!doc.elements || doc.elements.length === 0) {
+                    return '';
+                }
+                
+                let html = '';
+                for (const element of doc.elements) {
+                    if (element.type === 'text') {
+                        let text = element.text || '';
+                        
+                        // Apply formatting based on element properties
+                        if (element.bold) text = `<strong>${text}</strong>`;
+                        if (element.italic) text = `<em>${text}</em>`;
+                        if (element.underline) text = `<u>${text}</u>`;
+                        if (element.highlight) text = `<mark>${text}</mark>`;
+                        
+                        // Handle headers
+                        if (element.level > 0) {
+                            text = `<h${element.level}>${text}</h${element.level}>`;
+                        }
+                        
+                        html += text;
+                    }
+                }
+                
+                return html;
+            } catch (error) {
+                console.warn('JSON parsing error:', error);
+                return '';
+            }
+        }
+
+        // Update cursor position and determine current line
+        function updateCursorPosition() {
+            const cursorPos = hybridEditor.selectionStart;
+            const text = hybridEditor.value;
+            
+            // Count lines up to cursor position
+            let lineNumber = 0;
+            for (let i = 0; i < cursorPos; i++) {
+                if (text[i] === '\n') {
+                    lineNumber++;
+                }
+            }
+            
+            if (lineNumber !== currentCursorLine) {
+                currentCursorLine = lineNumber;
+                console.log('Cursor moved to line:', currentCursorLine);
+                updateHybridPreview();
+            }
+        }
+        
+        // Sync scroll between editor and preview
+        function syncScroll() {
+            const scrollPercent = hybridEditor.scrollTop / (hybridEditor.scrollHeight - hybridEditor.clientHeight);
+            hybridPreview.scrollTop = scrollPercent * (hybridPreview.scrollHeight - hybridPreview.clientHeight);
+        }
+        
+        // Update hybrid preview - shows current line as markdown, others as HTML
+        function updateHybridPreview() {
+            const text = hybridEditor.value;
+            const lines = text.split('\n');
+            
+            console.log(`Updating hybrid preview, cursor on line ${currentCursorLine}`);
+            
+            let previewHtml = '';
+            
+            lines.forEach((line, index) => {
+                const isCurrentLine = index === currentCursorLine;
+                
+                if (isCurrentLine) {
+                    // Show markdown source for current line
+                    previewHtml += `<div class="hybrid-line current">${escapeHtml(line)}</div>\n`;
+                } else {
+                    // Render other lines
+                    const renderedHtml = renderSingleLine(line);
+                    previewHtml += `<div class="hybrid-line">${renderedHtml}</div>\n`;
+                }
+            });
+            
+            hybridPreview.innerHTML = previewHtml;
+        }
+        
+        // Render a single line of markdown
+        function renderSingleLine(line) {
+            if (!line.trim()) return '&nbsp;';
+            
+            // Try C engine first
+            if (isWasmReady && editorModule) {
+                try {
+                    const jsonStr = editorModule.ccall('editor_parse_markdown_simple', 'string', ['string'], [line]);
+                    if (jsonStr) {
+                        const html = jsonToHtml(jsonStr);
+                        return html || escapeHtml(line);
+                    }
+                } catch (error) {
+                    console.warn('WASM rendering failed for line:', error);
+                }
+            }
+            
+            // Fallback rendering
+            return renderMarkdownFallback(line) || escapeHtml(line);
+        }
+        
+        // Escape HTML characters
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize hybrid editor
+        function initializeHybridEditor() {
+            console.log('Initializing hybrid editor...');
+            
+            // Set up editor events
+            hybridEditor.addEventListener('input', updateHybridPreview);
+            hybridEditor.addEventListener('keyup', updateCursorPosition);
+            hybridEditor.addEventListener('click', updateCursorPosition);
+            hybridEditor.addEventListener('scroll', syncScroll);
+            
+            // Initial render
+            updateHybridPreview();
+            updateCursorPosition();
+        }
+
+        // Export functions
+        function exportMarkdown() {
+            const content = hybridEditor.value;
+            downloadFile('document.md', content);
+        }
+
+        function exportJSON() {
+            const content = hybridEditor.value;
+            if (isWasmReady && editorModule) {
+                try {
+                    const json = editorModule.ccall('editor_parse_markdown', 'string', ['string'], [content]);
+                    downloadFile('document.json', json || JSON.stringify({content}));
+                    return;
+                } catch (error) {
+                    console.warn('WASM JSON export failed:', error);
+                }
+            }
+            
+            // Fallback JSON export
+            const jsonData = {
+                content: content,
+                timestamp: new Date().toISOString(),
+                version: "1.0"
+            };
+            downloadFile('document.json', JSON.stringify(jsonData, null, 2));
+        }
+
+        function exportHTML() {
+            const content = hybridEditor.value;
+            const lines = content.split('\n');
+            let html = '';
+            
+            lines.forEach(line => {
+                const renderedLine = renderSingleLine(line);
+                html += renderedLine + '\n';
+            });
+            
+            const fullHtml = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+               max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1, h2, h3, h4, h5, h6 { margin-top: 2em; margin-bottom: 0.5em; }
+        mark { background: #ffd93d; }
+        u { text-decoration: underline; }
+    </style>
+</head>
+<body>
+${html}
+</body>
+</html>`;
+            downloadFile('document.html', fullHtml);
+        }
+
+        function downloadFile(filename, content) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async function() {
+            await initializeWasm();
+            initializeHybridEditor();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Position Mapping</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .test-line {
+            border: 1px solid #444;
+            padding: 10px;
+            margin: 10px 0;
+            background: #2a2a2a;
+            cursor: text;
+        }
+        .markdown-display {
+            background: #3a3a3a;
+            padding: 5px;
+            margin: 5px 0;
+            font-family: monospace;
+        }
+        .result {
+            background: #004400;
+            padding: 5px;
+            margin: 5px 0;
+        }
+        .error {
+            background: #440000;
+            padding: 5px;
+            margin: 5px 0;
+        }
+        button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 Debug Position Mapping</h1>
+    
+    <div id="testArea">
+        <h2>Test Case 1: "- *Italique* ==Surligné=="</h2>
+        <div class="test-line" contenteditable="true" id="test1">- <em>Italique</em> <mark>Surligné</mark></div>
+        <div class="markdown-display">Markdown: "- *Italique* ==Surligné=="</div>
+        <div id="result1" class="result">Click anywhere in the line above</div>
+        
+        <h2>Test Case 2: "**Gras** et *italique*"</h2>
+        <div class="test-line" contenteditable="true" id="test2"><strong>Gras</strong> et <em>italique</em></div>
+        <div class="markdown-display">Markdown: "**Gras** et *italique*"</div>
+        <div id="result2" class="result">Click anywhere in the line above</div>
+        
+        <h2>Test Case 3: "# Titre"</h2>
+        <div class="test-line" contenteditable="true" id="test3"><h1 style="display: inline; margin: 0;">Titre</h1></div>
+        <div class="markdown-display">Markdown: "# Titre"</div>
+        <div id="result3" class="result">Click anywhere in the line above</div>
+    </div>
+
+    <button onclick="runAutomatedTests()">🧪 Run All Automated Tests</button>
+    <button onclick="clearResults()">🗑️ Clear Results</button>
+
+    <div id="automatedResults"></div>
+
+    <script>
+        // Copy the exact mapping function from the main editor
+        function mapHtmlPositionToMarkdown(htmlPosition, markdownText) {
+            // Create character mapping between HTML and Markdown
+            let markdownPos = 0;
+            let htmlPos = 0;
+            let i = 0;
+            
+            console.log(`🔍 DEBUG: Mapping HTML pos ${htmlPosition} in "${markdownText}"`);
+            
+            // Handle header prefix first
+            const headerMatch = markdownText.match(/^(#{1,6})\s+/);
+            if (headerMatch) {
+                const prefixLength = headerMatch[0].length;
+                if (htmlPosition === 0) {
+                    // If clicking at start of HTML, position after header prefix
+                    console.log(`📊 Header prefix: moving to position ${prefixLength}`);
+                    return prefixLength;
+                }
+                markdownPos = prefixLength;
+                i = prefixLength;
+                console.log(`🏷️ Found header prefix: "${headerMatch[0]}" (length ${prefixLength})`);
+            }
+            
+            // Process character by character to build mapping
+            while (i < markdownText.length && htmlPos < htmlPosition) {
+                const char = markdownText[i];
+                console.log(`📍 At markdown[${i}]="${char}", htmlPos=${htmlPos}, target=${htmlPosition}`);
+                
+                // Check for formatting patterns
+                if (char === '*' && i + 1 < markdownText.length) {
+                    if (markdownText[i + 1] === '*') {
+                        // Bold: **text**
+                        const endPos = markdownText.indexOf('**', i + 2);
+                        if (endPos !== -1) {
+                            const innerText = markdownText.substring(i + 2, endPos);
+                            const remainingHtml = htmlPosition - htmlPos;
+                            
+                            console.log(`⭐ Found bold: "**${innerText}**" at pos ${i}, remaining HTML: ${remainingHtml}`);
+                            
+                            if (remainingHtml <= innerText.length) {
+                                // Cursor is inside or at end of bold text
+                                const result = i + 2 + remainingHtml;
+                                console.log(`📊 Inside bold: HTML ${htmlPosition} (remaining: ${remainingHtml}) -> MD ${result}`);
+                                return result;
+                            }
+                            
+                            htmlPos += innerText.length;
+                            i = endPos + 2; // Skip past **text**
+                            markdownPos = i;
+                            console.log(`⏭️ Skipped bold, now htmlPos=${htmlPos}, i=${i}`);
+                            continue;
+                        }
+                    } else {
+                        // Italic: *text*
+                        const endPos = markdownText.indexOf('*', i + 1);
+                        if (endPos !== -1) {
+                            const innerText = markdownText.substring(i + 1, endPos);
+                            const remainingHtml = htmlPosition - htmlPos;
+                            
+                            console.log(`💫 Found italic: "*${innerText}*" at pos ${i}, remaining HTML: ${remainingHtml}`);
+                            
+                            if (remainingHtml <= innerText.length) {
+                                // Cursor is inside or at end of italic text
+                                const result = i + 1 + remainingHtml;
+                                console.log(`📊 Inside italic: HTML ${htmlPosition} (remaining: ${remainingHtml}) -> MD ${result}`);
+                                return result;
+                            }
+                            
+                            htmlPos += innerText.length;
+                            i = endPos + 1; // Skip past *text*
+                            markdownPos = i;
+                            console.log(`⏭️ Skipped italic, now htmlPos=${htmlPos}, i=${i}`);
+                            continue;
+                        }
+                    }
+                } else if (char === '=' && i + 1 < markdownText.length && markdownText[i + 1] === '=') {
+                    // Highlight: ==text==
+                    const endPos = markdownText.indexOf('==', i + 2);
+                    if (endPos !== -1) {
+                        const innerText = markdownText.substring(i + 2, endPos);
+                        const remainingHtml = htmlPosition - htmlPos;
+                        
+                        console.log(`🌟 Found highlight: "==${innerText}==" at pos ${i}, remaining HTML: ${remainingHtml}`);
+                        
+                        if (remainingHtml <= innerText.length) {
+                            // Cursor is inside or at end of highlight text
+                            const result = i + 2 + remainingHtml;
+                            console.log(`📊 Inside highlight: HTML ${htmlPosition} (remaining: ${remainingHtml}) -> MD ${result}`);
+                            return result;
+                        }
+                        
+                        htmlPos += innerText.length;
+                        i = endPos + 2; // Skip past ==text==
+                        markdownPos = i;
+                        console.log(`⏭️ Skipped highlight, now htmlPos=${htmlPos}, i=${i}`);
+                        continue;
+                    }
+                }
+                
+                // Regular character
+                htmlPos++;
+                i++;
+                markdownPos = i;
+                console.log(`📝 Regular char, now htmlPos=${htmlPos}, i=${i}`);
+            }
+            
+            console.log(`🎯 Final result: HTML ${htmlPosition} -> Markdown ${markdownPos}`);
+            return markdownPos;
+        }
+
+        function calculatePlainTextPosition(htmlElement) {
+            try {
+                const selection = window.getSelection();
+                if (selection.rangeCount === 0) return 0;
+                
+                const range = selection.getRangeAt(0);
+                const preCaretRange = range.cloneRange();
+                preCaretRange.selectNodeContents(htmlElement);
+                preCaretRange.setEnd(range.startContainer, range.startOffset);
+                
+                // Get the text content up to the cursor position
+                const textBeforeCursor = preCaretRange.toString();
+                return textBeforeCursor.length;
+            } catch (error) {
+                console.warn('Error calculating plain text position:', error);
+                return 0;
+            }
+        }
+
+        // Set up click handlers for each test case
+        const testCases = [
+            { id: 'test1', markdown: '- *Italique* ==Surligné==', resultId: 'result1' },
+            { id: 'test2', markdown: '**Gras** et *italique*', resultId: 'result2' },
+            { id: 'test3', markdown: '# Titre', resultId: 'result3' }
+        ];
+
+        testCases.forEach(testCase => {
+            const element = document.getElementById(testCase.id);
+            const resultElement = document.getElementById(testCase.resultId);
+            
+            element.addEventListener('click', function(e) {
+                setTimeout(() => {
+                    const htmlPosition = calculatePlainTextPosition(element);
+                    const markdownPosition = mapHtmlPositionToMarkdown(htmlPosition, testCase.markdown);
+                    
+                    const htmlText = element.textContent;
+                    const charAtHtml = htmlText[htmlPosition] || '(end)';
+                    const charAtMarkdown = testCase.markdown[markdownPosition] || '(end)';
+                    
+                    resultElement.innerHTML = `
+                        HTML position: ${htmlPosition} (char: "${charAtHtml}")<br>
+                        Markdown position: ${markdownPosition} (char: "${charAtMarkdown}")<br>
+                        HTML text: "${htmlText}"<br>
+                        Markdown text: "${testCase.markdown}"
+                    `;
+                    resultElement.className = 'result';
+                }, 10);
+            });
+        });
+
+        function runAutomatedTests() {
+            const resultsDiv = document.getElementById('automatedResults');
+            resultsDiv.innerHTML = '<h2>🧪 Automated Test Results</h2>';
+            
+            const autoTestCases = [
+                {
+                    markdown: '- *Italique* ==Surligné==',
+                    htmlText: '- Italique Surligné',
+                    tests: [
+                        { htmlPos: 0, expectedMd: 0, desc: 'Start of line' },
+                        { htmlPos: 2, expectedMd: 3, desc: 'Start of "Italique"' },
+                        { htmlPos: 5, expectedMd: 6, desc: 'Middle of "Italique"' },
+                        { htmlPos: 10, expectedMd: 11, desc: 'End of "Italique"' },
+                        { htmlPos: 11, expectedMd: 13, desc: 'Space after "Italique"' },
+                        { htmlPos: 12, expectedMd: 15, desc: 'Start of "Surligné"' }
+                    ]
+                }
+            ];
+
+            autoTestCases.forEach(testCase => {
+                resultsDiv.innerHTML += `<h3>Testing: "${testCase.markdown}"</h3>`;
+                
+                testCase.tests.forEach(test => {
+                    const result = mapHtmlPositionToMarkdown(test.htmlPos, testCase.markdown);
+                    const passed = result === test.expectedMd;
+                    const className = passed ? 'result' : 'error';
+                    
+                    resultsDiv.innerHTML += `
+                        <div class="${className}">
+                            ${passed ? '✅' : '❌'} ${test.desc}: HTML ${test.htmlPos} -> MD ${result} (expected ${test.expectedMd})
+                        </div>
+                    `;
+                });
+            });
+        }
+
+        function clearResults() {
+            document.querySelectorAll('.result, .error').forEach(el => {
+                if (el.id.startsWith('result')) {
+                    el.innerHTML = 'Click anywhere in the line above';
+                    el.className = 'result';
+                }
+            });
+            document.getElementById('automatedResults').innerHTML = '';
+        }
+    </script>
+</body>
+</html>

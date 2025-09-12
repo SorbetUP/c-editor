@@ -1,0 +1,162 @@
+# Main Makefile - C Editor Project Root Build System
+
+# This Makefile coordinates building across all modules
+# Run from project root directory
+
+.PHONY: all engines tools web flutter tests clean help install
+
+# Default target
+all: engines tools
+
+# Build all C engines
+engines:
+	@echo "🔧 Building C engines..."
+	$(MAKE) -C engines/cursor static
+	$(MAKE) -C engines/markdown static  
+	$(MAKE) -C engines/editor static
+	@echo "✅ All engines built"
+
+# Build development tools  
+tools: engines
+	@echo "🛠️ Building development tools..."
+	$(MAKE) -C tools/tui all
+	@echo "✅ All tools built"
+
+# Build WebAssembly modules for web
+web: engines
+	@echo "🌐 Building WebAssembly modules..."
+	$(MAKE) -C engines/cursor wasm
+	$(MAKE) -C engines/markdown wasm
+	$(MAKE) -C engines/editor wasm
+	@echo "✅ WebAssembly modules built"
+
+# Build Flutter app
+flutter:
+	@echo "📱 Building Flutter app..."
+	cd flutter && flutter build web
+	cd flutter && flutter build macos
+	@echo "✅ Flutter app built"
+
+# Run all tests
+tests: engines
+	@echo "🧪 Running all tests..."
+	$(MAKE) -C tests/unit all
+	$(MAKE) -C tools/tui test
+	@echo "✅ All tests completed"
+
+# Quick development cycle
+dev: engines
+	@echo "🚀 Development build complete"
+	@echo ""
+	@echo "Available tools:"
+	@echo "  make tui        - Launch terminal editor"
+	@echo "  make demo       - Run cursor management demo"
+	@echo "  make web-serve  - Start web development server"
+
+# Launch TUI editor
+tui: tools
+	$(MAKE) -C tools/tui run
+
+# Run cursor demo
+demo: tools  
+	$(MAKE) -C tools/tui demo
+
+# Start web development server
+web-serve: web
+	@echo "🌐 Starting web development server..."
+	cd web/site && python3 -m http.server 8001
+
+# Install system-wide (Unix-like systems)
+install: engines
+	@echo "📦 Installing C Editor system-wide..."
+	$(MAKE) -C engines/cursor install
+	$(MAKE) -C engines/markdown install
+	$(MAKE) -C engines/editor install
+	@echo "✅ Installation complete"
+
+# Clean all build artifacts
+clean:
+	@echo "🧹 Cleaning all build artifacts..."
+	$(MAKE) -C engines/cursor clean
+	$(MAKE) -C engines/markdown clean
+	$(MAKE) -C engines/editor clean
+	$(MAKE) -C tools/tui clean
+	$(MAKE) -C tests/unit clean
+	rm -rf flutter/build/
+	@echo "✅ All artifacts cleaned"
+
+# Deep clean including dependencies
+clean-all: clean
+	@echo "🗑️ Deep cleaning..."
+	cd flutter && flutter clean
+	rm -rf flutter/.dart_tool/
+	rm -rf web/site/node_modules/
+	@echo "✅ Deep clean complete"
+
+# Development helpers
+format:
+	@echo "🎨 Formatting C code..."
+	find engines/ tools/ tests/ -name "*.c" -o -name "*.h" | xargs clang-format -i
+	@echo "✅ Code formatted"
+
+lint:
+	@echo "🔍 Linting C code..."
+	find engines/ tools/ tests/ -name "*.c" -o -name "*.h" | xargs clang-tidy
+	@echo "✅ Linting complete"
+
+docs:
+	@echo "📚 Generating documentation..."
+	doxygen Doxyfile
+	@echo "✅ Documentation generated in docs/html/"
+
+# Continuous integration targets
+ci: tests lint
+	@echo "✅ CI pipeline complete"
+
+release: clean all tests
+	@echo "🚀 Release build complete"
+	@echo ""
+	@echo "Deliverables:"
+	@echo "  - C engines (engines/*/lib*.a)"
+	@echo "  - WebAssembly modules (engines/*/*.wasm.js)"
+	@echo "  - TUI editor (tools/tui/tui_editor)"
+	@echo "  - Web interface (web/site/)"
+	@echo "  - Flutter apps (flutter/build/)"
+
+# Help
+help:
+	@echo "C Editor Project - Multi-Platform Markdown Editor"
+	@echo ""
+	@echo "Main targets:"
+	@echo "  all          - Build engines and tools (default)"
+	@echo "  engines      - Build all C engines"
+	@echo "  tools        - Build development tools"
+	@echo "  web          - Build WebAssembly modules"
+	@echo "  flutter      - Build Flutter apps" 
+	@echo "  tests        - Run all test suites"
+	@echo "  clean        - Remove build artifacts"
+	@echo ""
+	@echo "Development:"
+	@echo "  dev          - Quick development build"
+	@echo "  tui          - Launch terminal editor"
+	@echo "  demo         - Run cursor management demo"
+	@echo "  web-serve    - Start web development server"
+	@echo ""  
+	@echo "Quality:"
+	@echo "  format       - Format C code"
+	@echo "  lint         - Run code linting"
+	@echo "  docs         - Generate documentation"
+	@echo ""
+	@echo "Release:"
+	@echo "  install      - Install system-wide"
+	@echo "  release      - Full release build"
+	@echo "  ci           - Continuous integration"
+	@echo ""
+	@echo "Architecture:"
+	@echo "  engines/     - Core C libraries"
+	@echo "  tools/       - Development tools"
+	@echo "  web/         - Web interfaces"
+	@echo "  flutter/     - Mobile/desktop apps" 
+	@echo "  tests/       - Test suites"
+	@echo ""
+	@echo "Quick start: make dev && make tui"

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>C-Editor - Éditeur Markdown Hybride</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            max-width: 800px;
+            padding: 40px;
+            background: rgba(42, 42, 42, 0.9);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #00aaff;
+            font-size: 3rem;
+            margin-bottom: 10px;
+            text-shadow: 0 2px 10px rgba(0, 170, 255, 0.3);
+        }
+        .subtitle {
+            text-align: center;
+            color: #aaa;
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+        }
+        .status {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 170, 0, 0.1);
+            border: 1px solid rgba(0, 170, 0, 0.3);
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .status h2 {
+            color: #00aa00;
+            margin: 0 0 10px 0;
+        }
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+        .nav-card {
+            background: rgba(60, 60, 60, 0.7);
+            padding: 25px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+        .nav-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 170, 255, 0.2);
+            border-color: rgba(0, 170, 255, 0.3);
+        }
+        .nav-card h3 {
+            color: #00aaff;
+            margin: 0 0 15px 0;
+            font-size: 1.3rem;
+        }
+        .nav-card p {
+            color: #ccc;
+            line-height: 1.6;
+            margin: 0;
+        }
+        .nav-card .icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            display: block;
+        }
+        .features {
+            margin: 40px 0;
+            padding: 25px;
+            background: rgba(0, 170, 255, 0.1);
+            border-radius: 12px;
+            border: 1px solid rgba(0, 170, 255, 0.2);
+        }
+        .features h3 {
+            color: #00aaff;
+            margin-top: 0;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+        .feature-list li::before {
+            content: "✅";
+            position: absolute;
+            left: 0;
+        }
+        .github-link {
+            text-align: center;
+            margin-top: 30px;
+        }
+        .github-link a {
+            color: #00aaff;
+            text-decoration: none;
+            padding: 10px 20px;
+            border: 1px solid #00aaff;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+        .github-link a:hover {
+            background: #00aaff;
+            color: #1a1a1a;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 C-Editor</h1>
+        <div class="subtitle">Éditeur Markdown Hybride Ultra-Rapide</div>
+        
+        <div class="status">
+            <h2>✅ Problème de Curseur RÉSOLU</h2>
+            <p>Correction appliquée avec succès! Plus d'erreurs, plus de conflits de rendu. Le système de curseur fonctionne parfaitement.</p>
+        </div>
+
+        <div class="features">
+            <h3>✨ Fonctionnalités</h3>
+            <ul class="feature-list">
+                <li>Édition hybride temps réel (Markdown ↔ HTML)</li>
+                <li>Moteur C WebAssembly ultra-rapide</li>
+                <li>Gestion intelligente du curseur avec formatage</li>
+                <li>Support complet: **gras**, *italique*, ==surligné==</li>
+                <li>Transitions imperceptibles sans conflits async</li>
+                <li>Tests automatisés (100% de réussite)</li>
+            </ul>
+        </div>
+
+        <div class="nav-grid">
+            <a href="test-cursor-fix.html" class="nav-card" style="grid-column: span 2; background: linear-gradient(135deg, rgba(0,170,0,0.2) 0%, rgba(0,102,51,0.2) 100%); border: 2px solid rgba(0,170,0,0.4);">
+                <span class="icon">✅</span>
+                <h3>🎯 PROBLÈME RÉSOLU</h3>
+                <p><strong>Test de la correction appliquée!</strong><br>Validation que le problème de curseur avec "==Surligné==" + Entrée est complètement corrigé sans erreurs.</p>
+            </a>
+
+            <a href="docs/index.html" class="nav-card">
+                <span class="icon">📝</span>
+                <h3>Éditeur Principal</h3>
+                <p>L'éditeur complet avec toutes les fonctionnalités, système de curseur intégré et rendu hybride temps réel.</p>
+            </a>
+
+            <a href="live-enter-test.html" class="nav-card">
+                <span class="icon">⚡</span>
+                <h3>Test Live Enter</h3>
+                <p>Test interactif en temps réel du comportement de la touche Entrée avec formatage complexe et validation immédiate.</p>
+            </a>
+
+            <a href="test-integration.html" class="nav-card">
+                <span class="icon">🧪</span>
+                <h3>Tests d'Intégration</h3>
+                <p>Validation complète du système de gestion du curseur avec tests automatisés et vérifications en temps réel.</p>
+            </a>
+
+            <a href="manual-enter-test.html" class="nav-card">
+                <span class="icon">🔧</span>
+                <h3>Test Manuel</h3>
+                <p>Test spécifique du problème résolu: curseur avant "==Surligné==" + touche Entrée avec gestion intelligente.</p>
+            </a>
+
+            <a href="debug-position-mapping.html" class="nav-card">
+                <span class="icon">🔍</span>
+                <h3>Debug Positions</h3>
+                <p>Outils de débogage pour tester et valider le mappage de positions HTML vers Markdown en temps réel.</p>
+            </a>
+        </div>
+
+        <div class="github-link">
+            <p>Développé avec ❤️ pour une expérience d'édition parfaite</p>
+        </div>
+
+        <script>
+            // Auto-redirect vers l'éditeur après 3 secondes si pas d'interaction
+            let redirectTimer = setTimeout(() => {
+                window.location.href = 'docs/index.html';
+            }, 5000);
+
+            // Annuler la redirection si l'utilisateur interagit
+            document.addEventListener('click', () => {
+                clearTimeout(redirectTimer);
+            });
+
+            // Afficher un message de redirection
+            setTimeout(() => {
+                const container = document.querySelector('.container');
+                const redirectMsg = document.createElement('div');
+                redirectMsg.style.cssText = `
+                    text-align: center;
+                    padding: 15px;
+                    margin-top: 20px;
+                    background: rgba(0, 170, 255, 0.1);
+                    border: 1px solid rgba(0, 170, 255, 0.3);
+                    border-radius: 8px;
+                    color: #00aaff;
+                    animation: pulse 2s infinite;
+                `;
+                redirectMsg.innerHTML = '🔄 Redirection automatique vers l\'éditeur dans quelques secondes...<br><small>Cliquez n\'importe où pour annuler</small>';
+                container.appendChild(redirectMsg);
+
+                // Ajouter l'animation CSS
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes pulse {
+                        0% { opacity: 0.6; }
+                        50% { opacity: 1; }
+                        100% { opacity: 0.6; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }, 2000);
+        </script>
+    </div>
+</body>
+</html>

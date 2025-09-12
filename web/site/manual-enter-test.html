@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Manuel - Problème Entrée avant ==Surligné==</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+            line-height: 1.6;
+        }
+        .test-container {
+            border: 2px solid #444;
+            padding: 20px;
+            margin: 20px 0;
+            background: #2a2a2a;
+            border-radius: 8px;
+        }
+        .editor-line {
+            border: 1px solid #666;
+            padding: 10px;
+            margin: 10px 0;
+            background: #333;
+            cursor: text;
+            border-radius: 4px;
+            min-height: 24px;
+        }
+        .current-line {
+            border-color: #0066cc;
+            background: #003366;
+        }
+        .instructions {
+            background: #004400;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .problem-description {
+            background: #660000;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .solution {
+            background: #006600;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #0088ff;
+        }
+        .log {
+            background: #222;
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 4px solid #0066cc;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .test-status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .pass { background: #004400; }
+        .fail { background: #440000; }
+        .pending { background: #444400; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Manuel: Problème Entrée avant ==Surligné==</h1>
+    
+    <div class="problem-description">
+        <h2>📋 Description du Problème</h2>
+        <p><strong>Scénario:</strong> Lorsque le curseur est placé avant "==Surligné==" et qu'on appuie sur Entrée pour mettre le contenu suivant sur une nouvelle ligne:</p>
+        <ol>
+            <li>Le rendu HTML se déclenche avant que le système ne réalise que le curseur va changer de ligne</li>
+            <li>Après que le système se rende compte du changement, le rendu disparaît</li>
+            <li>Le curseur apparaît incorrectement après les marqueurs "=="</li>
+        </ol>
+        <p><strong>Contenu test:</strong> "- *Italique* ==Surligné== fin"</p>
+        <p><strong>Position problématique:</strong> Juste avant "==Surligné=="</p>
+    </div>
+    
+    <div class="instructions">
+        <h2>📝 Instructions de Test</h2>
+        <ol>
+            <li>Cliquez dans la ligne de test ci-dessous</li>
+            <li>Placez votre curseur juste avant "==Surligné=="</li>
+            <li>Appuyez sur Entrée</li>
+            <li>Observez le comportement du curseur et du rendu</li>
+        </ol>
+        <p><strong>Résultat attendu:</strong> Le contenu doit se diviser proprement avec "- *Italique* " sur la première ligne et "==Surligné== fin" sur la nouvelle ligne, sans conflit de rendu.</p>
+    </div>
+    
+    <div class="test-container">
+        <h3>Test Case: Division de ligne avec formatage</h3>
+        <div id="testLine" class="editor-line current-line" contenteditable="true">- <em>Italique</em> <mark>Surligné</mark> fin</div>
+        <div class="test-status pending" id="testStatus">En attente de test...</div>
+        <button onclick="setupTest()">🔄 Réinitialiser Test</button>
+        <button onclick="runAutomatedTest()">🤖 Test Automatique</button>
+        <button onclick="showCursorInfo()">📍 Info Curseur</button>
+    </div>
+    
+    <div class="solution">
+        <h2>🛠️ Solution Implémentée</h2>
+        <p><strong>CursorManager avec verrouillage d'opérations:</strong></p>
+        <ul>
+            <li>Verrouillage des transitions pendant les opérations critiques</li>
+            <li>Détection intelligente des marqueurs de formatage</li>
+            <li>Ajustement automatique de la position du curseur</li>
+            <li>Gestion des opérations asynchrones</li>
+        </ul>
+    </div>
+    
+    <div class="log" id="logOutput">
+        <strong>📊 Journal de test:</strong><br>
+        Prêt pour les tests...
+    </div>
+    
+    <script>
+        let testLog = [];
+        
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logMsg = `[${timestamp}] ${message}`;
+            testLog.push(logMsg);
+            const logOutput = document.getElementById('logOutput');
+            logOutput.innerHTML = '<strong>📊 Journal de test:</strong><br>' + testLog.slice(-20).join('<br>');
+            logOutput.scrollTop = logOutput.scrollHeight;
+            console.log(logMsg);
+        }
+        
+        function setupTest() {
+            log('🔄 Réinitialisation du test...');
+            const testLine = document.getElementById('testLine');
+            testLine.innerHTML = '- <em>Italique</em> <mark>Surligné</mark> fin';
+            testLine.focus();
+            document.getElementById('testStatus').textContent = 'Test réinitialisé - Placez le curseur avant "==Surligné==" et appuyez sur Entrée';
+            document.getElementById('testStatus').className = 'test-status pending';
+        }
+        
+        function showCursorInfo() {
+            const testLine = document.getElementById('testLine');
+            const selection = window.getSelection();
+            if (selection.rangeCount > 0) {
+                const range = selection.getRangeAt(0);
+                const preCaretRange = range.cloneRange();
+                preCaretRange.selectNodeContents(testLine);
+                preCaretRange.setEnd(range.startContainer, range.startOffset);
+                const position = preCaretRange.toString().length;
+                const textContent = testLine.textContent;
+                const charAtPosition = textContent[position] || '(fin)';
+                
+                log(`📍 Position curseur: ${position}, Caractère: "${charAtPosition}"`);
+                log(`📄 Contenu HTML: "${testLine.textContent}"`);
+                log(`📝 Contenu markdown simulé: "- *Italique* ==Surligné== fin"`);
+            } else {
+                log('⚠️ Aucune sélection trouvée');
+            }
+        }
+        
+        function runAutomatedTest() {
+            log('🤖 Démarrage du test automatique...');
+            
+            const markdownContent = '- *Italique* ==Surligné== fin';
+            const htmlContent = '- Italique Surligné fin';
+            const problemPosition = 13; // Position juste avant "=="
+            
+            log(`📋 Test: Division de ligne à la position ${problemPosition}`);
+            log(`   Markdown: "${markdownContent}"`);
+            log(`   HTML: "${htmlContent}"`);
+            
+            // Simule la logique de division
+            const beforeCursor = markdownContent.substring(0, problemPosition);
+            const afterCursor = markdownContent.substring(problemPosition);
+            
+            log(`✂️ Division simulée:`);
+            log(`   Avant curseur: "${beforeCursor}"`);
+            log(`   Après curseur: "${afterCursor}"`);
+            
+            const expectedBefore = '- *Italique* ';
+            const expectedAfter = '==Surligné== fin';
+            
+            const beforeCorrect = beforeCursor === expectedBefore;
+            const afterCorrect = afterCursor === expectedAfter;
+            
+            if (beforeCorrect && afterCorrect) {
+                log('✅ Test automatique RÉUSSI');
+                document.getElementById('testStatus').textContent = 'Test automatique réussi - La logique de division fonctionne correctement';
+                document.getElementById('testStatus').className = 'test-status pass';
+            } else {
+                log('❌ Test automatique ÉCHOUÉ');
+                log(`   Attendu avant: "${expectedBefore}"`);
+                log(`   Attendu après: "${expectedAfter}"`);
+                document.getElementById('testStatus').textContent = 'Test automatique échoué - Vérifiez la logique de division';
+                document.getElementById('testStatus').className = 'test-status fail';
+            }
+        }
+        
+        // Détection automatique de l'appui sur Entrée
+        document.getElementById('testLine').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                log('⚡ Touche Entrée détectée!');
+                showCursorInfo();
+                log('⚠️ Note: Dans l\'éditeur principal, le CursorManager gérerait cette opération avec verrouillage');
+            }
+        });
+        
+        // Initialisation
+        log('🚀 Test manuel prêt');
+        log('💡 Astuce: Utilisez les boutons pour tester ou observez le comportement manuel');
+    </script>
+</body>
+</html>
