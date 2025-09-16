@@ -64,6 +64,32 @@ char* cursor_extract_after_position(const char* content, int position);
 // Memory management
 void cursor_free_result(cursor_operation_result_t* result);
 
+// Word navigation functions
+cursor_position_t cursor_move_word_left(const char* content, int position);
+cursor_position_t cursor_move_word_right(const char* content, int position);
+cursor_position_t cursor_move_to_line_start(const char* content, int position);
+cursor_position_t cursor_move_to_line_end(const char* content, int position);
+
+// Advanced formatting detection
+bool cursor_is_at_word_boundary(const char* content, int position);
+bool cursor_is_whitespace_char(char c);
+bool cursor_is_word_char(char c);
+
+// Smart indentation
+cursor_operation_result_t cursor_smart_indent(const char* content, int position);
+int cursor_get_line_indentation(const char* line);
+char* cursor_create_indented_line(const char* content, int indent_level);
+
+// Bracket and quote matching
+cursor_position_t cursor_find_matching_bracket(const char* content, int position);
+cursor_position_t cursor_find_matching_quote(const char* content, int position);
+
+// Advanced line operations
+cursor_operation_result_t cursor_duplicate_line(const char* content, int position);
+cursor_operation_result_t cursor_delete_line(const char* content, int position);
+cursor_operation_result_t cursor_move_line_up(const char* content, int position);
+cursor_operation_result_t cursor_move_line_down(const char* content, int position);
+
 // Debug and validation
 bool cursor_validate_position(const char* content, int position);
 void cursor_print_debug(const char* content, int position);

@@ -17,7 +17,7 @@
 #define RENDER_BUFFER_SIZE 65536  // Increased buffer size
 #define CTRL_KEY(k) ((k) & 0x1f)
 #define TAB_STOP 4
-#define VERSION "2.2.0-dev"
+#define VERSION "2.1.0-dev"
 #define MAX_SEARCH_TERM 256
 #define MAX_UNDO_STACK 100
 #define MAX_CLIPBOARD_SIZE 16384
@@ -34,14 +34,6 @@ typedef struct {
     int last_match_col;
     int direction; // 1 for forward, -1 for backward
 } search_state_t;
-
-// Replace state
-typedef struct {
-    char find_term[MAX_SEARCH_TERM];
-    char replace_term[MAX_SEARCH_TERM];
-    int replace_all_mode;
-    int replacements_made;
-} replace_state_t;
 
 // Undo/Redo state
 typedef struct {
@@ -90,7 +82,6 @@ typedef struct {
     
     // Advanced features
     search_state_t search;
-    replace_state_t replace;
     undo_state_t undo;
     selection_state_t selection;
     clipboard_t clipboard;
@@ -109,16 +100,6 @@ void editor_extend_selection_right();
 void editor_extend_selection_up();
 void editor_extend_selection_down();
 void editor_select_all();
-void editor_search_and_replace();
-void editor_replace_current();
-void editor_replace_all();
-void editor_move_word_left();
-void editor_move_word_right();
-void editor_move_to_line_start();
-void editor_move_to_line_end();
-void editor_smart_indent_line();
-void editor_duplicate_current_line();
-void editor_enhance_markdown();
 void editor_save_snapshot();
 void editor_undo();
 void editor_redo();
@@ -211,11 +192,6 @@ int read_key() {
                             case 'B': return 1009; // Shift+Down arrow
                             case 'C': return 1007; // Shift+Right arrow
                             case 'D': return 1006; // Shift+Left arrow
-                        }
-                    } else if (seq[3] == '5') {  // Ctrl modifier
-                        switch (seq[4]) {
-                            case 'C': return 1013; // Ctrl+Right arrow
-                            case 'D': return 1014; // Ctrl+Left arrow
                         }
                     }
                 }
@@ -1352,440 +1328,6 @@ void editor_select_all() {
     editor_set_status_message("All text selected");
 }
 
-// Advanced cursor engine integration functions
-void editor_move_word_left() {
-    if (E.line_count == 0) return;
-    
-    // Convert current editor state to single string for cursor engine
-    char content[MAX_LINE_LENGTH * MAX_LINES];
-    content[0] = '\0';
-    
-    int current_pos = 0;
-    for (int i = 0; i < E.cursor_line; i++) {
-        strcat(content, E.lines[i]);
-        strcat(content, "\n");
-        current_pos += strlen(E.lines[i]) + 1;
-    }
-    current_pos += E.cursor_col;
-    
-    cursor_position_t result = cursor_move_word_left(content, current_pos);
-    if (result.is_valid) {
-        // Convert back to line/col
-        int pos = 0;
-        for (int i = 0; i < E.line_count; i++) {
-            int line_len = strlen(E.lines[i]) + 1; // +1 for \n
-            if (pos + line_len > result.position) {
-                E.cursor_line = i;
-                E.cursor_col = result.position - pos;
-                if (E.cursor_col < 0) E.cursor_col = 0;
-                break;
-            }
-            pos += line_len;
-        }
-        editor_set_status_message("Moved to previous word");
-    }
-}
-
-void editor_move_word_right() {
-    if (E.line_count == 0) return;
-    
-    // Convert current editor state to single string for cursor engine
-    char content[MAX_LINE_LENGTH * MAX_LINES];
-    content[0] = '\0';
-    
-    int current_pos = 0;
-    for (int i = 0; i < E.cursor_line; i++) {
-        strcat(content, E.lines[i]);
-        strcat(content, "\n");
-        current_pos += strlen(E.lines[i]) + 1;
-    }
-    current_pos += E.cursor_col;
-    
-    cursor_position_t result = cursor_move_word_right(content, current_pos);
-    if (result.is_valid) {
-        // Convert back to line/col
-        int pos = 0;
-        for (int i = 0; i < E.line_count; i++) {
-            int line_len = strlen(E.lines[i]) + 1; // +1 for \n
-            if (pos + line_len > result.position) {
-                E.cursor_line = i;
-                E.cursor_col = result.position - pos;
-                if (E.cursor_col > (int)strlen(E.lines[i])) {
-                    E.cursor_col = strlen(E.lines[i]);
-                }
-                break;
-            }
-            pos += line_len;
-        }
-        editor_set_status_message("Moved to next word");
-    }
-}
-
-void editor_move_to_line_start() {
-    E.cursor_col = 0;
-    editor_set_status_message("Moved to line start");
-}
-
-void editor_move_to_line_end() {
-    if (E.cursor_line < E.line_count) {
-        E.cursor_col = strlen(E.lines[E.cursor_line]);
-        editor_set_status_message("Moved to line end");
-    }
-}
-
-void editor_smart_indent_line() {
-    if (E.line_count == 0) return;
-    
-    editor_save_snapshot();
-    
-    // Get current line content for cursor engine
-    char *current_line = E.lines[E.cursor_line];
-    
-    // Use cursor engine to determine proper indentation
-    cursor_operation_result_t result = cursor_smart_indent(current_line, E.cursor_col);
-    
-    if (result.success && result.before_cursor) {
-        // Apply the smart indentation
-        strcpy(E.lines[E.cursor_line], result.before_cursor);
-        E.cursor_col = result.new_position.position;
-        E.dirty = 1;
-        editor_set_status_message("Applied smart indentation");
-    } else {
-        editor_set_status_message("Smart indentation failed");
-    }
-    
-    cursor_free_result(&result);
-}
-
-void editor_duplicate_current_line() {
-    if (E.line_count == 0 || E.line_count >= MAX_LINES - 1) return;
-    
-    editor_save_snapshot();
-    
-    // Use cursor engine for line duplication
-    cursor_operation_result_t result = cursor_duplicate_line(E.lines[E.cursor_line], E.cursor_col);
-    
-    if (result.success) {
-        // Shift lines down to make room
-        for (int i = E.line_count; i > E.cursor_line; i--) {
-            strcpy(E.lines[i], E.lines[i - 1]);
-        }
-        E.line_count++;
-        
-        // Move to duplicated line
-        E.cursor_line++;
-        
-        E.dirty = 1;
-        editor_set_status_message("Line duplicated");
-    } else {
-        editor_set_status_message("Failed to duplicate line");
-    }
-    
-    cursor_free_result(&result);
-}
-
-void editor_enhance_markdown() {
-    if (E.line_count == 0) return;
-    
-    editor_save_snapshot();
-    
-    // Combine all lines into single markdown content
-    char markdown[MAX_LINE_LENGTH * MAX_LINES];
-    markdown[0] = '\0';
-    
-    for (int i = 0; i < E.line_count; i++) {
-        strcat(markdown, E.lines[i]);
-        if (i < E.line_count - 1) {
-            strcat(markdown, "\n");
-        }
-    }
-    
-    // Use markdown engine to enhance formatting
-    char *enhanced = enhance_markdown_formatting(markdown);
-    if (enhanced) {
-        // Parse enhanced markdown back into lines
-        char *line = strtok(enhanced, "\n");
-        int line_count = 0;
-        
-        while (line && line_count < MAX_LINES) {
-            strcpy(E.lines[line_count], line);
-            line_count++;
-            line = strtok(NULL, "\n");
-        }
-        
-        E.line_count = line_count;
-        if (E.cursor_line >= E.line_count) {
-            E.cursor_line = E.line_count - 1;
-        }
-        if (E.cursor_col > (int)strlen(E.lines[E.cursor_line])) {
-            E.cursor_col = strlen(E.lines[E.cursor_line]);
-        }
-        
-        E.dirty = 1;
-        editor_set_status_message("Enhanced markdown formatting");
-        free(enhanced);
-    } else {
-        editor_set_status_message("Failed to enhance markdown");
-    }
-}
-
-// Search and replace functions
-void editor_search_and_replace() {
-    write(STDOUT_FILENO, "\x1b[2J", 4);  // Clear screen
-    write(STDOUT_FILENO, "\x1b[H", 3);   // Go home
-    
-    // Display search and replace interface
-    char buf[256];
-    int len = 0;
-    
-    len = snprintf(buf, sizeof(buf), "🔍 SEARCH AND REPLACE MODE\r\n");
-    write(STDOUT_FILENO, buf, len);
-    
-    len = snprintf(buf, sizeof(buf), "═══════════════════════════\r\n\r\n");
-    write(STDOUT_FILENO, buf, len);
-    
-    // Get search term
-    len = snprintf(buf, sizeof(buf), "Find: ");
-    write(STDOUT_FILENO, buf, len);
-    
-    E.replace.find_term[0] = '\0';
-    int pos = 0;
-    
-    while (1) {
-        int c = read_key();
-        
-        if (c == '\r') {
-            break;
-        } else if (c == '\x1b') {
-            editor_set_status_message("Search and replace cancelled");
-            return;
-        } else if (c == 127 && pos > 0) { // Backspace
-            pos--;
-            E.replace.find_term[pos] = '\0';
-            write(STDOUT_FILENO, "\b \b", 3);
-        } else if (c >= 32 && c < 127 && pos < MAX_SEARCH_TERM - 1) {
-            E.replace.find_term[pos] = c;
-            E.replace.find_term[pos + 1] = '\0';
-            pos++;
-            write(STDOUT_FILENO, &c, 1);
-        }
-    }
-    
-    if (strlen(E.replace.find_term) == 0) {
-        editor_set_status_message("Empty search term");
-        return;
-    }
-    
-    // Get replace term
-    len = snprintf(buf, sizeof(buf), "\r\nReplace with: ");
-    write(STDOUT_FILENO, buf, len);
-    
-    E.replace.replace_term[0] = '\0';
-    pos = 0;
-    
-    while (1) {
-        int c = read_key();
-        
-        if (c == '\r') {
-            break;
-        } else if (c == '\x1b') {
-            editor_set_status_message("Search and replace cancelled");
-            return;
-        } else if (c == 127 && pos > 0) { // Backspace
-            pos--;
-            E.replace.replace_term[pos] = '\0';
-            write(STDOUT_FILENO, "\b \b", 3);
-        } else if (c >= 32 && c < 127 && pos < MAX_SEARCH_TERM - 1) {
-            E.replace.replace_term[pos] = c;
-            E.replace.replace_term[pos + 1] = '\0';
-            pos++;
-            write(STDOUT_FILENO, &c, 1);
-        }
-    }
-    
-    // Show options
-    len = snprintf(buf, sizeof(buf), "\r\n\r\nOptions:\r\n");
-    write(STDOUT_FILENO, buf, len);
-    len = snprintf(buf, sizeof(buf), "  [R] Replace current match\r\n");
-    write(STDOUT_FILENO, buf, len);
-    len = snprintf(buf, sizeof(buf), "  [A] Replace all matches\r\n");
-    write(STDOUT_FILENO, buf, len);
-    len = snprintf(buf, sizeof(buf), "  [ESC] Cancel\r\n");
-    write(STDOUT_FILENO, buf, len);
-    len = snprintf(buf, sizeof(buf), "\r\nChoice: ");
-    write(STDOUT_FILENO, buf, len);
-    
-    int choice = read_key();
-    
-    switch (choice) {
-        case 'r':
-        case 'R':
-            // First find the term
-            strcpy(E.search.term, E.replace.find_term);
-            E.search.current_match = -1;
-            E.search.total_matches = 0;
-            
-            // Count matches and find first one
-            for (int i = 0; i < E.line_count; i++) {
-                char *line = E.lines[i];
-                char *pos = line;
-                while ((pos = strstr(pos, E.replace.find_term)) != NULL) {
-                    E.search.total_matches++;
-                    if (E.search.current_match == -1) {
-                        E.cursor_line = i;
-                        E.cursor_col = pos - line;
-                        E.search.current_match = 1;
-                        E.search.last_match_line = i;
-                        E.search.last_match_col = pos - line;
-                    }
-                    pos += strlen(E.replace.find_term);
-                }
-            }
-            
-            if (E.search.total_matches > 0) {
-                editor_set_status_message("Found %d matches. Press 'r' to replace current, 'n' for next", 
-                                        E.search.total_matches);
-                E.search_mode = 1;
-            } else {
-                editor_set_status_message("No matches found");
-            }
-            break;
-            
-        case 'a':
-        case 'A':
-            editor_replace_all();
-            break;
-            
-        default:
-            editor_set_status_message("Search and replace cancelled");
-            break;
-    }
-}
-
-void editor_replace_current() {
-    if (E.search.current_match == -1) {
-        editor_set_status_message("No current match to replace");
-        return;
-    }
-    
-    editor_save_snapshot();
-    
-    char *line = E.lines[E.search.last_match_line];
-    int find_len = strlen(E.replace.find_term);
-    int replace_len = strlen(E.replace.replace_term);
-    int line_len = strlen(line);
-    
-    // Check if replacement would make line too long
-    if (line_len - find_len + replace_len >= MAX_LINE_LENGTH - 1) {
-        editor_set_status_message("Replacement would make line too long");
-        return;
-    }
-    
-    // Make space for replacement if needed
-    if (replace_len != find_len) {
-        memmove(line + E.search.last_match_col + replace_len,
-                line + E.search.last_match_col + find_len,
-                line_len - E.search.last_match_col - find_len + 1);
-    }
-    
-    // Insert replacement text
-    strncpy(line + E.search.last_match_col, E.replace.replace_term, replace_len);
-    
-    E.dirty = 1;
-    
-    // Find next match
-    E.search.current_match++;
-    E.cursor_col = E.search.last_match_col + replace_len;
-    
-    int found_next = 0;
-    
-    // Search from current position
-    char *pos = E.lines[E.cursor_line] + E.cursor_col;
-    char *next_match = strstr(pos, E.replace.find_term);
-    if (next_match) {
-        E.search.last_match_line = E.cursor_line;
-        E.search.last_match_col = next_match - E.lines[E.cursor_line];
-        E.cursor_col = E.search.last_match_col;
-        found_next = 1;
-    } else {
-        // Search remaining lines
-        for (int i = E.cursor_line + 1; i < E.line_count && !found_next; i++) {
-            next_match = strstr(E.lines[i], E.replace.find_term);
-            if (next_match) {
-                E.search.last_match_line = i;
-                E.search.last_match_col = next_match - E.lines[i];
-                E.cursor_line = i;
-                E.cursor_col = E.search.last_match_col;
-                found_next = 1;
-            }
-        }
-    }
-    
-    if (found_next) {
-        editor_set_status_message("Replaced 1. Match %d of %d. Press 'r' to replace current, 'n' for next", 
-                                E.search.current_match, E.search.total_matches);
-    } else {
-        editor_set_status_message("Replaced 1. No more matches");
-        E.search_mode = 0;
-        E.search.current_match = -1;
-    }
-}
-
-void editor_replace_all() {
-    if (strlen(E.replace.find_term) == 0) {
-        editor_set_status_message("No search term specified");
-        return;
-    }
-    
-    editor_save_snapshot();
-    
-    int replacements = 0;
-    int find_len = strlen(E.replace.find_term);
-    int replace_len = strlen(E.replace.replace_term);
-    
-    for (int i = 0; i < E.line_count; i++) {
-        char *line = E.lines[i];
-        char new_line[MAX_LINE_LENGTH];
-        int new_pos = 0;
-        int old_pos = 0;
-        
-        while (old_pos < (int)strlen(line)) {
-            char *match = strstr(line + old_pos, E.replace.find_term);
-            if (match && match == line + old_pos) {
-                // Found match at current position
-                if (new_pos + replace_len < MAX_LINE_LENGTH - 1) {
-                    strcpy(new_line + new_pos, E.replace.replace_term);
-                    new_pos += replace_len;
-                    old_pos += find_len;
-                    replacements++;
-                } else {
-                    // Would exceed line length, copy rest as-is
-                    strcpy(new_line + new_pos, line + old_pos);
-                    break;
-                }
-            } else {
-                // No match, copy character
-                if (new_pos < MAX_LINE_LENGTH - 1) {
-                    new_line[new_pos++] = line[old_pos++];
-                } else {
-                    break;
-                }
-            }
-        }
-        
-        new_line[new_pos] = '\0';
-        strcpy(E.lines[i], new_line);
-    }
-    
-    if (replacements > 0) {
-        E.dirty = 1;
-        editor_set_status_message("Replaced %d occurrences of '%s' with '%s'", 
-                                replacements, E.replace.find_term, E.replace.replace_term);
-    } else {
-        editor_set_status_message("No matches found for '%s'", E.replace.find_term);
-    }
-}
-
 void editor_process_keypress() {
     int c = read_key();
     
@@ -1821,10 +1363,6 @@ void editor_process_keypress() {
             
         case CTRL_KEY('f'):
             editor_search();
-            break;
-            
-        case CTRL_KEY('r'):
-            editor_search_and_replace();
             break;
             
         case CTRL_KEY('o'):
@@ -1906,35 +1444,12 @@ void editor_process_keypress() {
             editor_move_cursor(c);
             break;
             
-        case 1013: // Ctrl+Right arrow - move word right
-            editor_move_word_right();
-            break;
-            
-        case 1014: // Ctrl+Left arrow - move word left
-            editor_move_word_left();
-            break;
-            
-        case CTRL_KEY('i'):  // Smart indent
-            editor_smart_indent_line();
-            break;
-            
-        case CTRL_KEY('d'):  // Duplicate line
-            editor_duplicate_current_line();
-            break;
-            
-        case CTRL_KEY('e'):  // Enhance markdown
-            editor_enhance_markdown();
-            break;
-            
         case '\x1b':
             // Escape key - do nothing for now
             break;
             
         default:
-            if (c == 'r' && E.search_mode && E.search.current_match > 0) {
-                // Replace current match during search mode
-                editor_replace_current();
-            } else if (c >= 32 && c < 127) {
+            if (c >= 32 && c < 127) {
                 editor_insert_char(c);
             }
             break;

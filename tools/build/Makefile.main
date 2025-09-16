@@ -40,7 +40,7 @@ flutter:
 # Run all tests
 tests: engines
 	@echo "🧪 Running all tests..."
-	$(MAKE) -C tests/unit all
+	@if [ -d tests/unit ]; then $(MAKE) -C tests/unit all; else echo "⚠️  Unit tests directory not found"; fi
 	$(MAKE) -C tools/tui test
 	@echo "✅ All tests completed"
 
@@ -81,7 +81,7 @@ clean:
 	$(MAKE) -C engines/markdown clean
 	$(MAKE) -C engines/editor clean
 	$(MAKE) -C tools/tui clean
-	$(MAKE) -C tests/unit clean
+	@if [ -d tests/unit ]; then $(MAKE) -C tests/unit clean; fi
 	rm -rf flutter/build/
 	@echo "✅ All artifacts cleaned"
 

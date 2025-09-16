@@ -1038,3 +1038,402 @@ int json_to_markdown(const Document *doc, char **out_markdown) {
   fclose(fp);
   return 0;
 }
+
+// ============= NEW ADVANCED MARKDOWN FUNCTIONS =============
+
+// Parse inline code (`code`)
+int parse_code_blocks(const char *text, InlineSpan *spans, size_t max_spans) {
+  if (!text || !spans || max_spans == 0) return 0;
+  
+  size_t len = strlen(text);
+  size_t span_count = 0;
+  
+  for (size_t i = 0; i < len && span_count < max_spans; i++) {
+    if (text[i] == '`') {
+      size_t start = i;
+      
+      // Find closing `
+      for (size_t j = i + 1; j < len; j++) {
+        if (text[j] == '`') {
+          spans[span_count].style = INLINE_CODE;
+          spans[span_count].start = start;
+          spans[span_count].end = j + 1;
+          span_count++;
+          i = j;
+          break;
+        }
+      }
+    }
+  }
+  
+  return span_count;
+}
+
+// Parse strikethrough (~~text~~)
+int parse_strikethrough(const char *text, InlineSpan *spans, size_t max_spans) {
+  if (!text || !spans || max_spans == 0) return 0;
+  
+  size_t len = strlen(text);
+  size_t span_count = 0;
+  
+  for (size_t i = 0; i + 1 < len && span_count < max_spans; i++) {
+    if (text[i] == '~' && text[i + 1] == '~') {
+      size_t start = i;
+      
+      // Find closing ~~
+      for (size_t j = i + 2; j + 1 < len; j++) {
+        if (text[j] == '~' && text[j + 1] == '~') {
+          spans[span_count].style = INLINE_STRIKETHROUGH;
+          spans[span_count].start = start;
+          spans[span_count].end = j + 2;
+          span_count++;
+          i = j + 1;
+          break;
+        }
+      }
+    }
+  }
+  
+  return span_count;
+}
+
+// Parse links [text](url) and images ![alt](url)
+int parse_links_and_images(const char *text, InlineSpan *spans, size_t max_spans) {
+  if (!text || !spans || max_spans == 0) return 0;
+  
+  size_t len = strlen(text);
+  size_t span_count = 0;
+  
+  for (size_t i = 0; i < len && span_count < max_spans; i++) {
+    // Check for image ![
+    if (i + 1 < len && text[i] == '!' && text[i + 1] == '[') {
+      size_t start = i;
+      size_t bracket_end = 0;
+      size_t paren_start = 0;
+      size_t paren_end = 0;
+      
+      // Find closing ]
+      for (size_t j = i + 2; j < len; j++) {
+        if (text[j] == ']') {
+          bracket_end = j;
+          break;
+        }
+      }
+      
+      // Find opening (
+      if (bracket_end > 0 && bracket_end + 1 < len && text[bracket_end + 1] == '(') {
+        paren_start = bracket_end + 1;
+        
+        // Find closing )
+        for (size_t j = paren_start + 1; j < len; j++) {
+          if (text[j] == ')') {
+            paren_end = j;
+            break;
+          }
+        }
+        
+        if (paren_end > paren_start) {
+          spans[span_count].style = INLINE_IMAGE_REF;
+          spans[span_count].start = start;
+          spans[span_count].end = paren_end + 1;
+          span_count++;
+          i = paren_end;
+        }
+      }
+    }
+    // Check for link [
+    else if (text[i] == '[') {
+      size_t start = i;
+      size_t bracket_end = 0;
+      size_t paren_start = 0;
+      size_t paren_end = 0;
+      
+      // Find closing ]
+      for (size_t j = i + 1; j < len; j++) {
+        if (text[j] == ']') {
+          bracket_end = j;
+          break;
+        }
+      }
+      
+      // Find opening (
+      if (bracket_end > 0 && bracket_end + 1 < len && text[bracket_end + 1] == '(') {
+        paren_start = bracket_end + 1;
+        
+        // Find closing )
+        for (size_t j = paren_start + 1; j < len; j++) {
+          if (text[j] == ')') {
+            paren_end = j;
+            break;
+          }
+        }
+        
+        if (paren_end > paren_start) {
+          spans[span_count].style = INLINE_LINK;
+          spans[span_count].start = start;
+          spans[span_count].end = paren_end + 1;
+          span_count++;
+          i = paren_end;
+        }
+      }
+    }
+  }
+  
+  return span_count;
+}
+
+// Validate URL format
+bool is_valid_url(const char *url) {
+  if (!url || strlen(url) < 4) return false;
+  
+  // Check for common protocols
+  if (strncmp(url, "http://", 7) == 0 || 
+      strncmp(url, "https://", 8) == 0 ||
+      strncmp(url, "ftp://", 6) == 0 ||
+      strncmp(url, "file://", 7) == 0) {
+    return true;
+  }
+  
+  // Check for relative URLs starting with /
+  if (url[0] == '/') return true;
+  
+  // Check for anchor links
+  if (url[0] == '#') return true;
+  
+  return false;
+}
+
+// Check if line is a markdown heading
+bool is_markdown_heading(const char *line) {
+  if (!line) return false;
+  
+  // Skip leading whitespace
+  while (*line == ' ' || *line == '\t') line++;
+  
+  return (*line == '#');
+}
+
+// Get heading level (1-6)
+int get_heading_level(const char *line) {
+  if (!line) return 0;
+  
+  // Skip leading whitespace
+  while (*line == ' ' || *line == '\t') line++;
+  
+  int level = 0;
+  while (*line == '#' && level < 6) {
+    level++;
+    line++;
+  }
+  
+  // Must be followed by space or end of line
+  if (*line == ' ' || *line == '\t' || *line == '\0' || *line == '\n') {
+    return level;
+  }
+  
+  return 0;
+}
+
+// Extract heading text (without # symbols)
+char* extract_heading_text(const char *line) {
+  if (!line) return NULL;
+  
+  // Skip leading whitespace
+  while (*line == ' ' || *line == '\t') line++;
+  
+  // Skip # symbols
+  while (*line == '#') line++;
+  
+  // Skip space after #
+  while (*line == ' ' || *line == '\t') line++;
+  
+  // Find end of line
+  const char *end = line;
+  while (*end != '\0' && *end != '\n' && *end != '\r') {
+    end++;
+  }
+  
+  // Remove trailing whitespace
+  while (end > line && (*(end - 1) == ' ' || *(end - 1) == '\t')) {
+    end--;
+  }
+  
+  // Create result string
+  size_t len = end - line;
+  char *result = malloc(len + 1);
+  if (result) {
+    strncpy(result, line, len);
+    result[len] = '\0';
+  }
+  
+  return result;
+}
+
+// Validate markdown structure
+bool validate_markdown_structure(const char *markdown) {
+  if (!markdown) return false;
+  
+  // Check for balanced brackets
+  int bracket_count = 0;
+  int paren_count = 0;
+  int code_block_count = 0;
+  
+  const char *p = markdown;
+  while (*p) {
+    switch (*p) {
+      case '[':
+        bracket_count++;
+        break;
+      case ']':
+        bracket_count--;
+        if (bracket_count < 0) return false;
+        break;
+      case '(':
+        paren_count++;
+        break;
+      case ')':
+        paren_count--;
+        if (paren_count < 0) return false;
+        break;
+      case '`':
+        // Check for triple backticks
+        if (p[1] == '`' && p[2] == '`') {
+          code_block_count++;
+          p += 2; // Skip the other two backticks
+        }
+        break;
+    }
+    p++;
+  }
+  
+  // All brackets and parentheses should be balanced
+  // Code blocks should be even (paired)
+  return (bracket_count == 0 && paren_count == 0 && (code_block_count % 2) == 0);
+}
+
+// Enhance markdown formatting
+char* enhance_markdown_formatting(const char *markdown) {
+  if (!markdown) return NULL;
+  
+  size_t len = strlen(markdown);
+  // Allocate extra space for enhancements
+  char *result = malloc(len * 2 + 1000);
+  if (!result) return NULL;
+  
+  const char *src = markdown;
+  char *dst = result;
+  
+  while (*src) {
+    // Auto-format headings
+    if (*src == '#') {
+      // Count heading level
+      int level = 0;
+      const char *p = src;
+      while (*p == '#' && level < 6) {
+        level++;
+        p++;
+      }
+      
+      // Add proper spacing
+      for (int i = 0; i < level; i++) {
+        *dst++ = '#';
+      }
+      
+      if (*p != ' ' && *p != '\0' && *p != '\n') {
+        *dst++ = ' ';
+      }
+      
+      src = p;
+      continue;
+    }
+    
+    // Auto-format list items
+    if ((*src == '-' || *src == '*' || *src == '+') && 
+        (src == markdown || *(src - 1) == '\n')) {
+      *dst++ = *src++;
+      if (*src != ' ') {
+        *dst++ = ' ';
+      }
+      continue;
+    }
+    
+    *dst++ = *src++;
+  }
+  
+  *dst = '\0';
+  return result;
+}
+
+// Auto-format lists
+char* auto_format_lists(const char *markdown) {
+  if (!markdown) return NULL;
+  
+  size_t len = strlen(markdown);
+  char *result = malloc(len * 2 + 1);
+  if (!result) return NULL;
+  
+  const char *src = markdown;
+  char *dst = result;
+  bool at_line_start = true;
+  
+  while (*src) {
+    if (at_line_start && (*src == '-' || *src == '*' || *src == '+')) {
+      *dst++ = '-'; // Standardize to dash
+      *dst++ = ' ';
+      src++;
+      // Skip existing space if present
+      if (*src == ' ') src++;
+      at_line_start = false;
+      continue;
+    }
+    
+    *dst++ = *src;
+    at_line_start = (*src == '\n');
+    src++;
+  }
+  
+  *dst = '\0';
+  return result;
+}
+
+// Fix markdown spacing
+char* fix_markdown_spacing(const char *markdown) {
+  if (!markdown) return NULL;
+  
+  size_t len = strlen(markdown);
+  char *result = malloc(len * 2 + 1);
+  if (!result) return NULL;
+  
+  const char *src = markdown;
+  char *dst = result;
+  char prev_char = '\0';
+  
+  while (*src) {
+    char curr_char = *src;
+    
+    // Add proper spacing around formatting markers
+    if ((curr_char == '*' || curr_char == '_' || curr_char == '`') &&
+        prev_char != ' ' && prev_char != '\0' && prev_char != '\n' &&
+        !isalnum(prev_char)) {
+      // Don't add space if it's part of markdown syntax
+    }
+    
+    // Remove multiple consecutive newlines (max 2)
+    if (curr_char == '\n' && prev_char == '\n') {
+      // Look ahead for more newlines
+      const char *p = src + 1;
+      while (*p == '\n') p++;
+      if (p > src + 1) {
+        // Skip extra newlines, keep only one more
+        src = p - 1;
+      }
+    }
+    
+    *dst++ = *src;
+    prev_char = curr_char;
+    src++;
+  }
+  
+  *dst = '\0';
+  return result;
+}

@@ -16,7 +16,11 @@ typedef enum {
   INLINE_ITALIC,
   INLINE_BOLD_ITALIC,
   INLINE_HIGHLIGHT,
-  INLINE_UNDERLINE
+  INLINE_UNDERLINE,
+  INLINE_CODE,
+  INLINE_STRIKETHROUGH,
+  INLINE_LINK,
+  INLINE_IMAGE_REF
 } InlineStyle;
 
 typedef struct {
@@ -33,3 +37,18 @@ bool is_table_separator_line(const char *line);
 char **split_table_row(const char *line, int *col_count);
 TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
                                       size_t span_count, size_t *out_count);
+
+// Advanced markdown parsing functions
+int parse_code_blocks(const char *text, InlineSpan *spans, size_t max_spans);
+int parse_strikethrough(const char *text, InlineSpan *spans, size_t max_spans);
+int parse_links_and_images(const char *text, InlineSpan *spans, size_t max_spans);
+bool is_valid_url(const char *url);
+bool is_markdown_heading(const char *line);
+int get_heading_level(const char *line);
+char* extract_heading_text(const char *line);
+
+// Markdown validation and enhancement
+bool validate_markdown_structure(const char *markdown);
+char* enhance_markdown_formatting(const char *markdown);
+char* auto_format_lists(const char *markdown);
+char* fix_markdown_spacing(const char *markdown);

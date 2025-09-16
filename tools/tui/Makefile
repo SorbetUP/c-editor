@@ -25,7 +25,7 @@ DEBUG_FLAGS = -DDEBUG_CURSOR=1 -DDEBUG_VERBOSE=1
 RELEASE_FLAGS = -DDEBUG_CURSOR=0 -DNDEBUG
 
 # Include paths
-INCLUDES = -I$(CURSOR_DIR) -I$(MARKDOWN_DIR)
+INCLUDES = -I$(CURSOR_DIR) -I$(MARKDOWN_DIR) -I../../engines/editor
 
 .PHONY: all clean run demo test debug help
 

@@ -500,3 +500,384 @@ void cursor_print_debug(const char* content, int position) {
                     context.inside_marker ? "yes" : "no");
     }
 }
+
+// ============= NEW ADVANCED CURSOR FUNCTIONS =============
+
+// Helper functions for word navigation
+bool cursor_is_whitespace_char(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+bool cursor_is_word_char(char c) {
+    return isalnum(c) || c == '_';
+}
+
+bool cursor_is_at_word_boundary(const char* content, int position) {
+    if (!content) return false;
+    int len = strlen(content);
+    
+    if (position <= 0 || position >= len) return true;
+    
+    char prev_char = content[position - 1];
+    char curr_char = content[position];
+    
+    // Boundary between word and non-word characters
+    return (cursor_is_word_char(prev_char) != cursor_is_word_char(curr_char));
+}
+
+// Word navigation functions
+cursor_position_t cursor_move_word_left(const char* content, int position) {
+    cursor_position_t result = {0, position, true, false};
+    
+    if (!content || position <= 0) {
+        result.position = 0;
+        result.is_valid = true;
+        return result;
+    }
+    
+    int len = strlen(content);
+    if (position > len) position = len;
+    
+    int pos = position - 1;
+    
+    // Skip whitespace to the left
+    while (pos >= 0 && cursor_is_whitespace_char(content[pos])) {
+        pos--;
+    }
+    
+    // Move to start of current word
+    while (pos >= 0 && cursor_is_word_char(content[pos])) {
+        pos--;
+    }
+    
+    // Skip non-word, non-whitespace characters
+    while (pos >= 0 && !cursor_is_word_char(content[pos]) && !cursor_is_whitespace_char(content[pos])) {
+        pos--;
+    }
+    
+    result.position = pos + 1;
+    result.is_valid = true;
+    
+    CURSOR_DEBUG("Move word left from %d to %d", position, result.position);
+    return result;
+}
+
+cursor_position_t cursor_move_word_right(const char* content, int position) {
+    cursor_position_t result = {0, position, true, false};
+    
+    if (!content) {
+        result.is_valid = false;
+        return result;
+    }
+    
+    int len = strlen(content);
+    if (position >= len) {
+        result.position = len;
+        result.is_valid = true;
+        return result;
+    }
+    
+    int pos = position;
+    
+    // Skip current word
+    while (pos < len && cursor_is_word_char(content[pos])) {
+        pos++;
+    }
+    
+    // Skip non-word, non-whitespace characters  
+    while (pos < len && !cursor_is_word_char(content[pos]) && !cursor_is_whitespace_char(content[pos])) {
+        pos++;
+    }
+    
+    // Skip whitespace
+    while (pos < len && cursor_is_whitespace_char(content[pos])) {
+        pos++;
+    }
+    
+    result.position = pos;
+    result.is_valid = true;
+    
+    CURSOR_DEBUG("Move word right from %d to %d", position, result.position);
+    return result;
+}
+
+cursor_position_t cursor_move_to_line_start(const char* content, int position) {
+    cursor_position_t result = {0, position, true, false};
+    
+    if (!content) {
+        result.is_valid = false;
+        return result;
+    }
+    
+    int pos = position;
+    
+    // Move backwards to find start of line (or beginning of content)
+    while (pos > 0 && content[pos - 1] != '\n') {
+        pos--;
+    }
+    
+    result.position = pos;
+    result.is_valid = true;
+    
+    CURSOR_DEBUG("Move to line start from %d to %d", position, result.position);
+    return result;
+}
+
+cursor_position_t cursor_move_to_line_end(const char* content, int position) {
+    cursor_position_t result = {0, position, true, false};
+    
+    if (!content) {
+        result.is_valid = false;
+        return result;
+    }
+    
+    int len = strlen(content);
+    int pos = position;
+    
+    // Move forward to find end of line (or end of content)
+    while (pos < len && content[pos] != '\n') {
+        pos++;
+    }
+    
+    result.position = pos;
+    result.is_valid = true;
+    
+    CURSOR_DEBUG("Move to line end from %d to %d", position, result.position);
+    return result;
+}
+
+// Smart indentation functions
+int cursor_get_line_indentation(const char* line) {
+    if (!line) return 0;
+    
+    int indent = 0;
+    for (int i = 0; line[i] != '\0' && line[i] != '\n'; i++) {
+        if (line[i] == ' ') {
+            indent++;
+        } else if (line[i] == '\t') {
+            indent += 4; // Tab equals 4 spaces
+        } else {
+            break;
+        }
+    }
+    
+    return indent;
+}
+
+char* cursor_create_indented_line(const char* content, int indent_level) {
+    if (!content) return NULL;
+    
+    size_t content_len = strlen(content);
+    char* result = malloc(content_len + indent_level + 1);
+    if (!result) return NULL;
+    
+    // Add indentation
+    for (int i = 0; i < indent_level; i++) {
+        result[i] = ' ';
+    }
+    
+    // Copy content
+    strcpy(result + indent_level, content);
+    
+    return result;
+}
+
+cursor_operation_result_t cursor_smart_indent(const char* content, int position) {
+    cursor_operation_result_t result = {false, {0, 0, true, false}, NULL, NULL, NULL};
+    
+    if (!content) {
+        result.error_message = safe_strdup("Invalid content");
+        return result;
+    }
+    
+    // Find the start of the current line
+    cursor_position_t line_start = cursor_move_to_line_start(content, position);
+    cursor_position_t line_end = cursor_move_to_line_end(content, position);
+    
+    // Extract current line
+    char* current_line = safe_substr(content, line_start.position, 
+                                   line_end.position - line_start.position);
+    if (!current_line) {
+        result.error_message = safe_strdup("Memory allocation failed");
+        return result;
+    }
+    
+    // Get indentation of previous line (if exists)
+    int prev_indent = 0;
+    if (line_start.position > 0) {
+        // Find previous line
+        int prev_line_end = line_start.position - 2; // Skip the \n
+        while (prev_line_end >= 0 && content[prev_line_end] != '\n') {
+            prev_line_end--;
+        }
+        int prev_line_start = prev_line_end + 1;
+        
+        char* prev_line = safe_substr(content, prev_line_start, 
+                                    line_start.position - 1 - prev_line_start);
+        if (prev_line) {
+            prev_indent = cursor_get_line_indentation(prev_line);
+            free(prev_line);
+        }
+    }
+    
+    // Create properly indented line
+    char* indented_line = cursor_create_indented_line(current_line, prev_indent);
+    free(current_line);
+    
+    if (!indented_line) {
+        result.error_message = safe_strdup("Failed to create indented line");
+        return result;
+    }
+    
+    // Create result
+    result.before_cursor = safe_substr(content, 0, line_start.position);
+    result.after_cursor = safe_substr(content, line_end.position, 
+                                    strlen(content) - line_end.position);
+    
+    // Concatenate with indented line
+    size_t before_len = result.before_cursor ? strlen(result.before_cursor) : 0;
+    size_t indented_len = strlen(indented_line);
+    
+    char* new_before = malloc(before_len + indented_len + 1);
+    if (new_before) {
+        strcpy(new_before, result.before_cursor ? result.before_cursor : "");
+        strcat(new_before, indented_line);
+        free(result.before_cursor);
+        result.before_cursor = new_before;
+    }
+    
+    result.new_position.position = line_start.position + indented_len;
+    result.new_position.is_valid = true;
+    result.success = true;
+    
+    free(indented_line);
+    return result;
+}
+
+// Bracket matching functions
+cursor_position_t cursor_find_matching_bracket(const char* content, int position) {
+    cursor_position_t result = {0, -1, true, false};
+    
+    if (!content || position < 0 || position >= (int)strlen(content)) {
+        return result;
+    }
+    
+    char current = content[position];
+    char target;
+    int direction;
+    
+    // Determine bracket type and search direction
+    switch (current) {
+        case '(':
+            target = ')';
+            direction = 1;
+            break;
+        case '[':
+            target = ']';
+            direction = 1;
+            break;
+        case '{':
+            target = '}';
+            direction = 1;
+            break;
+        case ')':
+            target = '(';
+            direction = -1;
+            break;
+        case ']':
+            target = '[';
+            direction = -1;
+            break;
+        case '}':
+            target = '{';
+            direction = -1;
+            break;
+        default:
+            return result; // Not a bracket
+    }
+    
+    int len = strlen(content);
+    int pos = position + direction;
+    int depth = 1;
+    
+    while (pos >= 0 && pos < len && depth > 0) {
+        if (content[pos] == current) {
+            depth++;
+        } else if (content[pos] == target) {
+            depth--;
+        }
+        
+        if (depth == 0) {
+            result.position = pos;
+            result.is_valid = true;
+            break;
+        }
+        
+        pos += direction;
+    }
+    
+    CURSOR_DEBUG("Find matching bracket for '%c' at %d: found at %d", 
+                current, position, result.position);
+    return result;
+}
+
+// Line manipulation functions
+cursor_operation_result_t cursor_duplicate_line(const char* content, int position) {
+    cursor_operation_result_t result = {false, {0, 0, true, false}, NULL, NULL, NULL};
+    
+    if (!content) {
+        result.error_message = safe_strdup("Invalid content");
+        return result;
+    }
+    
+    // Find line boundaries
+    cursor_position_t line_start = cursor_move_to_line_start(content, position);
+    cursor_position_t line_end = cursor_move_to_line_end(content, position);
+    
+    // Extract current line
+    char* current_line = safe_substr(content, line_start.position, 
+                                   line_end.position - line_start.position);
+    if (!current_line) {
+        result.error_message = safe_strdup("Memory allocation failed");
+        return result;
+    }
+    
+    // Create duplicated content
+    size_t line_len = strlen(current_line);
+    char* duplicated = malloc(line_len * 2 + 2); // +2 for \n
+    if (!duplicated) {
+        free(current_line);
+        result.error_message = safe_strdup("Memory allocation failed");
+        return result;
+    }
+    
+    sprintf(duplicated, "%s\n%s", current_line, current_line);
+    
+    // Build result
+    result.before_cursor = safe_substr(content, 0, line_start.position);
+    result.after_cursor = safe_substr(content, line_end.position, 
+                                    strlen(content) - line_end.position);
+    
+    // Update before_cursor to include duplicated line
+    if (result.before_cursor) {
+        size_t before_len = strlen(result.before_cursor);
+        size_t dup_len = strlen(duplicated);
+        char* new_before = malloc(before_len + dup_len + 1);
+        if (new_before) {
+            strcpy(new_before, result.before_cursor);
+            strcat(new_before, duplicated);
+            free(result.before_cursor);
+            result.before_cursor = new_before;
+        }
+    } else {
+        result.before_cursor = safe_strdup(duplicated);
+    }
+    
+    result.new_position.position = line_start.position + line_len + 1; // Position on duplicated line
+    result.new_position.is_valid = true;
+    result.success = true;
+    
+    free(current_line);
+    free(duplicated);
+    return result;
+}
