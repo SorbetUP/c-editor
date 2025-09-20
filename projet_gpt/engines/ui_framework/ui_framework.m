@@ -1529,8 +1529,8 @@ bool ui_framework_setup_layout(UIFramework* framework) {
     [framework->containerView addSubview:framework->sidebarView]; // En dernier pour être au-dessus
     
     // Ajouter les icônes par défaut dans l'ordre du workflow
-    ui_framework_add_icon(framework, UI_ICON_HOME);     // Tableau de bord
     ui_framework_add_icon(framework, UI_ICON_SEARCH);   // Recherche
+    ui_framework_add_icon(framework, UI_ICON_HOME);     // Tableau de bord
     ui_framework_add_icon(framework, UI_ICON_SETTINGS); // Paramètres
     
     framework->isInitialized = true;
@@ -1604,6 +1604,7 @@ static void ui_framework_layout_icons(UIFramework* framework) {
     CGFloat sidebarHeight = NSHeight([framework->sidebarView bounds]);
     CGFloat topMargin = 40.0;
     CGFloat bottomMargin = 30.0;
+    CGFloat bottomReserved = bottomMargin + iconSize + 16.0;
 
     NSMutableArray<UIIconButton*>* orderedButtons = [NSMutableArray array];
     UIIconButton* settingsButton = nil;
@@ -1618,16 +1619,21 @@ static void ui_framework_layout_icons(UIFramework* framework) {
 
     NSInteger count = [orderedButtons count];
     if (count > 0) {
-        CGFloat usableHeight = MAX(sidebarHeight - topMargin - bottomMargin - iconSize, 0.0);
-        CGFloat spacing = (count > 1) ? usableHeight / (count - 1) : 0.0;
-        CGFloat startY = sidebarHeight - topMargin - iconSize;
+        CGFloat topY = sidebarHeight - topMargin - iconSize;
+        CGFloat minY = MAX(bottomReserved, bottomMargin + iconSize);
+        CGFloat span = MAX(topY - minY, 0.0);
+        CGFloat step = (count > 1 && span > 0.0) ? span / (count - 1) : 0.0;
         CGFloat x = (sidebarWidth - iconSize) / 2.0;
 
         for (NSInteger idx = 0; idx < count; idx++) {
             UIIconButton* button = orderedButtons[idx];
+            CGFloat y = topY - (step * idx);
+            if (y < minY) {
+                y = minY;
+            }
             NSRect frame = button.frame;
             frame.origin.x = x;
-            frame.origin.y = startY - (spacing * idx);
+            frame.origin.y = y;
             frame.size = NSMakeSize(iconSize, iconSize);
             [button setFrame:frame];
         }
