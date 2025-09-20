@@ -54,6 +54,7 @@
     BOOL _suppressExpansionTracking;
     BOOL _suppressQuerySync;
     BOOL _observersBound;
+    NSLayoutConstraint* _searchContainerLeadingConstraint;
 }
 @end
 
@@ -82,6 +83,7 @@
     [_displayNodes release];
     [_expandedPaths release];
     [_activeQuery release];
+    [_searchContainerLeadingConstraint release];
     [super dealloc];
 }
 
@@ -130,10 +132,13 @@
         [_searchContainer setHidden:YES];
         [_searchContainer setWantsLayer:YES];
         [_searchContainer.layer setBackgroundColor:[[NSColor windowBackgroundColor] CGColor]];
-        [container addSubview:_searchContainer];
+        [container addSubview:_searchContainer positioned:NSWindowBelow relativeTo:self.uiFramework->sidebarView];
         
+        CGFloat sidebarWidth = self.uiFramework ? self.uiFramework->sidebarConfig.width : 60.0;
+        [_searchContainerLeadingConstraint release];
+        _searchContainerLeadingConstraint = [[NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeLeading multiplier:1.0 constant:sidebarWidth] retain];
         NSArray* containerConstraints = [NSArray arrayWithObjects:
-            [NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeLeading multiplier:1.0 constant:0.0],
+            _searchContainerLeadingConstraint,
             [NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeTrailing relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeTrailing multiplier:1.0 constant:0.0],
             [NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeTop multiplier:1.0 constant:0.0],
             [NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeBottom relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeBottom multiplier:1.0 constant:0.0],
@@ -312,6 +317,10 @@
 - (void)presentSearchInterface {
     if (!self.uiFramework) {
         return;
+    }
+    if (_searchContainerLeadingConstraint) {
+        CGFloat sidebarWidth = self.uiFramework->sidebarConfig.width;
+        [_searchContainerLeadingConstraint setConstant:sidebarWidth];
     }
     if (self.uiFramework->editorScrollView) {
         [self.uiFramework->editorScrollView setHidden:YES];
