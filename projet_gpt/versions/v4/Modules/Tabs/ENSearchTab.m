@@ -56,7 +56,6 @@
     BOOL _observersBound;
     NSLayoutConstraint* _searchContainerLeadingConstraint;
     NSLayoutConstraint* _searchContainerTrailingConstraint;
-    NSLayoutConstraint* _searchContainerWidthConstraint;
 }
 @end
 
@@ -87,7 +86,6 @@
     [_activeQuery release];
     [_searchContainerLeadingConstraint release];
     [_searchContainerTrailingConstraint release];
-    [_searchContainerWidthConstraint release];
     [super dealloc];
 }
 
@@ -139,14 +137,10 @@
         [container addSubview:_searchContainer positioned:NSWindowBelow relativeTo:self.uiFramework->sidebarView];
         
         CGFloat sidebarWidth = self.uiFramework ? self.uiFramework->sidebarConfig.width : 60.0;
-        CGFloat preferredWidth = MAX(520.0, MIN(NSWidth([container bounds]) - sidebarWidth - 80.0, 720.0));
         [_searchContainerLeadingConstraint release];
         [_searchContainerTrailingConstraint release];
-        [_searchContainerWidthConstraint release];
         _searchContainerLeadingConstraint = [[NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeLeading multiplier:1.0 constant:sidebarWidth] retain];
-        _searchContainerTrailingConstraint = [[NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeTrailing relatedBy:NSLayoutRelationLessThanOrEqual toItem:container attribute:NSLayoutAttributeTrailing multiplier:1.0 constant:-40.0] retain];
-        _searchContainerWidthConstraint = [[NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeWidth relatedBy:NSLayoutRelationLessThanOrEqual toItem:nil attribute:NSLayoutAttributeNotAnAttribute multiplier:1.0 constant:preferredWidth] retain];
-        [_searchContainer addConstraint:_searchContainerWidthConstraint];
+        _searchContainerTrailingConstraint = [[NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeTrailing relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeTrailing multiplier:1.0 constant:0.0] retain];
         NSArray* containerConstraints = [NSArray arrayWithObjects:
             _searchContainerLeadingConstraint,
             _searchContainerTrailingConstraint,
@@ -333,14 +327,7 @@
         [_searchContainerLeadingConstraint setConstant:sidebarWidth];
     }
     if (_searchContainerTrailingConstraint) {
-        CGFloat trailingMargin = -40.0;
-        [_searchContainerTrailingConstraint setConstant:trailingMargin];
-    }
-    if (_searchContainerWidthConstraint) {
-        CGFloat sidebarWidth = self.uiFramework->sidebarConfig.width;
-        CGFloat containerWidth = NSWidth([self.uiFramework->containerView bounds]);
-        CGFloat maxWidth = MAX(520.0, MIN(containerWidth - sidebarWidth - 80.0, 720.0));
-        [_searchContainerWidthConstraint setConstant:maxWidth];
+        [_searchContainerTrailingConstraint setConstant:0.0];
     }
     if (self.uiFramework->editorScrollView) {
         [self.uiFramework->editorScrollView setHidden:YES];
@@ -438,12 +425,7 @@
 
 #pragma mark - Actions
 
-- (void)handleItemDoubleClick:(id)sender {
-    NSInteger row = [_outlineView clickedRow];
-    if (row < 0) {
-        return;
-    }
-    ENFileNode* node = [_outlineView itemAtRow:row];
+- (void)openNode:(ENFileNode*)node {
     if (!node || node.isDirectory) {
         return;
     }
@@ -459,6 +441,15 @@
     } else if (error) {
         NSLog(@"⚠️ [ENSearchTab] Impossible de charger %@ : %@", node.relativePath, error);
     }
+}
+
+- (void)handleItemDoubleClick:(id)sender {
+    NSInteger row = [_outlineView clickedRow];
+    if (row < 0) {
+        return;
+    }
+    ENFileNode* node = [_outlineView itemAtRow:row];
+    [self openNode:node];
 }
 
 #pragma mark - NSSearchFieldDelegate
@@ -507,6 +498,21 @@
 }
 
 #pragma mark - NSOutlineView Delegate
+
+- (void)outlineViewSelectionDidChange:(NSNotification *)notification {
+    if (!_outlineView) {
+        return;
+    }
+    NSInteger selectedRow = [_outlineView selectedRow];
+    if (selectedRow < 0) {
+        return;
+    }
+    ENFileNode* node = [_outlineView itemAtRow:selectedRow];
+    if (!node || node.isDirectory) {
+        return;
+    }
+    [self openNode:node];
+}
 
 - (NSView*)outlineView:(NSOutlineView *)outlineView viewForTableColumn:(NSTableColumn *)tableColumn item:(id)item {
     ENFileNode* node = (ENFileNode*)item;
