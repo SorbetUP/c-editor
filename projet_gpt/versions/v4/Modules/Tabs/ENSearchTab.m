@@ -55,8 +55,6 @@
     BOOL _suppressExpansionTracking;
     BOOL _suppressQuerySync;
     BOOL _observersBound;
-    NSLayoutConstraint* _searchContainerLeadingConstraint;
-    NSLayoutConstraint* _searchContainerTrailingConstraint;
     SearchEngine* _searchEngine;
     NSString* _indexedVaultPath;
 }
@@ -87,8 +85,6 @@
     [_displayNodes release];
     [_expandedPaths release];
     [_activeQuery release];
-    [_searchContainerLeadingConstraint release];
-    [_searchContainerTrailingConstraint release];
     if (_searchEngine) {
         search_engine_destroy(_searchEngine);
         _searchEngine = NULL;
@@ -137,25 +133,16 @@
     }
     if (!_searchContainer) {
         NSView* container = self.uiFramework->containerView;
-        _searchContainer = [[NSView alloc] initWithFrame:[container bounds]];
-        [_searchContainer setTranslatesAutoresizingMaskIntoConstraints:NO];
+        NSRect bounds = [container bounds];
+        CGFloat sidebarWidth = self.uiFramework ? self.uiFramework->sidebarConfig.width : 60.0;
+        NSRect searchFrame = NSMakeRect(sidebarWidth, 0, MAX(0, bounds.size.width - sidebarWidth), bounds.size.height);
+
+        _searchContainer = [[NSView alloc] initWithFrame:searchFrame];
+        [_searchContainer setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
         [_searchContainer setHidden:YES];
         [_searchContainer setWantsLayer:YES];
         [_searchContainer.layer setBackgroundColor:[[NSColor windowBackgroundColor] CGColor]];
         [container addSubview:_searchContainer positioned:NSWindowBelow relativeTo:self.uiFramework->sidebarView];
-        
-        CGFloat sidebarWidth = self.uiFramework ? self.uiFramework->sidebarConfig.width : 60.0;
-        [_searchContainerLeadingConstraint release];
-        [_searchContainerTrailingConstraint release];
-        _searchContainerLeadingConstraint = [[NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeLeading multiplier:1.0 constant:sidebarWidth] retain];
-        _searchContainerTrailingConstraint = [[NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeTrailing relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeTrailing multiplier:1.0 constant:0.0] retain];
-        NSArray* containerConstraints = [NSArray arrayWithObjects:
-            _searchContainerLeadingConstraint,
-            _searchContainerTrailingConstraint,
-            [NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeTop relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeTop multiplier:1.0 constant:0.0],
-            [NSLayoutConstraint constraintWithItem:_searchContainer attribute:NSLayoutAttributeBottom relatedBy:NSLayoutRelationEqual toItem:container attribute:NSLayoutAttributeBottom multiplier:1.0 constant:0.0],
-            nil];
-        [container addConstraints:containerConstraints];
         
         [self buildSearchControls];
     }
@@ -406,12 +393,10 @@
     if (!self.uiFramework) {
         return;
     }
-    if (_searchContainerLeadingConstraint) {
+    if (_searchContainer) {
+        NSRect bounds = [self.uiFramework->containerView bounds];
         CGFloat sidebarWidth = self.uiFramework->sidebarConfig.width;
-        [_searchContainerLeadingConstraint setConstant:sidebarWidth];
-    }
-    if (_searchContainerTrailingConstraint) {
-        [_searchContainerTrailingConstraint setConstant:0.0];
+        [_searchContainer setFrame:NSMakeRect(sidebarWidth, 0, MAX(0, bounds.size.width - sidebarWidth), bounds.size.height)];
     }
     if (self.uiFramework->editorScrollView) {
         [self.uiFramework->editorScrollView setHidden:YES];
