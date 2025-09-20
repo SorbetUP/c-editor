@@ -436,6 +436,12 @@
     NSError* error = nil;
     NSString* content = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:&error];
     if (!error && content && self.uiFramework) {
+        if (self.uiFramework->editorScrollView) {
+            [self.uiFramework->editorScrollView setHidden:NO];
+        }
+        if (_searchContainer) {
+            [_searchContainer setHidden:YES];
+        }
         ui_framework_set_editor_content(self.uiFramework, content);
         NSLog(@"📄 [ENSearchTab] Ouverture de %@", node.relativePath);
     } else if (error) {
