@@ -1603,49 +1603,42 @@ static void ui_framework_layout_icons(UIFramework* framework) {
     CGFloat sidebarWidth = framework->sidebarConfig.width;
     CGFloat sidebarHeight = NSHeight([framework->sidebarView bounds]);
     CGFloat topMargin = 40.0;
-    CGFloat bottomMargin = 30.0;
-    CGFloat bottomReserved = bottomMargin + iconSize + 16.0;
+    CGFloat bottomMargin = 40.0;
 
-    NSMutableArray<UIIconButton*>* orderedButtons = [NSMutableArray array];
-    UIIconButton* settingsButton = nil;
+    NSArray<NSNumber*>* iconOrder = @[ @(UI_ICON_SEARCH), @(UI_ICON_HOME), @(UI_ICON_SETTINGS) ];
+    NSMutableArray<UIIconButton*>* orderedButtons = [NSMutableArray arrayWithCapacity:[iconOrder count]];
 
-    for (UIIconButton* button in framework->iconButtons) {
-        if (button.iconType == UI_ICON_SETTINGS) {
-            settingsButton = button;
-        } else {
-            [orderedButtons addObject:button];
+    for (NSNumber* iconNumber in iconOrder) {
+        UIIconType iconType = (UIIconType)[iconNumber integerValue];
+        for (UIIconButton* button in framework->iconButtons) {
+            if (button.iconType == iconType) {
+                [orderedButtons addObject:button];
+                break;
+            }
         }
     }
 
     NSInteger count = [orderedButtons count];
-    if (count > 0) {
-        CGFloat topY = sidebarHeight - topMargin - iconSize;
-        CGFloat minY = MAX(bottomReserved, bottomMargin + iconSize);
-        CGFloat span = MAX(topY - minY, 0.0);
-        CGFloat step = (count > 1 && span > 0.0) ? span / (count - 1) : 0.0;
-        CGFloat x = (sidebarWidth - iconSize) / 2.0;
-
-        for (NSInteger idx = 0; idx < count; idx++) {
-            UIIconButton* button = orderedButtons[idx];
-            CGFloat y = topY - (step * idx);
-            if (y < minY) {
-                y = minY;
-            }
-            NSRect frame = button.frame;
-            frame.origin.x = x;
-            frame.origin.y = y;
-            frame.size = NSMakeSize(iconSize, iconSize);
-            [button setFrame:frame];
-        }
+    if (count == 0) {
+        return;
     }
 
-    if (settingsButton) {
-        CGFloat x = (sidebarWidth - iconSize) / 2.0;
-        NSRect frame = settingsButton.frame;
+    CGFloat availableHeight = MAX(sidebarHeight - topMargin - bottomMargin - (iconSize * count), 0.0);
+    CGFloat spacing = (count > 1) ? availableHeight / (count - 1) : 0.0;
+    CGFloat startY = sidebarHeight - topMargin - iconSize;
+    CGFloat x = (sidebarWidth - iconSize) / 2.0;
+
+    for (NSInteger idx = 0; idx < count; idx++) {
+        UIIconButton* button = orderedButtons[idx];
+        CGFloat y = startY - idx * (iconSize + spacing);
+        if (y < bottomMargin) {
+            y = bottomMargin;
+        }
+        NSRect frame = button.frame;
         frame.origin.x = x;
-        frame.origin.y = bottomMargin;
+        frame.origin.y = y;
         frame.size = NSMakeSize(iconSize, iconSize);
-        [settingsButton setFrame:frame];
+        [button setFrame:frame];
     }
 }
 
