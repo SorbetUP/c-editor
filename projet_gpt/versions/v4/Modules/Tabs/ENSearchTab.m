@@ -4,6 +4,7 @@
 //
 
 #import "ENSearchTab.h"
+#include "advanced_search.h"
 
 @interface ENFileNode : NSObject
 @property (nonatomic, copy) NSString* name;
@@ -56,6 +57,8 @@
     BOOL _observersBound;
     NSLayoutConstraint* _searchContainerLeadingConstraint;
     NSLayoutConstraint* _searchContainerTrailingConstraint;
+    SearchEngine* _searchEngine;
+    NSString* _indexedVaultPath;
 }
 @end
 
@@ -86,6 +89,11 @@
     [_activeQuery release];
     [_searchContainerLeadingConstraint release];
     [_searchContainerTrailingConstraint release];
+    if (_searchEngine) {
+        search_engine_destroy(_searchEngine);
+        _searchEngine = NULL;
+    }
+    [_indexedVaultPath release];
     [super dealloc];
 }
 
@@ -211,6 +219,8 @@
 #pragma mark - Data Handling
 
 - (void)rebuildFileTree {
+    [self ensureSearchEngineInitialized];
+    [self indexCurrentVaultIfNeeded];
     [_allNodes release];
     _allNodes = [[self buildNodesForCurrentVault] retain];
     [self updateDisplayNodes];
@@ -275,7 +285,7 @@
 - (void)updateDisplayNodes {
     NSArray* nodes = nil;
     if (_activeQuery && [_activeQuery length] > 0) {
-        nodes = [self filteredNodes:_allNodes query:_activeQuery];
+        nodes = [self searchNodesForQuery:_activeQuery];
     } else {
         nodes = _allNodes ?: [NSArray array];
     }
@@ -283,37 +293,111 @@
     _displayNodes = [nodes retain];
 }
 
-- (NSArray*)filteredNodes:(NSArray*)source query:(NSString*)query {
-    if (!source || [source count] == 0) {
+- (void)ensureSearchEngineInitialized {
+    if (_searchEngine) {
+        return;
+    }
+    SearchConfig config = search_engine_get_default_config();
+    config.mode = SEARCH_MODE_BALANCED;
+    config.strategy = INDEX_STRATEGY_IVF;
+    config.max_results = 40;
+    config.enable_caching = true;
+    _searchEngine = search_engine_create(&config);
+    if (!_searchEngine) {
+        NSLog(@"⚠️ [ENSearchTab] Impossible de créer le moteur de recherche sémantique");
+    }
+}
+
+- (void)resetSearchEngine {
+    if (_searchEngine) {
+        search_engine_destroy(_searchEngine);
+        _searchEngine = NULL;
+    }
+    [_indexedVaultPath release];
+    _indexedVaultPath = nil;
+}
+
+- (void)indexCurrentVaultIfNeeded {
+    if (!self.currentVaultPath) {
+        return;
+    }
+    NSString* notesPath = [self.currentVaultPath stringByAppendingPathComponent:@"Notes"];
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:notesPath isDirectory:&isDir] || !isDir) {
+        return;
+    }
+    if (_indexedVaultPath && ![_indexedVaultPath isEqualToString:notesPath]) {
+        [self resetSearchEngine];
+    }
+    [self ensureSearchEngineInitialized];
+    if (!_searchEngine) {
+        return;
+    }
+    if (_indexedVaultPath && [_indexedVaultPath isEqualToString:notesPath]) {
+        return; // déjà indexé
+    }
+    const char* directoryPath = [notesPath fileSystemRepresentation];
+    if (!search_engine_index_directory(_searchEngine, directoryPath, NULL, NULL)) {
+        NSLog(@"⚠️ [ENSearchTab] Échec de l'indexation pour %@", notesPath);
+        return;
+    }
+    [_indexedVaultPath release];
+    _indexedVaultPath = [notesPath copy];
+}
+
+- (NSArray*)searchNodesForQuery:(NSString*)query {
+    if (!query || [query length] == 0) {
         return [NSArray array];
     }
-    NSMutableArray* result = [NSMutableArray array];
-    for (ENFileNode* node in source) {
-        BOOL nameMatches = (query && [node.name rangeOfString:query options:NSCaseInsensitiveSearch].location != NSNotFound);
-        NSArray* filteredChildren = nil;
-        if (node.isDirectory) {
-            filteredChildren = [self filteredNodes:node.children query:query];
-        }
-        BOOL includeNode = nameMatches || (filteredChildren && [filteredChildren count] > 0);
-        if (includeNode) {
-            NSArray* childrenToUse = nil;
-            if (node.isDirectory) {
-                if (nameMatches && (!filteredChildren || [filteredChildren count] == 0)) {
-                    childrenToUse = node.children;
-                } else {
-                    childrenToUse = filteredChildren;
-                }
-            } else {
-                childrenToUse = [NSArray array];
-            }
-            ENFileNode* copyNode = [[[ENFileNode alloc] initWithName:node.name
-                                                        relativePath:node.relativePath
-                                                           directory:node.isDirectory
-                                                            children:childrenToUse] autorelease];
-            [result addObject:copyNode];
-        }
+    [self ensureSearchEngineInitialized];
+    if (!_searchEngine) {
+        return [NSArray array];
     }
-    return [NSArray arrayWithArray:result];
+    if (!_indexedVaultPath) {
+        [self indexCurrentVaultIfNeeded];
+    }
+    int numResults = 0;
+    SearchResult* results = search_hybrid_advanced(_searchEngine, [query UTF8String], &numResults);
+    if (!results || numResults <= 0) {
+        if (results) {
+            search_results_free(results, numResults);
+        }
+        return [NSArray array];
+    }
+    NSMutableArray* nodes = [NSMutableArray arrayWithCapacity:numResults];
+    NSString* notesRoot = self.currentVaultPath ? [self.currentVaultPath stringByAppendingPathComponent:@"Notes"] : nil;
+    for (int i = 0; i < numResults; i++) {
+        const char* pathC = results[i].file_path;
+        if (!pathC) {
+            continue;
+        }
+        NSString* absolutePath = [NSString stringWithUTF8String:pathC];
+        if (!absolutePath) {
+            continue;
+        }
+        NSString* relativePath = absolutePath;
+        if (notesRoot && [absolutePath hasPrefix:notesRoot]) {
+            NSUInteger rootLength = [notesRoot length];
+            if ([absolutePath length] > rootLength) {
+                relativePath = [absolutePath substringFromIndex:rootLength + 1];
+            }
+        } else if (self.currentVaultPath && [absolutePath hasPrefix:self.currentVaultPath]) {
+            NSUInteger rootLength = [self.currentVaultPath length];
+            if ([absolutePath length] > rootLength) {
+                relativePath = [absolutePath substringFromIndex:rootLength + 1];
+            }
+        } else {
+            relativePath = [absolutePath lastPathComponent];
+        }
+        NSString* displayName = [relativePath lastPathComponent] ?: absolutePath;
+        ENFileNode* node = [[[ENFileNode alloc] initWithName:displayName
+                                               relativePath:relativePath
+                                                  directory:NO
+                                                   children:[NSArray array]] autorelease];
+        [nodes addObject:node];
+    }
+    search_results_free(results, numResults);
+    return nodes;
 }
 
 #pragma mark - Presentation Helpers

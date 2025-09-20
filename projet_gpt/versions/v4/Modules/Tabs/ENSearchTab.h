@@ -4,6 +4,7 @@
 //
 
 #import "ENTabBase.h"
+#include "advanced_search.h"
 
 @interface ENSearchTab : ENTabBase
 
