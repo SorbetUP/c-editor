@@ -11,12 +11,19 @@
 #import "../Tabs/ENToolsTab.h"
 #import "../Tabs/ENSettingsTab.h"
 
-@implementation ENMainController
+@implementation ENMainController {
+    NSMutableArray<NSNumber*>* _navigationHistory;
+    BOOL _handlingBackNavigation;
+    UIIconType _currentIcon;
+}
 
 - (instancetype)init {
     self = [super init];
     if (self) {
         _tabs = [[NSMutableDictionary alloc] init];
+        _navigationHistory = [[NSMutableArray alloc] init];
+        _handlingBackNavigation = NO;
+        _currentIcon = UI_ICON_HOME;
         _isReady = false;
         NSLog(@"🔧 [ENMainController] Contrôleur principal initialisé");
     }
@@ -73,6 +80,7 @@
     _sidebar = [[ENSidebar alloc] initWithUIFramework:_uiFramework];
     _sidebar.delegate = self;
     [_sidebar setup];
+    [self updateBackIconState];
     
     NSLog(@"✅ [ENMainController] Sidebar configurée");
 }
@@ -99,33 +107,71 @@
     
     // Activer l'onglet par défaut (Dashboard)
     [self switchToTab:UI_ICON_HOME];
+    [self updateBackIconState];
     
     NSLog(@"✅ [ENMainController] Onglets configurés : Dashboard → Search → Settings");
 }
 
+- (void)updateBackIconState {
+    if (!_uiFramework) {
+        return;
+    }
+    bool hasHistory = (_navigationHistory && [_navigationHistory count] > 0);
+    ui_framework_set_icon_enabled(_uiFramework, UI_ICON_BACK, hasHistory);
+}
+
+- (void)navigateBack {
+    if (!_navigationHistory || [_navigationHistory count] == 0) {
+        NSLog(@"⚠️ [ENMainController] Aucun historique de navigation");
+        [_sidebar setActiveIcon:_currentIcon];
+        return;
+    }
+    UIIconType previousIcon = (UIIconType)[[_navigationHistory lastObject] integerValue];
+    [_navigationHistory removeLastObject];
+    _handlingBackNavigation = YES;
+    [self switchToTab:previousIcon];
+    _handlingBackNavigation = NO;
+}
+
 - (void)switchToTab:(UIIconType)iconType {
+    if (iconType == UI_ICON_BACK) {
+        [self navigateBack];
+        return;
+    }
+    
     NSString* tabName = [self nameForIconType:iconType];
+    ENTabBase* newTab = [self tabForIconType:iconType];
+    
+    if (newTab && _currentTab && (_currentIcon == iconType) && !_handlingBackNavigation) {
+        [_sidebar setActiveIcon:iconType];
+        return;
+    }
+    
+    if (!_handlingBackNavigation && newTab && _currentTab && _currentIcon != iconType) {
+        NSNumber* previousIconNumber = @(_currentIcon);
+        if (![_navigationHistory count] || ![[_navigationHistory lastObject] isEqualToNumber:previousIconNumber]) {
+            [_navigationHistory addObject:previousIconNumber];
+            if ([_navigationHistory count] > 25) {
+                [_navigationHistory removeObjectAtIndex:0];
+            }
+        }
+    }
+    
     NSLog(@"🔄 [ENMainController] Basculement vers : %@", tabName);
     
-    // Désactiver l'onglet actuel
     if (_currentTab) {
         [_currentTab didBecomeInactive];
     }
     
-    // Activer le nouvel onglet
-    ENTabBase* newTab = [self tabForIconType:iconType];
     if (newTab) {
         _currentTab = newTab;
+        _currentIcon = iconType;
         [_currentTab didBecomeActive];
-        
-        // Mettre à jour la sidebar
         [_sidebar setActiveIcon:iconType];
-        
         NSLog(@"✅ [ENMainController] Onglet actif : %@", tabName);
     } else {
         NSLog(@"⚠️ [ENMainController] Onglet non trouvé : %@", tabName);
         
-        // Contenu temporaire en attendant l'implémentation des onglets
         NSString* tempContent = [NSString stringWithFormat:
             @"# %@ %@\n\n"
             @"## ElephantNotes V4 - Architecture Modulaire\n\n"
@@ -148,6 +194,8 @@
         ui_framework_set_editor_content(_uiFramework, tempContent);
         [_sidebar setActiveIcon:iconType];
     }
+    
+    [self updateBackIconState];
 }
 
 - (void)registerTab:(ENTabBase*)tab forIconType:(UIIconType)iconType {
@@ -266,6 +314,7 @@
 - (void)dealloc {
     [_sidebar release];
     [_tabs release];
+    [_navigationHistory release];
     [_currentVaultPath release];
     [_currentVaultName release];
     [super dealloc];

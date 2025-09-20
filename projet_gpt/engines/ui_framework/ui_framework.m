@@ -1530,6 +1530,7 @@ bool ui_framework_setup_layout(UIFramework* framework) {
     
     // Ajouter les icônes par défaut dans l'ordre du workflow
     ui_framework_add_icon(framework, UI_ICON_SEARCH);   // Recherche
+    ui_framework_add_icon(framework, UI_ICON_BACK);     // Retour
     ui_framework_add_icon(framework, UI_ICON_HOME);     // Tableau de bord
     ui_framework_add_icon(framework, UI_ICON_SETTINGS); // Paramètres
     
@@ -1605,7 +1606,7 @@ static void ui_framework_layout_icons(UIFramework* framework) {
     CGFloat topMargin = 40.0;
     CGFloat bottomMargin = 40.0;
 
-    NSArray<NSNumber*>* iconOrder = @[ @(UI_ICON_SEARCH), @(UI_ICON_HOME), @(UI_ICON_SETTINGS) ];
+    NSArray<NSNumber*>* iconOrder = @[ @(UI_ICON_SEARCH), @(UI_ICON_BACK), @(UI_ICON_HOME), @(UI_ICON_SETTINGS) ];
     NSMutableArray<UIIconButton*>* orderedButtons = [NSMutableArray arrayWithCapacity:[iconOrder count]];
 
     for (NSNumber* iconNumber in iconOrder) {
@@ -1854,6 +1855,19 @@ void ui_framework_set_icon_active(UIFramework* framework, UIIconType iconType) {
                 framework->sidebarConfig.iconSize, 
                 framework->sidebarConfig.iconColor);
             [button setImage:normalImage];
+        }
+    }
+}
+
+
+void ui_framework_set_icon_enabled(UIFramework* framework, UIIconType iconType, bool enabled) {
+    if (!framework) return;
+
+    for (UIIconButton* button in framework->iconButtons) {
+        if (button.iconType == iconType) {
+            [button setEnabled:enabled];
+            button.alphaValue = enabled ? 1.0 : 0.45;
+            break;
         }
     }
 }
