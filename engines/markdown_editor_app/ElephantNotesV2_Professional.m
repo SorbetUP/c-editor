@@ -3,7 +3,9 @@
 #include "../hybrid_editor/hybrid_editor_core.h"
 #include "../file_manager/file_manager.h"
 #include "../file_manager/professional_file_manager.h"
+#include "../vault_manager/vault_manager.h"
 #include "../editor/editor_abi.h"
+#import "VaultSetupController.h"
 
 @interface ElephantNotesProfessionalTextView : NSTextView {
     NSInteger _currentLineIndex;
@@ -21,6 +23,8 @@
     NSMutableArray* _recentFiles;
     BOOL _sessionRecoveryEnabled;
     NSString* _workspacePath;
+    NSString* _vaultPath;
+    BOOL _isFirstLaunch;
 }
 
 @property (nonatomic, strong) NSString* currentFilePath;
@@ -44,6 +48,11 @@
 - (void)saveWorkspaceSession;
 - (void)loadWorkspaceSession;
 - (void)showFileStatistics;
+
+// Vault management
+- (void)showVaultSetup;
+- (void)loadVaultConfiguration;
+- (void)completeInitializationWithVault:(NSString*)vaultPath;
 
 @end
 
@@ -88,6 +97,19 @@
 }
 
 - (void)initializeProfessionalFeatures {
+    // Initialize vault manager first
+    vault_manager_init();
+    
+    // Check if this is first launch and show setup if needed
+    if (vault_is_first_launch()) {
+        _isFirstLaunch = YES;
+        [self showVaultSetup];
+        return; // Setup will continue initialization after vault creation
+    }
+    
+    // Load existing vault configuration
+    [self loadVaultConfiguration];
+    
     // Initialize professional file manager
     professional_init();
     
@@ -101,6 +123,11 @@
     config.backup_config.strategy = BACKUP_TIMESTAMPED;
     config.backup_config.max_versions = 20;
     professional_set_config(&config);
+    
+    // Use vault path as workspace
+    if (_vaultPath) {
+        _workspacePath = [_vaultPath stringByAppendingPathComponent:@".workspace"];
+    }
     
     // Create workspace if it doesn't exist
     NSFileManager* fileManager = [NSFileManager defaultManager];
@@ -201,12 +228,22 @@
     [openPanel setAllowedFileTypes:@[@"md", @"markdown", @"mdown", @"mkd", @"txt"]];
     [openPanel setTitle:@"Open Markdown Document"];
     
-    // Set initial directory
-    char* docs_dir = file_get_documents_dir();
-    if (docs_dir) {
-        NSString* docsPath = [NSString stringWithUTF8String:docs_dir];
-        [openPanel setDirectoryURL:[NSURL fileURLWithPath:docsPath]];
-        file_free_string(docs_dir);
+    // Set initial directory to vault if available
+    if (_vaultPath) {
+        NSString* notesPath = [_vaultPath stringByAppendingPathComponent:@"Notes"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:notesPath]) {
+            [openPanel setDirectoryURL:[NSURL fileURLWithPath:notesPath]];
+        } else {
+            [openPanel setDirectoryURL:[NSURL fileURLWithPath:_vaultPath]];
+        }
+    } else {
+        // Fallback to Documents
+        char* docs_dir = file_get_documents_dir();
+        if (docs_dir) {
+            NSString* docsPath = [NSString stringWithUTF8String:docs_dir];
+            [openPanel setDirectoryURL:[NSURL fileURLWithPath:docsPath]];
+            file_free_string(docs_dir);
+        }
     }
     
     [openPanel beginWithCompletionHandler:^(NSInteger result) {
@@ -312,12 +349,22 @@
     [savePanel setTitle:@"Save Markdown Document"];
     [savePanel setNameFieldStringValue:@"Untitled.md"];
     
-    // Set initial directory
-    char* docs_dir = file_get_documents_dir();
-    if (docs_dir) {
-        NSString* docsPath = [NSString stringWithUTF8String:docs_dir];
-        [savePanel setDirectoryURL:[NSURL fileURLWithPath:docsPath]];
-        file_free_string(docs_dir);
+    // Set initial directory to vault if available
+    if (_vaultPath) {
+        NSString* notesPath = [_vaultPath stringByAppendingPathComponent:@"Notes"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:notesPath]) {
+            [savePanel setDirectoryURL:[NSURL fileURLWithPath:notesPath]];
+        } else {
+            [savePanel setDirectoryURL:[NSURL fileURLWithPath:_vaultPath]];
+        }
+    } else {
+        // Fallback to Documents
+        char* docs_dir = file_get_documents_dir();
+        if (docs_dir) {
+            NSString* docsPath = [NSString stringWithUTF8String:docs_dir];
+            [savePanel setDirectoryURL:[NSURL fileURLWithPath:docsPath]];
+            file_free_string(docs_dir);
+        }
     }
     
     [savePanel beginWithCompletionHandler:^(NSInteger result) {
@@ -550,6 +597,70 @@
         
         NSLog(@"📄 Recovered from auto-save: %@", self.currentFilePath);
     }
+}
+
+// Vault management methods
+- (void)showVaultSetup {
+    VaultSetupController* setupController = [[VaultSetupController alloc] init];
+    
+    ElephantNotesProfessionalTextView* selfRef = self;
+    setupController.completionHandler = ^(BOOL success, NSString* vaultPath) {
+        if (success && vaultPath) {
+            [selfRef completeInitializationWithVault:vaultPath];
+        } else {
+            // User cancelled setup, exit app
+            [NSApp terminate:nil];
+        }
+    };
+    
+    [setupController showSetupWindow];
+}
+
+- (void)loadVaultConfiguration {
+    VaultRegistry* registry = NULL;
+    VaultResult result = vault_registry_load(&registry);
+    
+    if (result == VAULT_SUCCESS && registry && registry->default_vault_path) {
+        _vaultPath = [NSString stringWithUTF8String:registry->default_vault_path];
+        NSLog(@"📁 Loaded vault: %@", _vaultPath);
+        
+        // Update window title to show vault name
+        VaultInfo* info = NULL;
+        if (vault_load([_vaultPath UTF8String], &info) == VAULT_SUCCESS && info) {
+            NSString* vaultName = [NSString stringWithUTF8String:info->config.name];
+            [self.window setTitle:[NSString stringWithFormat:@"ElephantNotes Professional - %@", vaultName]];
+            vault_free_info(info);
+            free(info);
+        }
+        
+        vault_registry_free(registry);
+    } else {
+        // No vault configured, show setup
+        _isFirstLaunch = YES;
+        [self showVaultSetup];
+    }
+}
+
+- (void)completeInitializationWithVault:(NSString*)vaultPath {
+    _vaultPath = vaultPath;
+    _isFirstLaunch = NO;
+    
+    // Now complete the professional features initialization
+    [self initializeProfessionalFeatures];
+    
+    // Update welcome content to show vault info
+    [self newDocument];
+    
+    // Update window title
+    VaultInfo* info = NULL;
+    if (vault_load([_vaultPath UTF8String], &info) == VAULT_SUCCESS && info) {
+        NSString* vaultName = [NSString stringWithUTF8String:info->config.name];
+        [self.window setTitle:[NSString stringWithFormat:@"ElephantNotes Professional - %@", vaultName]];
+        vault_free_info(info);
+        free(info);
+    }
+    
+    NSLog(@"✅ Vault configuration completed: %@", _vaultPath);
 }
 
 - (void)showFileStatistics {

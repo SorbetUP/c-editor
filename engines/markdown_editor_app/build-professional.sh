@@ -27,26 +27,33 @@ cd ../markdown_editor_app
 
 # Build file_manager
 cd ../file_manager
-make static
+make professional
 if [ $? -ne 0 ]; then
     echo "❌ Failed to build file_manager"
     exit 1
 fi
+cd ../markdown_editor_app
 
-# Build professional file manager
-echo "🏢 Building professional file manager..."
-clang -c -std=c11 -fPIC -O2 \
-    -I/opt/homebrew/include \
-    professional_file_manager.c -o professional_file_manager.o
+# Build vault_manager
+echo "📁 Building vault manager..."
+cd ../vault_manager
 
-if [ $? -ne 0 ]; then
-    echo "❌ Failed to build professional file manager"
-    exit 1
+# Check for json-c
+if ! pkg-config --exists json-c; then
+    echo "⚠️  json-c not found, installing via Homebrew..."
+    if command -v brew >/dev/null 2>&1; then
+        brew install json-c
+    else
+        echo "❌ Please install json-c: brew install json-c"
+        exit 1
+    fi
 fi
 
-# Create professional static library
-ar rcs libprofessional_file_manager.a professional_file_manager.o
-
+make static
+if [ $? -ne 0 ]; then
+    echo "❌ Failed to build vault_manager"
+    exit 1
+fi
 cd ../markdown_editor_app
 
 # Check for required dependencies
@@ -63,22 +70,24 @@ if ! pkg-config --exists openssl; then
     fi
 fi
 
-# Get OpenSSL flags
+# Get dependency flags
 OPENSSL_CFLAGS=$(pkg-config --cflags openssl)
 OPENSSL_LIBS=$(pkg-config --libs openssl)
+JSONC_CFLAGS=$(pkg-config --cflags json-c)
+JSONC_LIBS=$(pkg-config --libs json-c)
 
-# Compile with all libraries and enterprise features
-echo "🔗 Linking ${APP_NAME} with enterprise libraries..."
+# Compile with all libraries including vault system
+echo "🔗 Linking ${APP_NAME} with enterprise libraries and vault system..."
 clang -framework Cocoa \
-      -I../hybrid_editor -I../file_manager -I../editor -I../markdown \
-      ${OPENSSL_CFLAGS} \
+      -I../hybrid_editor -I../file_manager -I../editor -I../markdown -I../vault_manager \
+      ${OPENSSL_CFLAGS} ${JSONC_CFLAGS} \
       ../hybrid_editor/build/libhybrid_editor.a \
-      ../file_manager/build/libfile_manager.a \
-      ../file_manager/libprofessional_file_manager.a \
+      ../file_manager/build/libprofessional_file_manager.a \
+      ../vault_manager/build/libvault_manager.a \
       ../editor/libeditor.a \
       ../markdown/libmarkdown.a \
-      ${OPENSSL_LIBS} -lpthread \
-      ElephantNotesV2_Professional.m -o "${BUNDLE_NAME}/Contents/MacOS/${APP_NAME}"
+      ${OPENSSL_LIBS} ${JSONC_LIBS} -lpthread \
+      ElephantNotesV2_Professional.m VaultSetupController.m -o "${BUNDLE_NAME}/Contents/MacOS/${APP_NAME}"
 
 if [ $? -eq 0 ]; then
     echo "✅ ${APP_NAME} compilation successful"
