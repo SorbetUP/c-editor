@@ -5,6 +5,88 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ElephantNote Web - Éditeur Hybride</title>
     <style>
+        :root {
+            --page-bg: #f6f5f2;
+            --page-ink: #2f3437;
+            --muted-ink: #6b6f76;
+            --page-bg-top: #fbfaf8;
+            --page-glow: rgba(46, 170, 220, 0.12);
+            --chrome-bg: rgba(255, 255, 255, 0.78);
+            --chrome-border: rgba(55, 53, 47, 0.12);
+            --button-bg: rgba(255, 255, 255, 0.9);
+            --button-hover-bg: #ffffff;
+            --canvas-bg: #fffefc;
+            --canvas-border: rgba(55, 53, 47, 0.09);
+            --line-hover: rgba(55, 53, 47, 0.03);
+            --line-active: rgba(46, 170, 220, 0.12);
+            --line-accent: #2eaadc;
+            --link-color: #0b6e99;
+            --code-bg: rgba(135, 131, 120, 0.15);
+            --code-ink: #eb5757;
+            --quote-border: rgba(55, 53, 47, 0.18);
+            --rule-color: rgba(55, 53, 47, 0.14);
+            --table-rule: rgba(55, 53, 47, 0.12);
+            --table-rule-strong: rgba(46, 170, 220, 0.35);
+            --heading-ink: #111827;
+            --italic-ink: #7c5a00;
+            --mark-bg: #fde68a;
+            --mark-ink: #422006;
+            --pre-bg: #11161c;
+            --pre-border: #2d3844;
+            --pre-code-ink: #d9e3ec;
+            --blockquote-ink: #4b5563;
+            --blockquote-rich-ink: #c9d7e4;
+            --image-border: #33404d;
+            --table-border-strong: #394553;
+            --table-head-bg: rgba(255, 255, 255, 0.06);
+            --table-head-ink: #ffffff;
+            --footer-link: #4c6ef5;
+            --shadow-soft: 0 16px 48px rgba(15, 23, 42, 0.08);
+        }
+
+        body[data-theme="dark"] {
+            --page-bg: #000000;
+            --page-ink: #f2f2f2;
+            --muted-ink: #a1a1aa;
+            --page-bg-top: #000000;
+            --page-glow: rgba(0, 0, 0, 0);
+            --chrome-bg: rgba(0, 0, 0, 0.96);
+            --chrome-border: rgba(255, 255, 255, 0.08);
+            --button-bg: #050505;
+            --button-hover-bg: #111111;
+            --canvas-bg: #050505;
+            --canvas-border: rgba(255, 255, 255, 0.08);
+            --line-hover: rgba(255, 255, 255, 0.05);
+            --line-active: rgba(255, 255, 255, 0.08);
+            --line-accent: #f2f2f2;
+            --link-color: #7dd3fc;
+            --code-bg: rgba(255, 255, 255, 0.09);
+            --code-ink: #fca5a5;
+            --quote-border: rgba(255, 255, 255, 0.18);
+            --rule-color: rgba(255, 255, 255, 0.14);
+            --table-rule: rgba(255, 255, 255, 0.12);
+            --table-rule-strong: rgba(255, 255, 255, 0.22);
+            --heading-ink: #ffffff;
+            --italic-ink: #f8d66d;
+            --mark-bg: #4a3a00;
+            --mark-ink: #fff1b8;
+            --pre-bg: #000000;
+            --pre-border: rgba(255, 255, 255, 0.12);
+            --pre-code-ink: #ededed;
+            --blockquote-ink: #d4d4d8;
+            --blockquote-rich-ink: #e4e4e7;
+            --image-border: rgba(255, 255, 255, 0.16);
+            --table-border-strong: rgba(255, 255, 255, 0.12);
+            --table-head-bg: rgba(255, 255, 255, 0.03);
+            --table-head-ink: #ffffff;
+            --footer-link: #7dd3fc;
+            --shadow-soft: none;
+        }
+
+        body[data-theme="dark"] {
+            background: #000000;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -12,25 +94,33 @@
         }
 
         body {
-            background: #1a1a1a;
-            color: #e0e0e0;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            height: 100vh;
-            overflow: hidden;
+            background:
+                radial-gradient(circle at top left, var(--page-glow), transparent 28%),
+                linear-gradient(180deg, var(--page-bg-top) 0%, var(--page-bg) 100%);
+            color: var(--page-ink);
+            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
 
         .header {
-            background: #2d2d2d;
-            padding: 10px 20px;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            backdrop-filter: blur(18px);
+            background: var(--chrome-bg);
+            padding: 14px 28px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #444;
+            border-bottom: 1px solid var(--chrome-border);
         }
 
         .header h1 {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
+            letter-spacing: 0.01em;
         }
 
         .status {
@@ -43,11 +133,11 @@
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: #ffa500;
+            background: #f5a524;
         }
 
         .status-indicator.ready {
-            background: #51cf66;
+            background: #23a55a;
         }
 
         .buttons {
@@ -56,80 +146,111 @@
         }
 
         .btn {
-            padding: 8px 16px;
-            background: #4c6ef5;
-            color: white;
-            border: none;
-            border-radius: 4px;
+            padding: 8px 14px;
+            background: var(--button-bg);
+            color: var(--page-ink);
+            border: 1px solid var(--chrome-border);
+            border-radius: 10px;
             cursor: pointer;
             font-size: 12px;
-            transition: background 0.2s;
+            font-weight: 600;
+            transition: background 0.2s, border-color 0.2s, transform 0.2s;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
         }
 
         .btn:hover {
-            background: #364fc7;
+            background: var(--button-hover-bg);
+            border-color: rgba(46, 170, 220, 0.22);
+            transform: translateY(-1px);
         }
 
         .main-content {
-            display: flex;
-            height: calc(100vh - 60px);
+            display: block;
+            min-height: calc(100vh - 72px);
         }
 
         .hybrid-editor {
-            flex: 1;
             display: flex;
             flex-direction: column;
         }
 
         .pane-header {
-            background: #2d2d2d;
-            padding: 10px 20px;
-            border-bottom: 1px solid #444;
-            font-weight: 600;
-            font-size: 14px;
+            padding: 26px 32px 0;
+            border-bottom: none;
+            font-weight: 500;
+            font-size: 13px;
+            color: var(--muted-ink);
         }
 
         .hybrid-editor-container {
-            flex: 1;
-            padding: 20px;
+            padding: 18px 24px 72px;
         }
 
         #hybridEditor {
-            width: 100%;
-            height: 100%;
-            background: #1e1e1e;
-            color: #e0e0e0;
-            border: 1px solid #444;
-            border-radius: 4px;
-            padding: 20px;
-            font-family: 'Monaco', 'Consolas', monospace;
-            font-size: 14px;
-            line-height: 1.8;
-            overflow-y: auto;
+            width: min(920px, calc(100vw - 48px));
+            min-height: calc(100vh - 180px);
+            margin: 0 auto;
+            background: var(--canvas-bg);
+            color: var(--page-ink);
+            border: 1px solid var(--canvas-border);
+            border-radius: 22px;
+            padding: 72px 88px 96px;
+            font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-size: 16px;
+            line-height: 1.75;
+            overflow: visible;
             outline: none;
+            box-shadow: var(--shadow-soft);
+        }
+
+        @media (max-width: 720px) {
+            #hybridEditor {
+                width: calc(100vw - 20px);
+                min-height: calc(100vh - 132px);
+                border-radius: 16px;
+                padding: 40px 22px 72px;
+            }
         }
 
         #hybridEditor:focus {
-            border-color: #4c6ef5;
+            border-color: rgba(46, 170, 220, 0.35);
         }
 
         .editor-line {
             min-height: 1.8em;
-            padding: 4px 8px;
+            padding: 3px 12px;
             margin: 0;
-            border-radius: 3px;
+            border-radius: 8px;
             transition: background-color 0.2s ease;
             cursor: text;
         }
 
+        .editor-line:hover {
+            background: var(--line-hover);
+        }
+
         .editor-line.current-line {
-            background-color: rgba(76, 110, 245, 0.1);
-            border-left: 3px solid #4c6ef5;
-            padding-left: 15px;
+            background-color: var(--line-active);
+            border-left: 2px solid var(--line-accent);
+            padding-left: 18px;
+        }
+
+        .editor-line.markdown-visible-edit {
+            white-space: pre-wrap;
+        }
+
+        .editor-line.layout-locked {
+            overflow-x: auto;
+            overflow-y: hidden;
+            scrollbar-width: thin;
+        }
+
+        .editor-line.markdown-block-edit {
+            white-space: pre-wrap;
         }
 
         .editor-line.rendered-line {
-            background-color: rgba(255, 255, 255, 0.02);
+            background-color: transparent;
         }
 
         .editor-line:empty::before {
@@ -140,21 +261,21 @@
         /* Styling for rendered HTML */
         .editor-line h1, .editor-line h2, .editor-line h3, .editor-line h4, .editor-line h5, .editor-line h6 {
             margin: 0;
-            color: #fff;
+            color: var(--heading-ink);
             display: inline;
         }
 
-        .editor-line h1 { font-size: 24px; }
-        .editor-line h2 { font-size: 20px; }
-        .editor-line h3 { font-size: 18px; }
+        .editor-line h1 { font-size: 2.3rem; font-weight: 700; letter-spacing: -0.03em; }
+        .editor-line h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
+        .editor-line h3 { font-size: 1.22rem; font-weight: 650; }
 
         .editor-line strong {
-            color: #fff;
+            color: var(--heading-ink);
             font-weight: bold;
         }
 
         .editor-line em {
-            color: #ffd93d;
+            color: var(--italic-ink);
             font-style: italic;
         }
 
@@ -163,21 +284,170 @@
         }
 
         .editor-line mark {
-            background: #ffd93d;
-            color: #000;
-            padding: 1px 2px;
+            background: var(--mark-bg);
+            color: var(--mark-ink);
+            padding: 1px 4px;
+            border-radius: 4px;
         }
 
         .editor-line a {
-            color: #8cc8ff;
+            color: var(--link-color);
             text-decoration: underline;
+            text-underline-offset: 0.15em;
         }
+
+        .editor-line .md-marker {
+            color: rgba(107, 111, 118, 0.78);
+        }
+
+        .editor-line .list-line .md-marker,
+        .editor-line .quote-line .md-marker {
+            color: var(--line-accent);
+        }
+
+        .editor-line .definition-desc-line .md-marker,
+        .editor-line .fence-line .md-marker {
+            color: var(--muted-ink);
+        }
+
+        .editor-line .md-edit-heading {
+            color: var(--heading-ink);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .editor-line .md-edit-heading-1 { font-size: 2.3rem; }
+        .editor-line .md-edit-heading-2 { font-size: 1.5rem; }
+        .editor-line .md-edit-heading-3 { font-size: 1.22rem; }
+        .editor-line .md-edit-heading-4,
+        .editor-line .md-edit-heading-5,
+        .editor-line .md-edit-heading-6 { font-size: 1rem; font-weight: 650; }
+
+        .editor-line .md-edit-strong { font-weight: 700; color: var(--heading-ink); }
+        .editor-line .md-edit-em { font-style: italic; color: var(--italic-ink); }
+        .editor-line .md-edit-del { text-decoration: line-through; color: #6b7280; }
+        .editor-line .md-edit-mark { background: var(--mark-bg); color: var(--mark-ink); border-radius: 4px; padding: 1px 4px; }
+        .editor-line .md-edit-underline { text-decoration: underline; }
+        .editor-line .md-edit-code { background: var(--code-bg); color: var(--code-ink); border-radius: 4px; padding: 1px 5px; }
+        .editor-line .md-edit-link { color: var(--link-color); text-decoration: underline; text-underline-offset: 0.15em; }
+        .editor-line .md-edit-url { color: var(--muted-ink); }
+        .editor-line .md-edit-image { color: var(--muted-ink); }
 
         .editor-line code {
             padding: 1px 5px;
             border-radius: 4px;
-            background: rgba(255, 255, 255, 0.08);
-            color: #ffd37e;
+            background: var(--code-bg);
+            color: var(--code-ink);
+        }
+
+        .editor-line .list-line,
+        .editor-line .quote-line,
+        .editor-line .definition-line,
+        .editor-line .table-row-line,
+        .editor-line .code-line,
+        .editor-line .fence-line {
+            display: block;
+        }
+
+        .editor-line .list-line {
+            padding-left: 1rem;
+            text-indent: -1rem;
+        }
+
+        .editor-line .list-marker,
+        .editor-line .quote-marker {
+            color: var(--line-accent);
+        }
+
+        .editor-line .definition-line.definition-term-line {
+            font-weight: 600;
+        }
+
+        .editor-line .definition-line.definition-desc-line {
+            padding-left: 1.2rem;
+            color: var(--muted-ink);
+        }
+
+        .editor-line .quote-line {
+            padding-left: 0.9rem;
+            border-left: 3px solid var(--quote-border);
+            color: var(--blockquote-ink);
+        }
+
+        .editor-line .table-row-line {
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: minmax(0, 1fr);
+            gap: 0.5rem;
+            align-items: stretch;
+        }
+
+        .editor-line.table-markdown-edit {
+            padding-top: 1px;
+            padding-bottom: 1px;
+        }
+
+        .editor-line .table-markdown-line {
+            display: grid;
+            align-items: center;
+            column-gap: 0.35rem;
+            min-width: 100%;
+            width: max-content;
+        }
+
+        .editor-line .table-markdown-pipe {
+            color: rgba(55, 53, 47, 0.35);
+            justify-self: center;
+            user-select: none;
+        }
+
+        .editor-line .table-markdown-cell {
+            min-width: 0;
+            padding: 0.1rem 0.45rem;
+            border-bottom: 1px solid var(--table-rule);
+            white-space: nowrap;
+        }
+
+        .editor-line .table-markdown-cell.table-markdown-rule {
+            border-bottom: 2px solid var(--table-rule-strong);
+            color: rgba(55, 53, 47, 0.45);
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+
+        .editor-line .table-row-line.table-separator-line {
+            gap: 0.5rem;
+        }
+
+        .editor-line .table-cell {
+            padding: 0.1rem 0.45rem;
+            border-bottom: 1px solid var(--table-rule);
+            min-width: 0;
+        }
+
+        .editor-line .table-row-line.table-header-line .table-cell {
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .editor-line .table-cell.table-rule {
+            border-bottom: 2px solid var(--table-rule-strong);
+            min-height: 0.5rem;
+            padding: 0;
+        }
+
+        .editor-line .code-line,
+        .editor-line .fence-line {
+            white-space: pre-wrap;
+        }
+
+        .editor-line .code-line {
+            padding-left: 1rem;
+            color: var(--page-ink);
+        }
+
+        .editor-line .fence-line {
+            color: #9ca3af;
         }
 
         .editor-line pre,
@@ -187,27 +457,62 @@
         .editor-line blockquote,
         .editor-line table,
         .editor-line hr {
-            margin: 0;
+            margin: 0.15rem 0 0.35rem;
         }
 
         .editor-line pre {
             padding: 10px 12px;
             border-radius: 10px;
-            background: #11161c;
-            border: 1px solid #2d3844;
+            background: var(--pre-bg);
+            border: 1px solid var(--pre-border);
             overflow-x: auto;
         }
 
         .editor-line pre code {
             padding: 0;
             background: transparent;
-            color: #d9e3ec;
+            color: var(--pre-code-ink);
+        }
+
+        .editor-line ul,
+        .editor-line ol {
+            padding-left: 1.6rem;
+            list-style-position: outside;
+        }
+
+        .editor-line ul {
+            list-style-type: disc;
+        }
+
+        .editor-line ol {
+            list-style-type: decimal;
+        }
+
+        .editor-line li {
+            margin: 0.15rem 0;
+        }
+
+        .editor-line .task-list {
+            padding-left: 0;
+            list-style: none;
+        }
+
+        .editor-line .task-list li {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.2rem 0;
+        }
+
+        .editor-line .task-list input[type="checkbox"] {
+            margin: 0;
+            accent-color: #4c6ef5;
         }
 
         .editor-line blockquote {
             padding-left: 12px;
-            border-left: 3px solid #4c6ef5;
-            color: #c9d7e4;
+            border-left: 3px solid var(--line-accent);
+            color: var(--blockquote-rich-ink);
         }
 
         .editor-line img {
@@ -215,7 +520,7 @@
             max-width: min(100%, 320px);
             height: auto;
             border-radius: 10px;
-            border: 1px solid #33404d;
+            border: 1px solid var(--image-border);
         }
 
         .editor-line table {
@@ -227,23 +532,23 @@
         .editor-line th,
         .editor-line td {
             padding: 6px 8px;
-            border: 1px solid #394553;
+            border: 1px solid var(--table-border-strong);
             text-align: left;
         }
 
         .editor-line th {
-            color: #fff;
-            background: rgba(255, 255, 255, 0.06);
+            color: var(--table-head-ink);
+            background: var(--table-head-bg);
         }
 
         .editor-line dd {
-            margin: 4px 0 0 18px;
-            color: #c9d7e4;
+            margin: 0.15rem 0 0.45rem 18px;
+            color: var(--muted-ink);
         }
 
         .editor-line hr {
             border: 0;
-            border-top: 1px solid #425060;
+            border-top: 1px solid var(--rule-color);
         }
 
         .collapsed-block-line {
@@ -257,12 +562,15 @@
         }
 
         .footer {
-            background: #2d2d2d;
-            padding: 8px 20px;
-            border-top: 1px solid #444;
+            padding: 18px 20px 32px;
+            border-top: none;
             font-size: 12px;
-            color: #888;
+            color: var(--muted-ink);
             text-align: center;
+        }
+
+        .footer a {
+            color: var(--footer-link);
         }
     </style>
 </head>
@@ -274,6 +582,7 @@
             <span id="statusText">Chargement...</span>
         </div>
         <div class="buttons">
+            <button class="btn" id="themeToggle" type="button" onclick="toggleTheme()">🌙 Sombre</button>
             <button class="btn" onclick="importMarkdown()">📂 Import MD</button>
             <button class="btn" onclick="exportMarkdown()">📄 Export MD</button>
         </div>
@@ -292,7 +601,7 @@
 
     <div class="footer">
         ElephantNote Web - Powered by Emscripten WASM | 
-        <a href="https://github.com/SorbetUP/c-editor" style="color: #4c6ef5;">GitHub</a>
+        <a href="https://github.com/SorbetUP/c-editor">GitHub</a>
     </div>
 
     <script src="editor.js"></script>
@@ -301,14 +610,51 @@
     <script>
         let editorModule = null;
         let isWasmReady = false;
+        const THEME_STORAGE_KEY = 'elephantnote-theme';
         
         const hybridEditor = document.getElementById('hybridEditor');
         const statusIndicator = document.getElementById('statusIndicator');
         const statusText = document.getElementById('statusText');
+        const themeToggle = document.getElementById('themeToggle');
         
         let currentLineIndex = -1;
         let editorLines = [];
         let lineContents = [];
+        let activeGroupedBlock = null;
+        let isRefreshingEditableLine = false;
+
+        function applyTheme(theme) {
+            const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
+            document.body.dataset.theme = normalizedTheme;
+            if (themeToggle) {
+                themeToggle.textContent = normalizedTheme === 'dark' ? '☀️ Clair' : '🌙 Sombre';
+                themeToggle.setAttribute('aria-pressed', normalizedTheme === 'dark' ? 'true' : 'false');
+            }
+        }
+
+        function initializeTheme() {
+            let savedTheme = null;
+            try {
+                savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+            } catch (error) {
+                console.warn('Unable to read saved theme:', error);
+            }
+
+            const preferredTheme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light';
+            applyTheme(savedTheme || preferredTheme);
+        }
+
+        function toggleTheme() {
+            const nextTheme = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+            applyTheme(nextTheme);
+            try {
+                localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+            } catch (error) {
+                console.warn('Unable to save theme preference:', error);
+            }
+        }
         const DEFAULT_MARKDOWN_EXAMPLE = [
             "# ElephantNote - Document de validation",
             "",
@@ -542,7 +888,8 @@
 
                             const tag = element.ordered ? 'ol' : 'ul';
                             const startAttr = element.ordered && element.start ? ` start="${element.start}"` : '';
-                            return `<${tag}${startAttr}>${(element.items || []).map((item) => {
+                            const classAttr = !element.ordered && element.kind === 'task' ? ' class="task-list"' : '';
+                            return `<${tag}${startAttr}${classAttr}>${(element.items || []).map((item) => {
                                 const checkbox = item.checkbox
                                     ? `<input type="checkbox"${item.checked ? ' checked' : ''} disabled /> `
                                     : '';
@@ -594,7 +941,7 @@
         // Update line states (current vs rendered)
         function updateLineStates() {
             const currentLine = getCurrentLineElement();
-            const newLineIndex = currentLine ? parseInt(currentLine.dataset.line) : -1;
+            let newLineIndex = currentLine ? parseInt(currentLine.dataset.line) : -1;
             
             console.log(`🔄 updateLineStates: currentLine=`, currentLine, `newLineIndex=${newLineIndex}`);
             
@@ -611,6 +958,13 @@
                 console.warn(`⚠️ Invalid newLineIndex: ${newLineIndex}, max: ${editorLines.length - 1}`);
                 return;
             }
+
+            const previousGroupedBlock = activeGroupedBlock;
+            const groupedTargetBlock = newLineIndex >= 0 ? getGroupedMarkdownBlock(newLineIndex) : null;
+            const stayingInsideCurrentGroupedBlock = isIndexInsideBlock(newLineIndex, previousGroupedBlock);
+            if (groupedTargetBlock && groupedTargetBlock.start !== newLineIndex && !stayingInsideCurrentGroupedBlock) {
+                newLineIndex = groupedTargetBlock.start;
+            }
             
             if (newLineIndex === currentLineIndex) return; // No change
             
@@ -618,7 +972,14 @@
             
             // Render the previously current line (if any)
             if (currentLineIndex >= 0 && editorLines[currentLineIndex]) {
-                renderLineAsHTML(currentLineIndex);
+                if (previousGroupedBlock && !stayingInsideCurrentGroupedBlock) {
+                    collapseGroupedBlockToHTML(previousGroupedBlock);
+                    activeGroupedBlock = null;
+                } else if (!previousGroupedBlock) {
+                    renderLineAsHTML(currentLineIndex);
+                } else {
+                    syncLineModelFromEditor(currentLineIndex);
+                }
             }
             
             // Calculate cursor position in the new line BEFORE switching it to markdown
@@ -632,8 +993,9 @@
                         if (newLine.contains(range.startContainer) || range.startContainer === newLine) {
                             const htmlPosition = calculatePlainTextPosition(newLine);
                             
-                            // Make sure we have current content - get it from the actual line if needed
-                            let markdownContent = lineContents[newLineIndex] || '';
+                            let markdownContent = groupedTargetBlock && groupedTargetBlock.start === newLineIndex
+                                ? groupedTargetBlock.markdown
+                                : (lineContents[newLineIndex] || '');
                             if (!markdownContent && newLine.textContent) {
                                 markdownContent = newLine.textContent;
                                 lineContents[newLineIndex] = markdownContent;
@@ -652,6 +1014,15 @@
             // Switch new current line to raw markdown
             if (newLineIndex >= 0 && newLineIndex < editorLines.length) {
                 currentLineIndex = newLineIndex;
+                const activeTargetBlock = getGroupedMarkdownBlock(currentLineIndex);
+                if (activeTargetBlock) {
+                    if (!isSameGroupedBlock(activeGroupedBlock, activeTargetBlock)) {
+                        activeGroupedBlock = activeTargetBlock;
+                        expandGroupedBlockForEditing(activeGroupedBlock);
+                    }
+                } else {
+                    activeGroupedBlock = null;
+                }
                 showLineAsMarkdownWithPosition(currentLineIndex, targetCursorPosition);
                 updateLineClasses();
             } else {
@@ -728,10 +1099,6 @@
             throw new Error('C ENGINE RETURNED EMPTY');
         }
 
-        function renderSingleLine(line) {
-            return renderMarkdownBlock(line);
-        }
-        
         // Escape HTML characters
         function escapeHtml(text) {
             const div = document.createElement('div');
@@ -860,11 +1227,11 @@
             if (isDefinitionDescriptionLine(current) && start > 0) {
                 start--;
             }
-            while (start > 0) {
-                const maybeTerm = lineContents[start - 1] || '';
-                const maybeDesc = lineContents[start] || '';
-                if (maybeTerm.trim() && isDefinitionDescriptionLine(maybeDesc)) {
-                    start--;
+            while (start > 1) {
+                const previousDescription = lineContents[start - 1] || '';
+                const previousTerm = lineContents[start - 2] || '';
+                if (isDefinitionDescriptionLine(previousDescription) && previousTerm.trim()) {
+                    start -= 2;
                 } else {
                     break;
                 }
@@ -889,11 +1256,374 @@
         }
 
         function getGroupedMarkdownBlock(index) {
-            return getFenceBlock(index) ||
-                   getTableBlock(index) ||
-                   getDefinitionBlock(index) ||
-                   getContiguousBlock(index, isListLine) ||
-                   getContiguousBlock(index, isBlockquoteLine);
+            return null;
+        }
+
+        function renderInlineMarkdown(markdown) {
+            if (!markdown.trim()) {
+                return '';
+            }
+
+            if (/^\s*(#{1,6}\s+|>\s*|[-+*]\s+|\d+\.\s+|```)/.test(markdown)) {
+                return escapeHtml(markdown.trim());
+            }
+
+            const html = renderMarkdownBlock(markdown);
+            const singleHeading = html.match(/^<h[1-6]>([\s\S]*)<\/h[1-6]>$/);
+            if (singleHeading) {
+                return singleHeading[1];
+            }
+
+            const singleParagraph = html.match(/^<p>([\s\S]*)<\/p>$/);
+            if (singleParagraph) {
+                return singleParagraph[1];
+            }
+
+            return html;
+        }
+
+        function renderEditableInlineMarkdown(markdown) {
+            let html = '';
+            let i = 0;
+
+            const markerSpan = (marker, extraClasses = '') => {
+                const classes = ['md-marker'];
+                if (extraClasses) {
+                    classes.push(extraClasses);
+                }
+                return `<span class="${classes.join(' ')}">${escapeHtml(marker)}</span>`;
+            };
+
+            const appendPlain = (text) => {
+                if (text) {
+                    html += escapeHtml(text);
+                }
+            };
+
+            while (i < markdown.length) {
+                if (markdown.startsWith('![', i)) {
+                    const labelEnd = markdown.indexOf(']', i + 2);
+                    const parenStart = labelEnd >= 0 ? markdown.indexOf('(', labelEnd) : -1;
+                    const parenEnd = parenStart >= 0 ? markdown.indexOf(')', parenStart + 1) : -1;
+                    if (labelEnd >= 0 && parenStart === labelEnd + 1 && parenEnd >= 0) {
+                        const alt = markdown.slice(i + 2, labelEnd);
+                        const src = markdown.slice(parenStart + 1, parenEnd);
+                        html += `${markerSpan('![', 'md-edit-image')}<span class="md-edit-image">${escapeHtml(alt)}</span>${markerSpan('](', 'md-edit-url')}<span class="md-edit-url">${escapeHtml(src)}</span>${markerSpan(')', 'md-edit-url')}`;
+                        i = parenEnd + 1;
+                        continue;
+                    }
+                }
+
+                if (markdown[i] === '[') {
+                    const labelEnd = markdown.indexOf(']', i + 1);
+                    const parenStart = labelEnd >= 0 ? markdown.indexOf('(', labelEnd) : -1;
+                    const parenEnd = parenStart >= 0 ? markdown.indexOf(')', parenStart + 1) : -1;
+                    if (labelEnd >= 0 && parenStart === labelEnd + 1 && parenEnd >= 0) {
+                        const label = markdown.slice(i + 1, labelEnd);
+                        const href = markdown.slice(parenStart + 1, parenEnd);
+                        html += `${markerSpan('[', 'md-edit-link')}<span class="md-edit-link">${renderEditableInlineMarkdown(label)}</span>${markerSpan('](', 'md-edit-url')}<span class="md-edit-url">${escapeHtml(href)}</span>${markerSpan(')', 'md-edit-url')}`;
+                        i = parenEnd + 1;
+                        continue;
+                    }
+                }
+
+                const wrappers = [
+                    { marker: '***', markerClass: 'md-edit-strong md-edit-em', open: '<span class="md-edit-strong md-edit-em">', close: '</span>' },
+                    { marker: '**', markerClass: 'md-edit-strong', open: '<span class="md-edit-strong">', close: '</span>' },
+                    { marker: '==', markerClass: 'md-edit-mark', open: '<span class="md-edit-mark">', close: '</span>' },
+                    { marker: '++', markerClass: 'md-edit-underline', open: '<span class="md-edit-underline">', close: '</span>' },
+                    { marker: '~~', markerClass: 'md-edit-del', open: '<span class="md-edit-del">', close: '</span>' },
+                    { marker: '`', markerClass: 'md-edit-code', open: '<span class="md-edit-code">', close: '</span>' },
+                    { marker: '*', markerClass: 'md-edit-em', open: '<span class="md-edit-em">', close: '</span>' }
+                ];
+
+                let matchedWrapper = false;
+                for (const wrapper of wrappers) {
+                    if (!markdown.startsWith(wrapper.marker, i)) {
+                        continue;
+                    }
+
+                    const end = markdown.indexOf(wrapper.marker, i + wrapper.marker.length);
+                    if (end < 0) {
+                        continue;
+                    }
+
+                    const inner = markdown.slice(i + wrapper.marker.length, end);
+                    html += `${markerSpan(wrapper.marker, wrapper.markerClass)}${wrapper.open}${renderEditableInlineMarkdown(inner)}${wrapper.close}${markerSpan(wrapper.marker, wrapper.markerClass)}`;
+                    i = end + wrapper.marker.length;
+                    matchedWrapper = true;
+                    break;
+                }
+
+                if (matchedWrapper) {
+                    continue;
+                }
+
+                appendPlain(markdown[i]);
+                i += 1;
+            }
+
+            return html;
+        }
+
+        function parseListLine(line) {
+            const match = (line || '').match(/^(\s*)([-+*]|\d+\.)\s+(.*)$/);
+            if (!match) {
+                return null;
+            }
+
+            const [, indent, marker, content] = match;
+            const taskMatch = content.match(/^\[( |x|X)\]\s+(.*)$/);
+
+            return {
+                indent: indent.length,
+                marker,
+                ordered: /\d+\./.test(marker),
+                number: /\d+\./.test(marker) ? marker : null,
+                task: Boolean(taskMatch),
+                checked: Boolean(taskMatch && /x/i.test(taskMatch[1])),
+                content: taskMatch ? taskMatch[2] : content
+            };
+        }
+
+        function parseTableCells(line) {
+            const trimmed = (line || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+            return trimmed.split('|').map((cell) => cell.trim());
+        }
+
+        function renderTableMarkdownLine(markdownText) {
+            const cells = parseTableCells(markdownText);
+            const columns = cells.length;
+            const template = `12px repeat(${columns}, minmax(0, 1fr) 12px)`;
+
+            const parts = ['<span class="table-markdown-line" style="grid-template-columns: ', template, ';">'];
+            parts.push('<span class="table-markdown-pipe">|</span>');
+
+            if (isTableSeparatorLineJs(markdownText)) {
+                cells.forEach((cell) => {
+                    parts.push('<span class="table-markdown-cell table-markdown-rule">', escapeHtml(cell || '---'), '</span>');
+                    parts.push('<span class="table-markdown-pipe">|</span>');
+                });
+            } else {
+                cells.forEach((cell) => {
+                    parts.push('<span class="table-markdown-cell">', renderEditableInlineMarkdown(cell), '</span>');
+                    parts.push('<span class="table-markdown-pipe">|</span>');
+                });
+            }
+
+            parts.push('</span>');
+            return parts.join('');
+        }
+
+        function renderEditableMarkdownLine(lineIndex, markdownText) {
+            const headingMatch = markdownText.match(/^(#{1,6})(\s+)(.*)$/);
+            if (headingMatch) {
+                const [, markers, spacing, content] = headingMatch;
+                const level = Math.min(markers.length, 6);
+                return `<span class="md-marker md-edit-heading md-edit-heading-${level}">${escapeHtml(markers + spacing)}</span><span class="md-edit-heading md-edit-heading-${level}">${renderEditableInlineMarkdown(content)}</span>`;
+            }
+
+            const listInfo = parseListLine(markdownText);
+            if (listInfo) {
+                const indentStyle = listInfo.indent > 0 ? ` style="margin-left:${listInfo.indent}ch"` : '';
+                const markerText = listInfo.task
+                    ? `${listInfo.marker} [${listInfo.checked ? 'x' : ' '}] `
+                    : `${listInfo.number || listInfo.marker} `;
+                return `<span class="list-line"${indentStyle}><span class="list-marker md-marker">${escapeHtml(markerText)}</span>${renderEditableInlineMarkdown(listInfo.content)}</span>`;
+            }
+
+            if (isDefinitionDescriptionLine(markdownText)) {
+                const match = markdownText.match(/^(\s*:\s+)(.*)$/);
+                return `<span class="definition-line definition-desc-line"><span class="md-marker">${escapeHtml(match[1])}</span>${renderEditableInlineMarkdown(match[2])}</span>`;
+            }
+
+            if (lineIndex + 1 < lineContents.length && isDefinitionDescriptionLine(lineContents[lineIndex + 1] || '')) {
+                return `<span class="definition-line definition-term-line">${renderEditableInlineMarkdown(markdownText)}</span>`;
+            }
+
+            if (isBlockquoteLine(markdownText)) {
+                const match = markdownText.match(/^(\s*>\s?)(.*)$/);
+                return `<span class="quote-line"><span class="quote-marker md-marker">${escapeHtml(match[1])}</span>${renderEditableInlineMarkdown(match[2])}</span>`;
+            }
+
+            if (isFenceMarker(markdownText)) {
+                return `<span class="fence-line"><span class="md-marker">${escapeHtml(markdownText)}</span></span>`;
+            }
+
+            const fenceBlock = getFenceBlock(lineIndex);
+            if (fenceBlock) {
+                return `<span class="code-line">${escapeHtml(markdownText)}</span>`;
+            }
+
+            if (isTableSeparatorLineJs(markdownText) || getTableBlock(lineIndex)) {
+                return renderTableMarkdownLine(markdownText);
+            }
+
+            return renderEditableInlineMarkdown(markdownText);
+        }
+
+        function renderStructuredLine(lineIndex, markdownText) {
+            const fenceBlock = getFenceBlock(lineIndex);
+            if (fenceBlock) {
+                if (isFenceMarker(markdownText)) {
+                    return `<span class="fence-line">${escapeHtml(markdownText)}</span>`;
+                }
+
+                return `<span class="code-line">${escapeHtml(markdownText)}</span>`;
+            }
+
+            const tableBlock = getTableBlock(lineIndex);
+            if (tableBlock) {
+                const cells = parseTableCells(markdownText);
+                if (isTableSeparatorLineJs(markdownText)) {
+                    return `<span class="table-row-line table-separator-line">${cells.map(() => '<span class="table-cell table-rule"></span>').join('')}</span>`;
+                }
+
+                const rowClass = lineIndex === tableBlock.start ? ' table-header-line' : '';
+                return `<span class="table-row-line${rowClass}">${cells.map((cell) => `<span class="table-cell">${renderInlineMarkdown(cell)}</span>`).join('')}</span>`;
+            }
+
+            const listInfo = parseListLine(markdownText);
+            if (listInfo) {
+                const indentStyle = listInfo.indent > 0 ? ` style="margin-left:${listInfo.indent}ch"` : '';
+                let markerHtml = escapeHtml(listInfo.number || listInfo.marker);
+                if (listInfo.task) {
+                    markerHtml = `<input type="checkbox"${listInfo.checked ? ' checked' : ''} disabled />`;
+                }
+
+                return `<span class="list-line"${indentStyle}><span class="list-marker">${markerHtml}</span> ${renderInlineMarkdown(listInfo.content)}</span>`;
+            }
+
+            if (isDefinitionDescriptionLine(markdownText)) {
+                const description = markdownText.replace(/^\s*:\s+/, '');
+                return `<span class="definition-line definition-desc-line">${renderInlineMarkdown(description)}</span>`;
+            }
+
+            if (lineIndex + 1 < lineContents.length && isDefinitionDescriptionLine(lineContents[lineIndex + 1] || '')) {
+                return `<span class="definition-line definition-term-line">${renderInlineMarkdown(markdownText)}</span>`;
+            }
+
+            if (isBlockquoteLine(markdownText)) {
+                const content = markdownText.replace(/^\s*>\s?/, '');
+                return `<span class="quote-line"><span class="quote-marker">&gt;</span> ${renderInlineMarkdown(content)}</span>`;
+            }
+
+            return null;
+        }
+
+        function renderSingleLine(lineIndex, line) {
+            const structuredHtml = renderStructuredLine(lineIndex, line);
+            if (structuredHtml !== null) {
+                return structuredHtml;
+            }
+
+            return renderMarkdownBlock(line);
+        }
+
+        function createEditorLineElement(lineContent, index) {
+            const lineElement = document.createElement('div');
+            lineElement.className = 'editor-line';
+            lineElement.dataset.line = index;
+            lineElement.textContent = lineContent;
+            lineElement.setAttribute('contenteditable', 'true');
+            return lineElement;
+        }
+
+        function reindexEditorLines() {
+            editorLines.forEach((line, index) => {
+                line.dataset.line = index;
+            });
+        }
+
+        function getLineEditorText(line) {
+            return line ? (line.textContent || '') : '';
+        }
+
+        function syncLineModelFromEditor(lineIndex) {
+            const line = editorLines[lineIndex];
+            if (!line) {
+                return;
+            }
+
+            lineContents[lineIndex] = getLineEditorText(line);
+        }
+
+        function isIndexInsideBlock(index, block) {
+            return Boolean(block && index >= block.start && index <= block.end);
+        }
+
+        function isSameGroupedBlock(firstBlock, secondBlock) {
+            return Boolean(firstBlock && secondBlock &&
+                firstBlock.start === secondBlock.start &&
+                firstBlock.end === secondBlock.end);
+        }
+
+        function clearGroupedBlockEditState(block) {
+            if (!block) {
+                return;
+            }
+
+            for (let i = block.start; i <= block.end; i++) {
+                const line = editorLines[i];
+                if (line) {
+                    line.classList.remove('markdown-block-edit');
+                }
+            }
+        }
+
+        function expandGroupedBlockForEditing(block) {
+            if (!block) {
+                return;
+            }
+
+            for (let i = block.start; i <= block.end; i++) {
+                const line = editorLines[i];
+                if (!line) {
+                    continue;
+                }
+                line.innerHTML = '';
+                line.textContent = lineContents[i] || '';
+                line.classList.remove('collapsed-block-line');
+                line.classList.add('markdown-block-edit');
+                line.setAttribute('contenteditable', 'true');
+            }
+        }
+
+        function collapseGroupedBlockToHTML(block) {
+            if (!block) {
+                return;
+            }
+
+            for (let i = block.start; i <= block.end; i++) {
+                syncLineModelFromEditor(i);
+            }
+
+            clearGroupedBlockEditState(block);
+            renderLineAsHTML(block.start);
+        }
+
+        function lockLineHeight(line) {
+            if (!line) {
+                return;
+            }
+
+            const renderedHeight = Math.ceil(line.getBoundingClientRect().height);
+            if (renderedHeight > 0) {
+                line.style.minHeight = `${renderedHeight}px`;
+                line.style.height = `${renderedHeight}px`;
+            }
+
+            line.classList.add('layout-locked');
+        }
+
+        function unlockLineHeight(line) {
+            if (!line) {
+                return;
+            }
+
+            line.style.removeProperty('min-height');
+            line.style.removeProperty('height');
+            line.classList.remove('layout-locked');
         }
 
         // Calculate cursor position in plain text from HTML cursor position
@@ -1036,55 +1766,47 @@
             return result;
         }
         
-        // Show line as raw markdown text with specific cursor position
-        function showLineAsMarkdownWithPosition(lineIndex, targetCursorPosition = 0) {
-            const line = editorLines[lineIndex];
-            if (!line) return;
-            
-            console.log(`🎯 showLineAsMarkdownWithPosition: line ${lineIndex}, targetPosition ${targetCursorPosition}`);
-            
-            // Get the stored markdown content
-            const markdownContent = lineContents[lineIndex] || '';
-            
-            // Set as plain text (markdown source)
-            line.innerHTML = '';
-            line.textContent = markdownContent;
-            
-            // Ensure line is focusable and editable
-            line.setAttribute('contenteditable', 'true');
-            
-            // Always focus the line and restore cursor position
+        function restoreCursorInEditableLine(line, targetCursorPosition = 0) {
             requestAnimationFrame(() => {
                 try {
                     line.focus();
-                    
+
                     const range = document.createRange();
                     const newSelection = window.getSelection();
-                    
+
                     // Ensure we don't exceed the text length
-                    const textNode = line.firstChild;
-                    if (textNode && textNode.nodeType === Node.TEXT_NODE) {
-                        const maxPos = textNode.textContent.length;
-                        const safePosition = Math.min(targetCursorPosition, maxPos);
-                        
-                        range.setStart(textNode, safePosition);
+                    const maxPos = (line.textContent || '').length;
+                    const safePosition = Math.min(targetCursorPosition, maxPos);
+                    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+                    let remaining = safePosition;
+                    let textNode = walker.nextNode();
+
+                    while (textNode) {
+                        const length = textNode.textContent.length;
+                        if (remaining <= length) {
+                            break;
+                        }
+                        remaining -= length;
+                        textNode = walker.nextNode();
+                    }
+
+                    if (textNode) {
+                        range.setStart(textNode, remaining);
                         range.collapse(true);
                         newSelection.removeAllRanges();
                         newSelection.addRange(range);
-                        
+
                         console.log(`✅ Cursor restored to position ${safePosition} in markdown (requested: ${targetCursorPosition}, text length: ${maxPos})`);
                     } else if (line.childNodes.length === 0) {
-                        // Line is empty, position cursor in the line itself
                         range.setStart(line, 0);
                         range.collapse(true);
                         newSelection.removeAllRanges();
                         newSelection.addRange(range);
-                        
-                        console.log(`✅ Cursor positioned in empty line`);
+
+                        console.log('✅ Cursor positioned in empty line');
                     }
                 } catch (error) {
                     console.warn('Error restoring cursor position:', error);
-                    // Fallback: just focus the line
                     try {
                         line.focus();
                     } catch (focusError) {
@@ -1092,6 +1814,39 @@
                     }
                 }
             });
+        }
+
+        function applyEditableMarkdownView(lineIndex, targetCursorPosition = 0) {
+            const line = editorLines[lineIndex];
+            if (!line) {
+                return '';
+            }
+
+            const markdownContent = lineContents[lineIndex] || '';
+            const tableBlock = getTableBlock(lineIndex);
+            if (tableBlock) {
+                line.innerHTML = renderTableMarkdownLine(markdownContent);
+                line.classList.add('table-markdown-edit');
+            } else {
+                line.innerHTML = renderEditableMarkdownLine(lineIndex, markdownContent);
+                line.classList.remove('table-markdown-edit');
+            }
+            line.classList.add('markdown-visible-edit');
+            line.classList.toggle('markdown-block-edit', isIndexInsideBlock(lineIndex, activeGroupedBlock));
+            line.setAttribute('contenteditable', 'true');
+            restoreCursorInEditableLine(line, targetCursorPosition);
+            return markdownContent;
+        }
+
+        // Show line as raw markdown text with specific cursor position
+        function showLineAsMarkdownWithPosition(lineIndex, targetCursorPosition = 0) {
+            const line = editorLines[lineIndex];
+            if (!line) return;
+            
+            console.log(`🎯 showLineAsMarkdownWithPosition: line ${lineIndex}, targetPosition ${targetCursorPosition}`);
+            
+            lockLineHeight(line);
+            const markdownContent = applyEditableMarkdownView(lineIndex, targetCursorPosition);
             
             console.log(`✅ Line ${lineIndex} switched to markdown: "${markdownContent}"`);
         }
@@ -1103,16 +1858,21 @@
         
         // Render line as HTML - C ENGINE ONLY
         function renderLineAsHTML(lineIndex) {
-            const line = editorLines[lineIndex];
+            let line = editorLines[lineIndex];
             if (!line) return;
 
+            unlockLineHeight(line);
             line.classList.remove('collapsed-block-line');
+            line.classList.remove('table-markdown-edit');
+            line.classList.remove('markdown-visible-edit');
             
             // ALWAYS update content from current line text when it was in markdown mode
             if (lineIndex === currentLineIndex) {
-                lineContents[lineIndex] = line.textContent || '';
+                syncLineModelFromEditor(lineIndex);
+                line = editorLines[lineIndex];
                 console.log(`💾 Saved line ${lineIndex} content:`, lineContents[lineIndex]);
             }
+            line.classList.remove('markdown-block-edit');
             
             const markdownText = lineContents[lineIndex] || '';
             console.log(`🔄 Rendering line ${lineIndex} as HTML:`, markdownText);
@@ -1122,27 +1882,9 @@
                 return;
             }
 
-            const groupedBlock = getGroupedMarkdownBlock(lineIndex);
-            if (groupedBlock) {
-                if (lineIndex === groupedBlock.start) {
-                    try {
-                        const renderedBlock = renderMarkdownBlock(groupedBlock.markdown);
-                        line.innerHTML = renderedBlock;
-                        console.log(`✅ Rendered grouped block ${groupedBlock.start}-${groupedBlock.end}`);
-                    } catch (error) {
-                        console.error(`❌ GROUPED BLOCK RENDER FAILED for ${groupedBlock.start}-${groupedBlock.end}:`, error);
-                        line.innerHTML = `<span style="color: red;">❌ BLOCK ERROR</span>`;
-                    }
-                } else {
-                    line.innerHTML = '&nbsp;';
-                    line.classList.add('collapsed-block-line');
-                }
-                return;
-            }
-            
             // C ENGINE ONLY - if it fails, we debug and fix the C code
             try {
-                const renderedHtml = renderSingleLine(markdownText);
+                const renderedHtml = renderSingleLine(lineIndex, markdownText);
                 line.innerHTML = renderedHtml;
                 console.log(`✅ Line ${lineIndex} rendered:`, renderedHtml);
             } catch (error) {
@@ -1564,6 +2306,7 @@
         // Initialize hybrid editor
         function initializeHybridEditor() {
             console.log('Initializing hybrid editor...');
+            activeGroupedBlock = null;
             
             // C cursor manager is initialized globally as cCursorManager
             // No need for JavaScript CursorManager class anymore
@@ -1578,7 +2321,15 @@
             });
             
             // Set up event listeners
-            hybridEditor.addEventListener('click', () => {
+            hybridEditor.addEventListener('click', (event) => {
+                const link = event.target.closest('a');
+                if (link && hybridEditor.contains(link)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    activateEditorLink(link, event);
+                    return;
+                }
+
                 requestAnimationFrame(updateLineStates); // Faster than setTimeout
             });
             
@@ -1649,8 +2400,22 @@
             hybridEditor.addEventListener('input', () => {
                 // Update line contents for current line
                 if (currentLineIndex >= 0 && editorLines[currentLineIndex]) {
-                    lineContents[currentLineIndex] = editorLines[currentLineIndex].textContent || '';
+                    if (isRefreshingEditableLine) {
+                        return;
+                    }
+
+                    const currentLine = editorLines[currentLineIndex];
+                    const cursorPosition = calculatePlainTextPosition(currentLine);
+                    syncLineModelFromEditor(currentLineIndex);
                     console.log(`📝 Updated line ${currentLineIndex}:`, lineContents[currentLineIndex]);
+
+                    if (currentLine.classList.contains('markdown-visible-edit')) {
+                        isRefreshingEditableLine = true;
+                        applyEditableMarkdownView(currentLineIndex, cursorPosition);
+                        requestAnimationFrame(() => {
+                            isRefreshingEditableLine = false;
+                        });
+                    }
                 }
             });
             
@@ -1694,6 +2459,35 @@
         }
 
         // Import function
+        async function activateEditorLink(anchor, event) {
+            const href = anchor ? anchor.getAttribute('href') : '';
+            if (!href) {
+                return;
+            }
+
+            if (/^(https?:)?\/\//i.test(href) || href.startsWith('file:')) {
+                if (event.metaKey || event.ctrlKey) {
+                    window.open(href, '_blank', 'noopener');
+                }
+                return;
+            }
+
+            if (href.toLowerCase().endsWith('.md') || href.includes('/')) {
+                try {
+                    const response = await fetch(href);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const markdown = await response.text();
+                    loadMarkdownContent(markdown);
+                    console.log(`✅ Opened local markdown link: ${href}`);
+                } catch (error) {
+                    console.warn(`⚠️ Unable to open local markdown link "${href}":`, error);
+                }
+            }
+        }
+
         function importMarkdown() {
             // Create a file input element
             const fileInput = document.createElement('input');
@@ -1742,48 +2536,33 @@
             hybridEditor.innerHTML = '';
             editorLines = [];
             lineContents = [];
+            activeGroupedBlock = null;
             
             // Create new lines
             lines.forEach((lineContent, index) => {
-                const lineElement = document.createElement('div');
-                lineElement.className = 'editor-line';
-                lineElement.dataset.line = index;
-                lineElement.textContent = lineContent;
-                lineElement.setAttribute('contenteditable', 'true');
-                
+                const lineElement = createEditorLineElement(lineContent, index);
                 hybridEditor.appendChild(lineElement);
                 editorLines.push(lineElement);
                 lineContents.push(lineContent);
             });
             
-            // Set first line as current
-            currentLineIndex = 0;
-            
-            // Render all lines except first as HTML
+            currentLineIndex = -1;
+
+            // Render everything first so rich lines get measured before the
+            // current markdown-visible line is activated.
             editorLines.forEach((line, index) => {
-                if (index === 0) {
-                    showLineAsMarkdown(index);
-                } else {
-                    renderLineAsHTML(index);
-                }
+                renderLineAsHTML(index);
             });
-            
-            updateLineClasses();
-            
-            // Focus first line
-            if (editorLines[0]) {
-                setTimeout(() => {
-                    editorLines[0].focus();
-                    
-                    // Place cursor at start
-                    const range = document.createRange();
-                    const selection = window.getSelection();
-                    range.setStart(editorLines[0], 0);
-                    range.collapse(true);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }, 100);
-            }
+
+            requestAnimationFrame(() => {
+                if (!editorLines[0]) {
+                    return;
+                }
+
+                currentLineIndex = 0;
+                showLineAsMarkdown(0);
+                updateLineClasses();
+            });
             
             console.log(`✅ Loaded ${lines.length} lines into hybrid editor`);
         }
@@ -1810,6 +2589,7 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async function() {
+            initializeTheme();
             await initializeWasm();
             initializeHybridEditor();
             loadMarkdownContent(DEFAULT_MARKDOWN_EXAMPLE);

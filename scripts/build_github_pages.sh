@@ -33,6 +33,11 @@ cp -f "$DOCS_DIR/cursor_wasm.js" "$DIST_DOCS_DIR/cursor_wasm.js"
 cp -f "$DOCS_DIR/cursor_wasm.wasm" "$DIST_DOCS_DIR/cursor_wasm.wasm"
 cp -f "$DOCS_DIR/cursor_c_interface.js" "$DIST_DOCS_DIR/cursor_c_interface.js"
 
+if [ -d "$DOCS_DIR/Notes" ]; then
+  mkdir -p "$DIST_DOCS_DIR/Notes"
+  cp -R "$DOCS_DIR/Notes/." "$DIST_DOCS_DIR/Notes/"
+fi
+
 touch "$DIST_DIR/.nojekyll"
 
 test -f "$DIST_DIR/index.html"
@@ -42,6 +47,7 @@ test -f "$DIST_DOCS_DIR/editor.wasm"
 test -f "$DIST_DOCS_DIR/cursor_wasm.js"
 test -f "$DIST_DOCS_DIR/cursor_wasm.wasm"
 test -f "$DIST_DOCS_DIR/cursor_c_interface.js"
+test -f "$DIST_DOCS_DIR/Notes/exemple.md"
 test -f "$DIST_DIR/.nojekyll"
 
 echo "==> GitHub Pages artifact ready"

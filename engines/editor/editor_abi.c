@@ -306,6 +306,16 @@ static bool render_list_html(HtmlBuilder *builder, const ElementList *list) {
     return true;
   }
 
+  bool is_task_list = list->kind == LIST_KIND_TASK;
+  if (!is_task_list) {
+    for (size_t i = 0; i < list->item_count; i++) {
+      if (list->items[i].has_checkbox || list->items[i].is_task) {
+        is_task_list = true;
+        break;
+      }
+    }
+  }
+
   if (list->kind == LIST_KIND_DEFINITION) {
     if (!html_builder_append(builder, "<dl>")) {
       return false;
@@ -325,6 +335,10 @@ static bool render_list_html(HtmlBuilder *builder, const ElementList *list) {
 
   if (list->ordered) {
     if (!html_builder_appendf(builder, "<ol start=\"%d\">", list->start_index)) {
+      return false;
+    }
+  } else if (is_task_list) {
+    if (!html_builder_append(builder, "<ul class=\"task-list\">")) {
       return false;
     }
   } else if (!html_builder_append(builder, "<ul>")) {
