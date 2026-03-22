@@ -168,6 +168,94 @@
             padding: 1px 2px;
         }
 
+        .editor-line a {
+            color: #8cc8ff;
+            text-decoration: underline;
+        }
+
+        .editor-line code {
+            padding: 1px 5px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffd37e;
+        }
+
+        .editor-line pre,
+        .editor-line ul,
+        .editor-line ol,
+        .editor-line dl,
+        .editor-line blockquote,
+        .editor-line table,
+        .editor-line hr {
+            margin: 0;
+        }
+
+        .editor-line pre {
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: #11161c;
+            border: 1px solid #2d3844;
+            overflow-x: auto;
+        }
+
+        .editor-line pre code {
+            padding: 0;
+            background: transparent;
+            color: #d9e3ec;
+        }
+
+        .editor-line blockquote {
+            padding-left: 12px;
+            border-left: 3px solid #4c6ef5;
+            color: #c9d7e4;
+        }
+
+        .editor-line img {
+            display: block;
+            max-width: min(100%, 320px);
+            height: auto;
+            border-radius: 10px;
+            border: 1px solid #33404d;
+        }
+
+        .editor-line table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .editor-line th,
+        .editor-line td {
+            padding: 6px 8px;
+            border: 1px solid #394553;
+            text-align: left;
+        }
+
+        .editor-line th {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .editor-line dd {
+            margin: 4px 0 0 18px;
+            color: #c9d7e4;
+        }
+
+        .editor-line hr {
+            border: 0;
+            border-top: 1px solid #425060;
+        }
+
+        .collapsed-block-line {
+            min-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+            margin: 0;
+            opacity: 0;
+            overflow: hidden;
+            pointer-events: none;
+        }
+
         .footer {
             background: #2d2d2d;
             padding: 8px 20px;
@@ -379,41 +467,99 @@
                 if (!doc.elements || doc.elements.length === 0) {
                     return '';
                 }
-                
-                let html = '';
-                for (const element of doc.elements) {
-                    if (element.type === 'text') {
-                        let text = element.text || '';
-                        
-                        // Use spans if available (C engine output)
-                        if (element.spans && element.spans.length > 0) {
-                            for (const span of element.spans) {
-                                let spanText = span.text || '';
-                                
-                                if (span.bold) spanText = `<strong>${spanText}</strong>`;
-                                if (span.italic) spanText = `<em>${spanText}</em>`;
-                                if (span.has_underline) spanText = `<u>${spanText}</u>`;
-                                if (span.has_highlight) spanText = `<mark>${spanText}</mark>`;
-                                
-                                html += spanText;
-                            }
-                        } else {
-                            // Apply element-level formatting
-                            if (element.bold) text = `<strong>${text}</strong>`;
-                            if (element.italic) text = `<em>${text}</em>`;
-                            if (element.underline) text = `<u>${text}</u>`;
-                            if (element.highlight) text = `<mark>${text}</mark>`;
-                            html += text;
-                        }
-                        
-                        // Handle headers
-                        if (element.level > 0) {
-                            html = `<h${element.level}>${html}</h${element.level}>`;
-                        }
+
+                const renderSpan = (span) => {
+                    if (!span) return '';
+
+                    if (span.image && span.src) {
+                        return `<img src="${escapeHtml(span.src)}" alt="${escapeHtml(span.alt || span.text || '')}" />`;
                     }
-                }
-                
-                return html;
+
+                    let html = escapeHtml(span.text || '');
+
+                    if (span.code) html = `<code>${html}</code>`;
+                    if (span.italic) html = `<em>${html}</em>`;
+                    if (span.bold) html = `<strong>${html}</strong>`;
+                    if (span.has_underline) html = `<u>${html}</u>`;
+                    if (span.has_highlight) html = `<mark>${html}</mark>`;
+                    if (span.strikethrough) html = `<del>${html}</del>`;
+                    if (span.link && span.href) {
+                        html = `<a href="${escapeHtml(span.href)}">${html}</a>`;
+                    }
+
+                    return html;
+                };
+
+                const renderTextNode = (node, wrapHeaders = true) => {
+                    if (!node) return '';
+
+                    let html = '';
+                    if (node.spans && node.spans.length > 0) {
+                        html = node.spans.map(renderSpan).join('');
+                    } else {
+                        html = renderSpan({
+                            text: node.text || '',
+                            bold: !!node.bold,
+                            italic: !!node.italic,
+                            code: !!node.code,
+                            strikethrough: !!node.strikethrough,
+                            has_underline: !!node.has_underline || !!node.underline,
+                            has_highlight: !!node.has_highlight || !!node.highlight
+                        });
+                    }
+
+                    if (wrapHeaders && node.level > 0) {
+                        html = `<h${node.level}>${html}</h${node.level}>`;
+                    }
+
+                    return html;
+                };
+
+                const normalizeTableRows = (rows) => {
+                    if (!Array.isArray(rows)) return [];
+                    return rows.map((row) => {
+                        if (!Array.isArray(row)) return [];
+                        return row.map((cell) => Array.isArray(cell) ? (cell[0] || null) : cell);
+                    });
+                };
+
+                const renderElement = (element) => {
+                    if (!element) return '';
+
+                    switch (element.type) {
+                        case 'text':
+                            return renderTextNode(element, true);
+                        case 'image':
+                            return `<img src="${escapeHtml(element.src || '')}" alt="${escapeHtml(element.alt || '')}" />`;
+                        case 'code':
+                            return `<pre><code${element.language ? ` class="language-${escapeHtml(element.language)}"` : ''}>${escapeHtml(element.content || '')}</code></pre>`;
+                        case 'quote':
+                            return `<blockquote>${(element.items || []).map((item) => renderTextNode(item, false)).join('<br />')}</blockquote>`;
+                        case 'list':
+                            if (element.kind === 'definition') {
+                                return `<dl>${(element.items || []).map((item) => `<dt>${renderTextNode(item.term, false)}</dt><dd>${renderTextNode(item.definition, false)}</dd>`).join('')}</dl>`;
+                            }
+
+                            const tag = element.ordered ? 'ol' : 'ul';
+                            const startAttr = element.ordered && element.start ? ` start="${element.start}"` : '';
+                            return `<${tag}${startAttr}>${(element.items || []).map((item) => {
+                                const checkbox = item.checkbox
+                                    ? `<input type="checkbox"${item.checked ? ' checked' : ''} disabled /> `
+                                    : '';
+                                return `<li>${checkbox}${renderTextNode(item.text, false)}</li>`;
+                            }).join('')}</${tag}>`;
+                        case 'table':
+                            const headerRows = normalizeTableRows(element.header);
+                            const bodyRows = normalizeTableRows(element.rows);
+                            return `<table><thead>${headerRows.map((row) => `<tr>${row.map((cell) => `<th>${renderTextNode(cell, false)}</th>`).join('')}</tr>`).join('')}</thead><tbody>${bodyRows.map((row) => `<tr>${row.map((cell) => `<td>${renderTextNode(cell, false)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+                        case 'divider':
+                            return '<hr />';
+                        default:
+                            return '';
+                    }
+                };
+
+                return doc.elements.map(renderElement).join('\n');
             } catch (error) {
                 console.warn('C ENGINE JSON parsing error:', error);
                 return '';
@@ -546,9 +692,8 @@
             });
         }
         
-        // C ENGINE HTML - TRY DIRECT HTML FIRST, FALLBACK TO JSON TEMPORARILY
-        function renderSingleLine(line) {
-            if (!line.trim()) return '&nbsp;';
+        function renderMarkdownBlock(markdown) {
+            if (!markdown.trim()) return '&nbsp;';
             
             // C engine MUST be ready - no fallback
             if (!isWasmReady || !editorModule) {
@@ -558,9 +703,9 @@
             
             // Try direct HTML function first
             try {
-                const html = editorModule.ccall('editor_markdown_to_html', 'string', ['string'], [line]);
-                if (html) {
-                    console.log(`✅ C ENGINE HTML DIRECT: "${line}" -> "${html}"`);
+                const html = editorModule.ccall('editor_markdown_to_html', 'string', ['string'], [markdown]);
+                if (html && html.trim()) {
+                    console.log(`✅ C ENGINE HTML DIRECT: "${markdown}" -> "${html}"`);
                     return html;
                 }
             } catch (error) {
@@ -569,10 +714,10 @@
             
             // Fallback to JSON approach (still using C engine)
             try {
-                const jsonStr = editorModule.ccall('editor_parse_markdown_simple', 'string', ['string'], [line]);
+                const jsonStr = editorModule.ccall('editor_parse_markdown_simple', 'string', ['string'], [markdown]);
                 if (jsonStr) {
                     const html = jsonToHtmlSimple(jsonStr);
-                    console.log(`✅ C ENGINE JSON: "${line}" -> "${html}"`);
+                    console.log(`✅ C ENGINE JSON: "${markdown}" -> "${html}"`);
                     return html;
                 }
             } catch (error) {
@@ -582,12 +727,173 @@
             
             throw new Error('C ENGINE RETURNED EMPTY');
         }
+
+        function renderSingleLine(line) {
+            return renderMarkdownBlock(line);
+        }
         
         // Escape HTML characters
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function isFenceMarker(line) {
+            return /^\s*```/.test(line || '');
+        }
+
+        function isTableSeparatorLineJs(line) {
+            return /^\s*\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$/.test((line || '').trim());
+        }
+
+        function isTableRowLine(line) {
+            const trimmed = (line || '').trim();
+            return trimmed.includes('|') && /^\|?.*\|.*\|?$/.test(trimmed);
+        }
+
+        function isListLine(line) {
+            return /^\s*(?:[-+*]\s+|\d+\.\s+)/.test(line || '');
+        }
+
+        function isDefinitionDescriptionLine(line) {
+            return /^\s*:\s+/.test(line || '');
+        }
+
+        function isBlockquoteLine(line) {
+            return /^\s*>/.test(line || '');
+        }
+
+        function getContiguousBlock(index, matcher) {
+            const line = lineContents[index] || '';
+            if (!matcher(line)) {
+                return null;
+            }
+
+            let start = index;
+            let end = index;
+
+            while (start > 0 && matcher(lineContents[start - 1] || '')) {
+                start--;
+            }
+            while (end + 1 < lineContents.length && matcher(lineContents[end + 1] || '')) {
+                end++;
+            }
+
+            return {
+                start,
+                end,
+                markdown: lineContents.slice(start, end + 1).join('\n')
+            };
+        }
+
+        function getFenceBlock(index) {
+            let start = -1;
+            for (let i = 0; i < lineContents.length; i++) {
+                if (isFenceMarker(lineContents[i])) {
+                    if (start === -1) {
+                        start = i;
+                    } else {
+                        if (index >= start && index <= i) {
+                            return {
+                                start,
+                                end: i,
+                                markdown: lineContents.slice(start, i + 1).join('\n')
+                            };
+                        }
+                        start = -1;
+                    }
+                }
+            }
+            return null;
+        }
+
+        function getTableBlock(index) {
+            const current = lineContents[index] || '';
+            if (!isTableRowLine(current) && !isTableSeparatorLineJs(current)) {
+                return null;
+            }
+
+            let start = index;
+            let end = index;
+
+            while (start > 0) {
+                const prev = lineContents[start - 1] || '';
+                if (!isTableRowLine(prev) && !isTableSeparatorLineJs(prev)) {
+                    break;
+                }
+                start--;
+            }
+
+            while (end + 1 < lineContents.length) {
+                const next = lineContents[end + 1] || '';
+                if (!isTableRowLine(next) && !isTableSeparatorLineJs(next)) {
+                    break;
+                }
+                end++;
+            }
+
+            const slice = lineContents.slice(start, end + 1);
+            if (!slice.some(isTableSeparatorLineJs)) {
+                return null;
+            }
+
+            return {
+                start,
+                end,
+                markdown: slice.join('\n')
+            };
+        }
+
+        function getDefinitionBlock(index) {
+            const current = lineContents[index] || '';
+            const previous = index > 0 ? (lineContents[index - 1] || '') : '';
+            const next = index + 1 < lineContents.length ? (lineContents[index + 1] || '') : '';
+
+            if (!isDefinitionDescriptionLine(current) &&
+                !isDefinitionDescriptionLine(next) &&
+                !isDefinitionDescriptionLine(previous)) {
+                return null;
+            }
+
+            let start = index;
+            if (isDefinitionDescriptionLine(current) && start > 0) {
+                start--;
+            }
+            while (start > 0) {
+                const maybeTerm = lineContents[start - 1] || '';
+                const maybeDesc = lineContents[start] || '';
+                if (maybeTerm.trim() && isDefinitionDescriptionLine(maybeDesc)) {
+                    start--;
+                } else {
+                    break;
+                }
+            }
+
+            let end = start;
+            while (end + 1 < lineContents.length &&
+                   (lineContents[end] || '').trim() &&
+                   isDefinitionDescriptionLine(lineContents[end + 1] || '')) {
+                end += 2;
+            }
+
+            if (end <= start) {
+                return null;
+            }
+
+            return {
+                start,
+                end,
+                markdown: lineContents.slice(start, end + 1).join('\n')
+            };
+        }
+
+        function getGroupedMarkdownBlock(index) {
+            return getFenceBlock(index) ||
+                   getTableBlock(index) ||
+                   getDefinitionBlock(index) ||
+                   getContiguousBlock(index, isListLine) ||
+                   getContiguousBlock(index, isBlockquoteLine);
         }
 
         // Calculate cursor position in plain text from HTML cursor position
@@ -799,6 +1105,8 @@
         function renderLineAsHTML(lineIndex) {
             const line = editorLines[lineIndex];
             if (!line) return;
+
+            line.classList.remove('collapsed-block-line');
             
             // ALWAYS update content from current line text when it was in markdown mode
             if (lineIndex === currentLineIndex) {
@@ -811,6 +1119,24 @@
             
             if (!markdownText.trim()) {
                 line.innerHTML = '&nbsp;';
+                return;
+            }
+
+            const groupedBlock = getGroupedMarkdownBlock(lineIndex);
+            if (groupedBlock) {
+                if (lineIndex === groupedBlock.start) {
+                    try {
+                        const renderedBlock = renderMarkdownBlock(groupedBlock.markdown);
+                        line.innerHTML = renderedBlock;
+                        console.log(`✅ Rendered grouped block ${groupedBlock.start}-${groupedBlock.end}`);
+                    } catch (error) {
+                        console.error(`❌ GROUPED BLOCK RENDER FAILED for ${groupedBlock.start}-${groupedBlock.end}:`, error);
+                        line.innerHTML = `<span style="color: red;">❌ BLOCK ERROR</span>`;
+                    }
+                } else {
+                    line.innerHTML = '&nbsp;';
+                    line.classList.add('collapsed-block-line');
+                }
                 return;
             }
             

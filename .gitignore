@@ -6,6 +6,8 @@ obj/
 bin/
 run_tests
 dist/
+output/
+test-results/
 
 # Debug and test binaries
 debug_*

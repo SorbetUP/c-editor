@@ -24,6 +24,12 @@ static EditorConfig g_config = {
     .max_nesting_depth = 64,
 };
 
+typedef struct {
+  char *data;
+  size_t len;
+  size_t capacity;
+} HtmlBuilder;
+
 // Default allocator using standard library
 static void *default_malloc(size_t size) { return malloc(size); }
 
@@ -48,6 +54,457 @@ static void log_debug(const char *format, ...) {
     g_log_callback(0, buffer);
   } else {
     printf("[EDITOR] %s\n", buffer);
+  }
+}
+
+static bool html_builder_reserve(HtmlBuilder *builder, size_t extra) {
+  size_t needed = builder->len + extra + 1;
+  if (needed <= builder->capacity) {
+    return true;
+  }
+
+  size_t new_capacity = builder->capacity == 0 ? 128 : builder->capacity;
+  while (new_capacity < needed) {
+    new_capacity *= 2;
+  }
+
+  char *new_data = g_allocator.realloc_fn(builder->data, new_capacity);
+  if (!new_data) {
+    return false;
+  }
+
+  builder->data = new_data;
+  builder->capacity = new_capacity;
+  return true;
+}
+
+static bool html_builder_append_n(HtmlBuilder *builder, const char *text,
+                                  size_t len) {
+  if (!text || len == 0) {
+    return true;
+  }
+
+  if (!html_builder_reserve(builder, len)) {
+    return false;
+  }
+
+  memcpy(builder->data + builder->len, text, len);
+  builder->len += len;
+  builder->data[builder->len] = '\0';
+  return true;
+}
+
+static bool html_builder_append(HtmlBuilder *builder, const char *text) {
+  return html_builder_append_n(builder, text, text ? strlen(text) : 0);
+}
+
+static bool html_builder_append_char(HtmlBuilder *builder, char ch) {
+  return html_builder_append_n(builder, &ch, 1);
+}
+
+static bool html_builder_append_escaped(HtmlBuilder *builder, const char *text) {
+  if (!text) {
+    return true;
+  }
+
+  for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+    switch (*p) {
+    case '&':
+      if (!html_builder_append(builder, "&amp;")) {
+        return false;
+      }
+      break;
+    case '<':
+      if (!html_builder_append(builder, "&lt;")) {
+        return false;
+      }
+      break;
+    case '>':
+      if (!html_builder_append(builder, "&gt;")) {
+        return false;
+      }
+      break;
+    case '"':
+      if (!html_builder_append(builder, "&quot;")) {
+        return false;
+      }
+      break;
+    case '\'':
+      if (!html_builder_append(builder, "&#39;")) {
+        return false;
+      }
+      break;
+    default:
+      if (!html_builder_append_char(builder, (char)*p)) {
+        return false;
+      }
+      break;
+    }
+  }
+
+  return true;
+}
+
+static bool html_builder_appendf(HtmlBuilder *builder, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  va_list copy;
+  va_copy(copy, args);
+  int needed = vsnprintf(NULL, 0, format, copy);
+  va_end(copy);
+
+  if (needed < 0) {
+    va_end(args);
+    return false;
+  }
+
+  if (!html_builder_reserve(builder, (size_t)needed)) {
+    va_end(args);
+    return false;
+  }
+
+  vsnprintf(builder->data + builder->len, builder->capacity - builder->len,
+            format, args);
+  va_end(args);
+  builder->len += (size_t)needed;
+  return true;
+}
+
+static bool render_text_inline_html(HtmlBuilder *builder,
+                                    const ElementText *text);
+
+static bool render_text_span_html(HtmlBuilder *builder, const TextSpan *span) {
+  TextSpan temp = {0};
+  if (!span) {
+    span = &temp;
+  }
+
+  if (span->is_image && span->image_src) {
+    if (!html_builder_append(builder, "<img src=\"") ||
+        !html_builder_append_escaped(builder, span->image_src) ||
+        !html_builder_append(builder, "\" alt=\"") ||
+        !html_builder_append_escaped(builder,
+                                     span->image_alt ? span->image_alt : "") ||
+        !html_builder_append(builder, "\" />")) {
+      return false;
+    }
+    return true;
+  }
+
+  if (span->is_link && span->link_href) {
+    TextSpan inner = *span;
+    inner.is_link = false;
+    inner.link_href = NULL;
+    inner.is_note_link = false;
+    inner.is_image = false;
+    inner.image_src = NULL;
+    inner.image_alt = NULL;
+
+    if (!html_builder_append(builder, "<a href=\"") ||
+        !html_builder_append_escaped(builder, span->link_href) ||
+        !html_builder_append(builder, "\">") ||
+        !render_text_span_html(builder, &inner) ||
+        !html_builder_append(builder, "</a>")) {
+      return false;
+    }
+    return true;
+  }
+
+  if (span->strikethrough && !html_builder_append(builder, "<del>")) {
+    return false;
+  }
+  if (span->has_highlight && !html_builder_append(builder, "<mark>")) {
+    return false;
+  }
+  if (span->has_underline && !html_builder_append(builder, "<u>")) {
+    return false;
+  }
+  if (span->bold && !html_builder_append(builder, "<strong>")) {
+    return false;
+  }
+  if (span->italic && !html_builder_append(builder, "<em>")) {
+    return false;
+  }
+  if (span->code && !html_builder_append(builder, "<code>")) {
+    return false;
+  }
+
+  if (!html_builder_append_escaped(builder, span->text ? span->text : "")) {
+    return false;
+  }
+
+  if (span->code && !html_builder_append(builder, "</code>")) {
+    return false;
+  }
+  if (span->italic && !html_builder_append(builder, "</em>")) {
+    return false;
+  }
+  if (span->bold && !html_builder_append(builder, "</strong>")) {
+    return false;
+  }
+  if (span->has_underline && !html_builder_append(builder, "</u>")) {
+    return false;
+  }
+  if (span->has_highlight && !html_builder_append(builder, "</mark>")) {
+    return false;
+  }
+  if (span->strikethrough && !html_builder_append(builder, "</del>")) {
+    return false;
+  }
+
+  return true;
+}
+
+static bool render_text_inline_html(HtmlBuilder *builder,
+                                    const ElementText *text) {
+  if (!text) {
+    return true;
+  }
+
+  if (text->spans && text->spans_count > 0) {
+    for (size_t i = 0; i < text->spans_count; i++) {
+      if (!render_text_span_html(builder, &text->spans[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  TextSpan span = {0};
+  span.text = text->text;
+  span.bold = text->bold;
+  span.italic = text->italic;
+  span.has_highlight = text->has_highlight;
+  span.highlight_color = text->highlight_color;
+  span.has_underline = text->has_underline;
+  span.underline_color = text->underline_color;
+  span.underline_gap = text->underline_gap;
+
+  return render_text_span_html(builder, &span);
+}
+
+static bool render_text_element_html(HtmlBuilder *builder,
+                                     const ElementText *text) {
+  if (!text) {
+    return true;
+  }
+
+  if (text->level > 0 && text->level <= 6) {
+    if (!html_builder_appendf(builder, "<h%d>", text->level) ||
+        !render_text_inline_html(builder, text) ||
+        !html_builder_appendf(builder, "</h%d>", text->level)) {
+      return false;
+    }
+    return true;
+  }
+
+  return render_text_inline_html(builder, text);
+}
+
+static bool render_list_html(HtmlBuilder *builder, const ElementList *list) {
+  if (!list) {
+    return true;
+  }
+
+  if (list->kind == LIST_KIND_DEFINITION) {
+    if (!html_builder_append(builder, "<dl>")) {
+      return false;
+    }
+    for (size_t i = 0; i < list->item_count; i++) {
+      const ElementListItem *item = &list->items[i];
+      if (!html_builder_append(builder, "<dt>") ||
+          !render_text_inline_html(builder, &item->term) ||
+          !html_builder_append(builder, "</dt><dd>") ||
+          !render_text_inline_html(builder, &item->definition) ||
+          !html_builder_append(builder, "</dd>")) {
+        return false;
+      }
+    }
+    return html_builder_append(builder, "</dl>");
+  }
+
+  if (list->ordered) {
+    if (!html_builder_appendf(builder, "<ol start=\"%d\">", list->start_index)) {
+      return false;
+    }
+  } else if (!html_builder_append(builder, "<ul>")) {
+    return false;
+  }
+
+  for (size_t i = 0; i < list->item_count; i++) {
+    const ElementListItem *item = &list->items[i];
+    if (!html_builder_append(builder, "<li>")) {
+      return false;
+    }
+    if (item->has_checkbox) {
+      if (!html_builder_append(builder,
+                               item->checkbox_checked
+                                   ? "<input type=\"checkbox\" checked disabled /> "
+                                   : "<input type=\"checkbox\" disabled /> ")) {
+        return false;
+      }
+    }
+    if (!render_text_inline_html(builder, &item->text) ||
+        !html_builder_append(builder, "</li>")) {
+      return false;
+    }
+  }
+
+  return html_builder_append(builder, list->ordered ? "</ol>" : "</ul>");
+}
+
+static bool render_quote_html(HtmlBuilder *builder, const ElementQuote *quote) {
+  if (!quote) {
+    return true;
+  }
+
+  if (!html_builder_append(builder, "<blockquote>")) {
+    return false;
+  }
+
+  for (size_t i = 0; i < quote->item_count; i++) {
+    if (i > 0 && !html_builder_append(builder, "<br />")) {
+      return false;
+    }
+    if (!render_text_inline_html(builder, &quote->items[i])) {
+      return false;
+    }
+  }
+
+  return html_builder_append(builder, "</blockquote>");
+}
+
+static bool render_table_html(HtmlBuilder *builder, const ElementTable *table) {
+  if (!table || table->rows == 0 || table->cols == 0) {
+    return true;
+  }
+
+  size_t header_rows = 0;
+  if (table->header_rows > 0 && table->header_rows <= table->rows) {
+    header_rows = table->header_rows;
+  } else {
+    header_rows = 1;
+  }
+
+  if (!html_builder_append(builder, "<table>")) {
+    return false;
+  }
+
+  if (header_rows > 0) {
+    if (!html_builder_append(builder, "<thead>")) {
+      return false;
+    }
+    for (size_t r = 0; r < header_rows; r++) {
+      if (!html_builder_append(builder, "<tr>")) {
+        return false;
+      }
+      for (size_t c = 0; c < table->cols; c++) {
+        if (!html_builder_append(builder, "<th>")) {
+          return false;
+        }
+        if (table->cells[r] && table->cells[r][c] &&
+            !render_text_inline_html(builder, table->cells[r][c])) {
+          return false;
+        }
+        if (!html_builder_append(builder, "</th>")) {
+          return false;
+        }
+      }
+      if (!html_builder_append(builder, "</tr>")) {
+        return false;
+      }
+    }
+    if (!html_builder_append(builder, "</thead>")) {
+      return false;
+    }
+  }
+
+  if (!html_builder_append(builder, "<tbody>")) {
+    return false;
+  }
+  for (size_t r = header_rows; r < table->rows; r++) {
+    if (!html_builder_append(builder, "<tr>")) {
+      return false;
+    }
+    for (size_t c = 0; c < table->cols; c++) {
+      if (!html_builder_append(builder, "<td>")) {
+        return false;
+      }
+      if (table->cells[r] && table->cells[r][c] &&
+          !render_text_inline_html(builder, table->cells[r][c])) {
+        return false;
+      }
+      if (!html_builder_append(builder, "</td>")) {
+        return false;
+      }
+    }
+    if (!html_builder_append(builder, "</tr>")) {
+      return false;
+    }
+  }
+  if (!html_builder_append(builder, "</tbody></table>")) {
+    return false;
+  }
+
+  return true;
+}
+
+static bool render_element_html(HtmlBuilder *builder, const Element *element) {
+  if (!element) {
+    return true;
+  }
+
+  switch (element->kind) {
+  case T_TEXT:
+    return render_text_element_html(builder, &element->as.text);
+  case T_IMAGE:
+    return html_builder_append(builder, "<img src=\"") &&
+           html_builder_append_escaped(builder,
+                                       element->as.image.src
+                                           ? element->as.image.src
+                                           : "") &&
+           html_builder_append(builder, "\" alt=\"") &&
+           html_builder_append_escaped(builder,
+                                       element->as.image.alt
+                                           ? element->as.image.alt
+                                           : "") &&
+           html_builder_append(builder, "\" />");
+  case T_TABLE:
+    return render_table_html(builder, &element->as.table);
+  case T_CODE:
+    if (!html_builder_append(builder, "<pre><code")) {
+      return false;
+    }
+    if (element->as.code.language && element->as.code.language[0] != '\0') {
+      if (!html_builder_append(builder, " class=\"language-") ||
+          !html_builder_append_escaped(builder, element->as.code.language) ||
+          !html_builder_append(builder, "\"")) {
+        return false;
+      }
+    }
+    return html_builder_append(builder, ">") &&
+           html_builder_append_escaped(
+               builder,
+               element->as.code.content ? element->as.code.content : "") &&
+           html_builder_append(builder, "</code></pre>");
+  case T_LIST:
+    return render_list_html(builder, &element->as.list);
+  case T_QUOTE:
+    return render_quote_html(builder, &element->as.quote);
+  case T_DIVIDER:
+    return html_builder_append(builder, "<hr />");
+  case T_SETTINGS:
+    return html_builder_append(builder, "<div class=\"settings\">") &&
+           html_builder_append_escaped(
+               builder,
+               element->as.settings.name ? element->as.settings.name : "") &&
+           html_builder_append(builder, "=") &&
+           html_builder_append_escaped(
+               builder,
+               element->as.settings.value ? element->as.settings.value : "") &&
+           html_builder_append(builder, "</div>");
+  default:
+    return false;
   }
 }
 
@@ -517,143 +974,36 @@ EDITOR_API const char *editor_markdown_to_html(const char *markdown) {
     printf("[EDITOR ERROR] Invalid input or not initialized\n");
     return NULL;
   }
-  
-  // Parse to JSON first
-  char *json_result = NULL;
-  EditorResult result = editor_parse_markdown(markdown, &json_result);
-  
-  if (result != EDITOR_SUCCESS || !json_result) {
-    printf("[EDITOR ERROR] Failed to parse markdown to JSON\n");
+
+  Document doc = {0};
+  if (markdown_to_json(markdown, &doc) != 0) {
+    printf("[EDITOR ERROR] Failed to parse markdown\n");
     return NULL;
   }
-  
-  // Allocate HTML buffer
-  size_t html_len = strlen(json_result) * 3 + 1024; // Large estimate
-  char *html_buffer = (char*)g_allocator.malloc_fn(html_len);
-  if (!html_buffer) {
-    g_allocator.free_fn(json_result);
+
+  HtmlBuilder builder = {0};
+  if (!html_builder_reserve(&builder, 128)) {
+    doc_free(&doc);
     return NULL;
   }
-  
-  // Simple approach: extract text and spans from JSON
-  html_buffer[0] = '\0';
-  char *html_pos = html_buffer;
-  size_t remaining = html_len - 1;
-  
-  // Find spans array in JSON
-  const char *spans_start = strstr(json_result, "\"spans\":[");
-  if (spans_start) {
-    spans_start += 9; // Skip "spans":[
-    const char *current = spans_start;
-    
-    while (*current && *current != ']') {
-      if (*current == '{') {
-        // Parse span object
-        const char *span_end = strchr(current, '}');
-        if (!span_end) break;
-        
-        // Extract text
-        const char *text_start = strstr(current, "\"text\":\"");
-        if (text_start && text_start < span_end) {
-          text_start += 8;
-          const char *text_end = strchr(text_start, '"');
-          if (text_end && text_end < span_end) {
-            
-            // Check formatting
-            bool is_bold = strstr(current, "\"bold\":true") && strstr(current, "\"bold\":true") < span_end;
-            bool is_italic = strstr(current, "\"italic\":true") && strstr(current, "\"italic\":true") < span_end;
-            bool has_underline = strstr(current, "\"has_underline\":true") && strstr(current, "\"has_underline\":true") < span_end;
-            bool has_highlight = strstr(current, "\"has_highlight\":true") && strstr(current, "\"has_highlight\":true") < span_end;
-            
-            // Open tags
-            if (is_bold && remaining > 8) {
-              strcpy(html_pos, "<strong>");
-              html_pos += 8; remaining -= 8;
-            }
-            if (is_italic && remaining > 4) {
-              strcpy(html_pos, "<em>");
-              html_pos += 4; remaining -= 4;
-            }
-            if (has_underline && remaining > 3) {
-              strcpy(html_pos, "<u>");
-              html_pos += 3; remaining -= 3;
-            }
-            if (has_highlight && remaining > 6) {
-              strcpy(html_pos, "<mark>");
-              html_pos += 6; remaining -= 6;
-            }
-            
-            // Copy text
-            size_t text_len = text_end - text_start;
-            if (text_len > 0 && remaining > text_len) {
-              memcpy(html_pos, text_start, text_len);
-              html_pos += text_len; remaining -= text_len;
-            }
-            
-            // Close tags (reverse order)
-            if (has_highlight && remaining > 7) {
-              strcpy(html_pos, "</mark>");
-              html_pos += 7; remaining -= 7;
-            }
-            if (has_underline && remaining > 4) {
-              strcpy(html_pos, "</u>");
-              html_pos += 4; remaining -= 4;
-            }
-            if (is_italic && remaining > 5) {
-              strcpy(html_pos, "</em>");
-              html_pos += 5; remaining -= 5;
-            }
-            if (is_bold && remaining > 9) {
-              strcpy(html_pos, "</strong>");
-              html_pos += 9; remaining -= 9;
-            }
-          }
-        }
-        current = span_end + 1;
-      } else {
-        current++;
-      }
+  builder.data[0] = '\0';
+
+  for (size_t i = 0; i < doc.elements_len; i++) {
+    if (i > 0 && !html_builder_append(&builder, "\n")) {
+      g_allocator.free_fn(builder.data);
+      doc_free(&doc);
+      return NULL;
     }
-  } else {
-    // Fallback: just extract main text
-    const char *text_start = strstr(json_result, "\"text\":\"");
-    if (text_start) {
-      text_start += 8;
-      const char *text_end = strchr(text_start, '"');
-      if (text_end) {
-        size_t text_len = text_end - text_start;
-        if (text_len > 0 && remaining > text_len) {
-          memcpy(html_pos, text_start, text_len);
-          html_pos += text_len;
-        }
-      }
+    if (!render_element_html(&builder, &doc.elements[i])) {
+      g_allocator.free_fn(builder.data);
+      doc_free(&doc);
+      return NULL;
     }
   }
-  
-  // Set null terminator FIRST
-  *html_pos = '\0';
-  
-  // Check for header level
-  const char *level_str = strstr(json_result, "\"level\":");
-  if (level_str) {
-    int level = atoi(level_str + 8);
-    if (level > 0 && level <= 6) {
-      // Wrap in header tags
-      size_t current_len = strlen(html_buffer);
-      if (current_len > 0 && current_len < html_len - 20) { // Ensure space for header tags
-        char temp_buffer[html_len];
-        strcpy(temp_buffer, html_buffer);
-        snprintf(html_buffer, html_len, "<h%d>%s</h%d>", level, temp_buffer, level);
-      }
-    }
-  }
-  
-  // Clean up
-  g_allocator.free_fn(json_result);
-  
-  // Store result
-  last_html_result = html_buffer;
-  
-  log_debug("Generated HTML result: %s", html_buffer);
-  return html_buffer;
+
+  doc_free(&doc);
+  last_html_result = builder.data;
+  log_debug("Generated HTML result: %s",
+            last_html_result ? last_html_result : "(null)");
+  return last_html_result;
 }

@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "editor_abi.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -26,6 +27,12 @@ static bool has_code_span(const ElementText *text) {
     }
   }
   return false;
+}
+
+static void assert_contains(const char *haystack, const char *needle) {
+  assert(haystack != NULL);
+  assert(needle != NULL);
+  assert(strstr(haystack, needle) != NULL);
 }
 
 static void test_header_case_is_preserved(void) {
@@ -83,10 +90,55 @@ static void test_table_headers_keep_inline_styles(void) {
   doc_free(&doc);
 }
 
+static void test_html_inline_rendering(void) {
+  const char *html = editor_markdown_to_html("**gras** *italique* `code` "
+                                             "~~barre~~ ==surligne== "
+                                             "++souligne++ "
+                                             "[texte](https://example.com)");
+  assert_contains(html, "<strong>gras</strong>");
+  assert_contains(html, "<em>italique</em>");
+  assert_contains(html, "<code>code</code>");
+  assert_contains(html, "<del>barre</del>");
+  assert_contains(html, "<mark>surligne</mark>");
+  assert_contains(html, "<u>souligne</u>");
+  assert_contains(html, "<a href=\"https://example.com\">texte</a>");
+}
+
+static void test_html_block_rendering(void) {
+  const char *list_html = editor_markdown_to_html("- [x] done");
+  assert_contains(list_html, "<ul>");
+  assert_contains(list_html, "<input type=\"checkbox\" checked disabled />");
+  assert_contains(list_html, "done");
+
+  const char *quote_html = editor_markdown_to_html("> citation");
+  assert_contains(quote_html, "<blockquote>");
+  assert_contains(quote_html, "citation");
+
+  const char *image_html =
+      editor_markdown_to_html("![alt](https://example.com/a.png)");
+  assert_contains(image_html, "<img src=\"https://example.com/a.png\"");
+  assert_contains(image_html, "alt=\"alt\"");
+
+  const char *table_html = editor_markdown_to_html(
+      "| A | B |\n| --- | --- |\n| 1 | 2 |");
+  assert_contains(table_html, "<table>");
+  assert_contains(table_html, "<th>A</th>");
+  assert_contains(table_html, "<td>1</td>");
+
+  const char *code_html =
+      editor_markdown_to_html("```c\nint x = 1;\n```");
+  assert_contains(code_html, "<pre><code class=\"language-c\">");
+  assert_contains(code_html, "int x = 1;");
+}
+
 int main(void) {
+  assert(editor_library_init() == EDITOR_SUCCESS);
   test_header_case_is_preserved();
   test_table_headers_keep_inline_styles();
   test_table_rows_keep_inline_styles();
+  test_html_inline_rendering();
+  test_html_block_rendering();
+  editor_library_cleanup();
   printf("editor tests passed\n");
   return 0;
 }
