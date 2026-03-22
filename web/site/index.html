@@ -2,21 +2,18 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="0; url=docs/index.html">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ElephantNote | Projet unifie</title>
+    <title>ElephantNote</title>
     <style>
         :root {
-            --bg: #0c1014;
-            --bg-soft: #131b22;
-            --panel: rgba(18, 27, 34, 0.84);
-            --panel-strong: rgba(10, 18, 25, 0.94);
-            --line: rgba(138, 180, 214, 0.22);
-            --text: #edf3f8;
+            color-scheme: dark;
+            --bg: #081017;
+            --panel: #101923;
+            --line: rgba(126, 215, 185, 0.25);
+            --text: #eef4f8;
             --muted: #9bb2c7;
             --accent: #7ed7b9;
-            --accent-2: #7bb8ff;
-            --warn: #ffd37e;
-            --shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
         }
 
         * {
@@ -26,349 +23,48 @@
         body {
             margin: 0;
             min-height: 100vh;
-            color: var(--text);
+            display: grid;
+            place-items: center;
+            padding: 24px;
             font-family: "Avenir Next", "Segoe UI", sans-serif;
             background:
-                radial-gradient(circle at top left, rgba(126, 215, 185, 0.18), transparent 28rem),
-                radial-gradient(circle at top right, rgba(123, 184, 255, 0.22), transparent 30rem),
-                linear-gradient(160deg, #081017 0%, #0f151c 48%, #0d141a 100%);
+                radial-gradient(circle at top left, rgba(126, 215, 185, 0.14), transparent 24rem),
+                linear-gradient(165deg, #081017 0%, #0d151d 100%);
+            color: var(--text);
         }
 
-        a {
-            color: inherit;
-            text-decoration: none;
-        }
-
-        .shell {
-            width: min(1180px, calc(100% - 32px));
-            margin: 0 auto;
-            padding: 32px 0 48px;
-        }
-
-        .hero {
-            display: grid;
-            grid-template-columns: 1.2fr 0.8fr;
-            gap: 24px;
-            align-items: stretch;
-        }
-
-        .panel {
-            background: var(--panel);
-            border: 1px solid var(--line);
+        main {
+            width: min(560px, 100%);
+            padding: 28px;
             border-radius: 24px;
-            box-shadow: var(--shadow);
-            backdrop-filter: blur(14px);
-        }
-
-        .hero-main {
-            padding: 32px;
-        }
-
-        .eyebrow {
-            display: inline-flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: rgba(126, 215, 185, 0.12);
-            border: 1px solid rgba(126, 215, 185, 0.28);
-            color: var(--accent);
-            font-size: 13px;
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
+            background: rgba(16, 25, 35, 0.88);
+            border: 1px solid var(--line);
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
         }
 
         h1 {
-            margin: 18px 0 14px;
-            font-size: clamp(2.3rem, 4vw, 4.4rem);
-            line-height: 0.96;
+            margin: 0 0 12px;
+            font-size: clamp(2rem, 4vw, 3rem);
             letter-spacing: -0.04em;
         }
 
-        .lead {
-            margin: 0;
-            max-width: 56ch;
-            color: var(--muted);
-            font-size: 1.05rem;
-            line-height: 1.7;
-        }
-
-        .cta-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 14px;
-            margin-top: 26px;
-        }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 48px;
-            padding: 0 18px;
-            border-radius: 14px;
-            border: 1px solid transparent;
-            font-weight: 600;
-            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
-        }
-
-        .btn:hover {
-            transform: translateY(-1px);
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, var(--accent), #61c3ff);
-            color: #07222b;
-        }
-
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.04);
-            border-color: rgba(255, 255, 255, 0.1);
-        }
-
-        .hero-side {
-            padding: 24px;
-            display: grid;
-            gap: 16px;
-        }
-
-        .stat {
-            padding: 18px;
-            border-radius: 18px;
-            background: var(--panel-strong);
-            border: 1px solid rgba(255, 255, 255, 0.06);
-        }
-
-        .stat-label {
-            color: var(--muted);
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
-
-        .stat-value {
-            margin-top: 8px;
-            font-size: 1.8rem;
-            font-weight: 700;
-        }
-
-        .section {
-            margin-top: 24px;
-        }
-
-        .section-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: end;
-            gap: 16px;
-            margin-bottom: 14px;
-        }
-
-        .section-header h2 {
-            margin: 0;
-            font-size: 1.35rem;
-        }
-
-        .section-header p {
-            margin: 0;
-            color: var(--muted);
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 18px;
-        }
-
-        .card {
-            padding: 22px;
-            border-radius: 20px;
-            background: var(--panel);
-            border: 1px solid var(--line);
-            box-shadow: var(--shadow);
-        }
-
-        .card h3 {
-            margin: 0 0 10px;
-            font-size: 1.1rem;
-        }
-
-        .card p {
-            margin: 0;
+        p {
+            margin: 0 0 14px;
             color: var(--muted);
             line-height: 1.6;
         }
 
-        .card .tag {
-            display: inline-block;
-            margin-bottom: 12px;
-            padding: 5px 10px;
-            border-radius: 999px;
-            background: rgba(123, 184, 255, 0.12);
-            border: 1px solid rgba(123, 184, 255, 0.26);
-            color: var(--accent-2);
-            font-size: 12px;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-        }
-
-        .callout {
-            margin-top: 24px;
-            padding: 22px 24px;
-            border-radius: 20px;
-            background: linear-gradient(135deg, rgba(255, 211, 126, 0.12), rgba(123, 184, 255, 0.1));
-            border: 1px solid rgba(255, 211, 126, 0.25);
-        }
-
-        .callout strong {
-            color: var(--warn);
-        }
-
-        .footer {
-            margin-top: 28px;
-            color: var(--muted);
-            font-size: 0.95rem;
-            text-align: center;
-        }
-
-        @media (max-width: 980px) {
-            .hero {
-                grid-template-columns: 1fr;
-            }
-
-            .grid {
-                grid-template-columns: 1fr 1fr;
-            }
-        }
-
-        @media (max-width: 680px) {
-            .shell {
-                width: min(100% - 18px, 1180px);
-                padding-top: 18px;
-            }
-
-            .hero-main,
-            .hero-side,
-            .card {
-                padding: 18px;
-            }
-
-            .grid {
-                grid-template-columns: 1fr;
-            }
+        a {
+            color: var(--accent);
+            font-weight: 600;
         }
     </style>
 </head>
 <body>
-    <main class="shell">
-        <section class="hero">
-            <article class="panel hero-main">
-                <div class="eyebrow">Projet unifie</div>
-                <h1>ElephantNote</h1>
-                <p class="lead">
-                    Un seul projet organise autour d'un coeur C modulaire, d'un moteur Markdown,
-                    d'une gestion de curseur dediee, d'un build WASM reproductible et d'une
-                    interface web publiee proprement sur GitHub Pages.
-                </p>
-                <div class="cta-row">
-                    <a class="btn btn-primary" href="docs/index.html">Ouvrir l'editeur web</a>
-                    <a class="btn btn-secondary" href="debug-position-mapping.html">Outils debug</a>
-                    <a class="btn btn-secondary" href="manual-enter-test.html">Tests manuels</a>
-                </div>
-            </article>
-
-            <aside class="panel hero-side">
-                <div class="stat">
-                    <div class="stat-label">Runtime public</div>
-                    <div class="stat-value">C libs + WASM</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Pipeline Pages</div>
-                    <div class="stat-value">Unifie</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-label">Point d'entree</div>
-                    <div class="stat-value">web/site</div>
-                </div>
-            </aside>
-        </section>
-
-        <section class="section">
-            <div class="section-header">
-                <div>
-                    <h2>Composants</h2>
-                    <p>Chaque brique a une responsabilite nette.</p>
-                </div>
-            </div>
-            <div class="grid">
-                <article class="card">
-                    <div class="tag">Core</div>
-                    <h3>Markdown Engine</h3>
-                    <p>Parsing Markdown, representation JSON intermediaire, export Markdown et normalisation des structures du document.</p>
-                </article>
-                <article class="card">
-                    <div class="tag">Edition</div>
-                    <h3>Editor ABI</h3>
-                    <p>API stable pour les integrations, gestion d'etat, conversion Markdown/JSON/HTML et surface WASM publique.</p>
-                </article>
-                <article class="card">
-                    <div class="tag">Interaction</div>
-                    <h3>Cursor Engine</h3>
-                    <p>Positionnement intelligent, Enter/backspace coherents, preservation du formatage et edition hybride ligne par ligne.</p>
-                </article>
-                <article class="card">
-                    <div class="tag">Web</div>
-                    <h3>GitHub Pages</h3>
-                    <p>Landing unique, demo principale, outils de verification et artefacts generes depuis une seule chaine de build.</p>
-                </article>
-                <article class="card">
-                    <div class="tag">Native</div>
-                    <h3>macOS / Flutter</h3>
-                    <p>Interfaces clientes autour du meme coeur C, sans dupliquer la logique metier de parsing ou de curseur.</p>
-                </article>
-                <article class="card">
-                    <div class="tag">Qualite</div>
-                    <h3>Tests et Validation</h3>
-                    <p>Tests unitaires moteurs, verification WASM, et page publique preparee depuis des artefacts valides.</p>
-                </article>
-            </div>
-        </section>
-
-        <section class="section">
-            <div class="section-header">
-                <div>
-                    <h2>Navigation</h2>
-                    <p>Les entrees utiles uniquement, sans liens morts.</p>
-                </div>
-            </div>
-            <div class="grid">
-                <a class="card" href="docs/index.html">
-                    <div class="tag">Demo</div>
-                    <h3>Editeur principal</h3>
-                    <p>Interface hybride branchée sur les modules `editor` et `cursor` en WebAssembly.</p>
-                </a>
-                <a class="card" href="live-enter-test.html">
-                    <div class="tag">Verification</div>
-                    <h3>Test live Enter</h3>
-                    <p>Validation interactive du comportement de la touche Entree dans les cas de formatage delicats.</p>
-                </a>
-                <a class="card" href="test-cursor-fix.html">
-                    <div class="tag">Regression</div>
-                    <h3>Correctif curseur</h3>
-                    <p>Page ciblee pour rejouer les scenarios qui ont pose probleme pendant le developpement.</p>
-                </a>
-            </div>
-        </section>
-
-        <div class="callout">
-            <strong>Build GitHub Pages :</strong> la publication ne depend plus d'un ancien dossier `docs/` a la racine.
-            Le workflow construit maintenant les artefacts depuis la racine du depot, copie les bundles WASM dans `web/site/docs`
-            puis publie l'ensemble de `web/site`.
-        </div>
-
-        <div class="footer">
-            ElephantNote | GitHub Pages unifie autour d'un seul point d'entree web
-        </div>
+    <main>
+        <h1>ElephantNote</h1>
+        <p>Redirection automatique vers l'éditeur web.</p>
+        <p>Si rien ne se passe, ouvre <a href="docs/index.html">docs/index.html</a>.</p>
     </main>
 </body>
 </html>
