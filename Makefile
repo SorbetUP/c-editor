@@ -1,6 +1,6 @@
-# Makefile for C Markdown Editor macOS App
+# Root Makefile for the ElephantNote macOS shell
 
-APP_NAME = CMarkdownEditor
+APP_NAME = ElephantNote
 BUNDLE_NAME = $(APP_NAME).app
 CONTENTS_DIR = $(BUNDLE_NAME)/Contents
 MACOS_DIR = $(CONTENTS_DIR)/MacOS
@@ -12,8 +12,15 @@ OBJC_FLAGS = -x objective-c -fobjc-arc -fobjc-weak
 CFLAGS = -std=c11 -Wall -Wextra -O2 -g
 FRAMEWORKS = -framework Cocoa -framework Foundation -framework UniformTypeIdentifiers
 
-# Include paths for our C engines
-INCLUDES = -I../editor -I../markdown -I../render_engine -I../cursor -I../search_engine -I../backup_engine -I../crypto_engine
+# Include paths for the C engines
+INCLUDES = \
+	-Iengines/editor \
+	-Iengines/markdown \
+	-Iengines/render_engine \
+	-Iengines/cursor \
+	-Iengines/search_engine \
+	-Iengines/backup_engine \
+	-Iengines/crypto_engine
 
 # Library paths and libraries - DISABLED FOR TESTING
 # LIBS = -L../editor -leditor \
@@ -78,7 +85,7 @@ debug: $(BUNDLE_NAME)
 check-deps:
 	@echo "🔍 Checking C engine libraries..."
 	@for dir in editor markdown render_engine cursor search_engine backup_engine crypto_engine; do \
-		lib="../$$dir/lib$$dir.a"; \
+		lib="engines/$$dir/lib$$dir.a"; \
 		if [ -f "$$lib" ]; then \
 			echo "✅ Found $$lib"; \
 		else \

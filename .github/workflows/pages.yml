@@ -30,9 +30,11 @@ jobs:
     - name: Build unified Pages site
       run: |
         chmod +x scripts/build_github_pages.sh
+        chmod +x scripts/smoke_test_github_pages.sh
         ./scripts/build_github_pages.sh
-        ls -la web/site
-        ls -la web/site/docs
+        ./scripts/smoke_test_github_pages.sh
+        ls -la dist/github-pages
+        ls -la dist/github-pages/docs
         
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -40,7 +42,7 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        path: 'web/site'
+        path: 'dist/github-pages'
 
   deploy:
     environment:

@@ -5,6 +5,7 @@
 obj/
 bin/
 run_tests
+dist/
 
 # Debug and test binaries
 debug_*
@@ -13,10 +14,28 @@ test_*
 simple_test
 ultra_simple_test
 fuzz_md
+*.app/
+Logs/
+backups/
 
 # Temporary files
 *.log
 *.tmp
+*.wasm
+*.js.mem
+
+# Generated WASM outputs
+editor.js
+editor.wasm
+cursor_wasm.js
+cursor_wasm.wasm
+cursor_c_interface.js
+web/site/.nojekyll
+web/site/docs/editor.js
+web/site/docs/editor.wasm
+web/site/docs/cursor_wasm.js
+web/site/docs/cursor_wasm.wasm
+web/site/docs/cursor_c_interface.js
 
 # Documentation and reports (not essential for project)
 IMPLEMENTATION_SUMMARY.md
@@ -34,3 +53,4 @@ CLAUDE.md
 
 # macOS
 .DS_Store
+__.SYMDEF SORTED
