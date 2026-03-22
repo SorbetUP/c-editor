@@ -17,6 +17,14 @@ typedef struct {
   bool has_underline;
   RGBA underline_color;
   int underline_gap;
+  bool code;
+  bool strikethrough;
+  bool is_link;
+  char *link_href;
+  bool is_note_link;
+  bool is_image;
+  char *image_src;
+  char *image_alt;
 } TextSpan;
 
 typedef struct {
@@ -41,6 +49,50 @@ typedef struct {
   bool fenced;
 } ElementCode;
 
+typedef enum {
+  LIST_KIND_BULLET = 0,
+  LIST_KIND_ORDERED = 1,
+  LIST_KIND_TASK = 2,
+  LIST_KIND_DEFINITION = 3
+} ListKind;
+
+typedef struct {
+  ElementText text;
+  bool has_checkbox;
+  bool checkbox_checked;
+  bool is_task;
+  bool is_definition;
+  ElementText term;
+  ElementText definition;
+  int indent_level;
+  int number;
+} ElementListItem;
+
+typedef struct {
+  bool ordered;
+  int start_index;
+  ListKind kind;
+  ElementListItem *items;
+  size_t item_count;
+  size_t item_capacity;
+} ElementList;
+
+typedef struct {
+  ElementText *items;
+  size_t item_count;
+  size_t item_capacity;
+} ElementQuote;
+
+typedef struct {
+  int thickness;
+  RGBA color;
+} ElementDivider;
+
+typedef struct {
+  char *name;
+  char *value;
+} ElementSettings;
+
 typedef struct {
   char *src;
   char *alt;
@@ -54,9 +106,29 @@ typedef struct {
   ElementText ***cells;
   RGBA grid_color, background_color;
   int grid_size;
+  Align *column_align;
+  bool *column_align_defined;
+  size_t column_align_count;
+  size_t header_rows;
+  
+  // Column width specifications for consistent line-by-line rendering
+  int *column_widths;           // Calculated optimal widths in characters
+  int *column_min_widths;       // Minimum required widths
+  int *column_max_widths;       // Maximum allowed widths
+  bool widths_calculated;       // Whether column widths have been computed
+  int total_content_width;      // Total width needed for all content
 } ElementTable;
 
-typedef enum { T_TEXT, T_IMAGE, T_TABLE, T_CODE } ElementKind;
+typedef enum {
+  T_TEXT,
+  T_IMAGE,
+  T_TABLE,
+  T_CODE,
+  T_LIST,
+  T_QUOTE,
+  T_DIVIDER,
+  T_SETTINGS
+} ElementKind;
 
 typedef struct {
   ElementKind kind;
@@ -65,6 +137,10 @@ typedef struct {
     ElementImage image;
     ElementTable table;
     ElementCode code;
+    ElementList list;
+    ElementQuote quote;
+    ElementDivider divider;
+    ElementSettings settings;
   } as;
 } Element;
 
@@ -95,5 +171,10 @@ int json_import_markdown(const char *md, Document *out_doc);
 
 int json_stringify(const Document *doc, char **out_json);
 int json_parse(const char *json, Document *out_doc);
+
+// Table column width calculation functions
+int table_calculate_column_widths(ElementTable *table);
+int table_get_cell_content_width(const ElementText *cell);
+void table_apply_width_constraints(ElementTable *table, int max_total_width);
 
 void doc_free(Document *doc);

@@ -3,6 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+
+static bool ensure_document_capacity(Document *doc, size_t extra);
+static ElementText build_text_element(const char *content, bool allow_headers);
+static ElementText build_table_cell_text(const char *content);
 
 static char *strdup_safe(const char *s) {
   if (!s)
@@ -14,14 +19,19 @@ static char *strdup_safe(const char *s) {
 }
 
 static void trim_whitespace(char *str) {
-  char *end = str + strlen(str) - 1;
-  while (end > str && isspace(*end)) {
+  if (!str)
+    return;
+  size_t len = strlen(str);
+  if (len == 0)
+    return;
+  char *end = str + len - 1;
+  while (end > str && isspace((unsigned char)*end)) {
     *end = '\0';
     end--;
   }
 
   char *start = str;
-  while (*start && isspace(*start)) {
+  while (*start && isspace((unsigned char)*start)) {
     start++;
   }
 
@@ -31,6 +41,370 @@ static void trim_whitespace(char *str) {
 }
 
 // Removed uppercase conversion for idempotence
+
+static void trim_trailing_whitespace(char *str) {
+  if (!str)
+    return;
+  size_t len = strlen(str);
+  while (len > 0 && isspace((unsigned char)str[len - 1])) {
+    str[len - 1] = '\0';
+    len--;
+  }
+}
+
+static const char *read_line_with_trim(const char *cursor, const char *end,
+                                       char **out_raw, char **out_left_trim) {
+  if (!cursor || cursor >= end) {
+    if (out_raw)
+      *out_raw = NULL;
+    if (out_left_trim)
+      *out_left_trim = NULL;
+    return end;
+  }
+
+  const char *line_end = strchr(cursor, '\n');
+  if (!line_end)
+    line_end = end;
+
+  size_t len = (size_t)(line_end - cursor);
+  char *raw = malloc(len + 1);
+  if (!raw) {
+    if (out_raw)
+      *out_raw = NULL;
+    if (out_left_trim)
+      *out_left_trim = NULL;
+    return end;
+  }
+  memcpy(raw, cursor, len);
+  raw[len] = '\0';
+
+  if (out_raw)
+    *out_raw = raw;
+  else
+    free(raw);
+
+  if (out_left_trim) {
+    char *p = raw;
+    while (*p == ' ' || *p == '\t')
+      p++;
+    *out_left_trim = p;
+  }
+
+  const char *next_cursor = (line_end < end) ? line_end + 1 : end;
+  return next_cursor;
+}
+
+static void markdown_free_text(ElementText *text) {
+  if (!text)
+    return;
+  if (text->spans) {
+    for (size_t i = 0; i < text->spans_count; i++) {
+      free(text->spans[i].text);
+      free(text->spans[i].link_href);
+      free(text->spans[i].image_src);
+      free(text->spans[i].image_alt);
+    }
+    free(text->spans);
+    text->spans = NULL;
+    text->spans_count = 0;
+  }
+  free(text->text);
+  text->text = NULL;
+  free(text->font);
+  text->font = NULL;
+}
+
+static void markdown_dispose_list(ElementList *list) {
+  if (!list || !list->items)
+    return;
+  for (size_t i = 0; i < list->item_count; i++) {
+    markdown_free_text(&list->items[i].text);
+    if (list->items[i].is_definition) {
+      markdown_free_text(&list->items[i].term);
+      markdown_free_text(&list->items[i].definition);
+    }
+  }
+  free(list->items);
+  list->items = NULL;
+  list->item_count = 0;
+  list->item_capacity = 0;
+}
+
+static void markdown_dispose_quote(ElementQuote *quote) {
+  if (!quote || !quote->items)
+    return;
+  for (size_t i = 0; i < quote->item_count; i++) {
+    markdown_free_text(&quote->items[i]);
+  }
+  free(quote->items);
+  quote->items = NULL;
+  quote->item_count = 0;
+  quote->item_capacity = 0;
+}
+
+static void markdown_dispose_code(ElementCode *code) {
+  if (!code)
+    return;
+  free(code->language);
+  free(code->content);
+  code->language = NULL;
+  code->content = NULL;
+}
+
+static void markdown_dispose_settings(ElementSettings *settings) {
+  if (!settings)
+    return;
+  free(settings->name);
+  free(settings->value);
+  settings->name = NULL;
+  settings->value = NULL;
+}
+
+static void markdown_dispose_image(ElementImage *image) {
+  if (!image)
+    return;
+  free(image->src);
+  free(image->alt);
+  image->src = NULL;
+  image->alt = NULL;
+}
+
+static void markdown_dispose_table(ElementTable *table) {
+  if (!table)
+    return;
+
+  if (table->cells) {
+    for (size_t r = 0; r < table->rows; r++) {
+      if (!table->cells[r])
+        continue;
+      for (size_t c = 0; c < table->cols; c++) {
+        if (!table->cells[r][c])
+          continue;
+        markdown_free_text(table->cells[r][c]);
+        free(table->cells[r][c]);
+      }
+      free(table->cells[r]);
+    }
+    free(table->cells);
+  }
+
+  free(table->column_align);
+  free(table->column_align_defined);
+  free(table->column_widths);
+  free(table->column_min_widths);
+  free(table->column_max_widths);
+
+  memset(table, 0, sizeof(*table));
+}
+
+static bool is_identifier_char(char c) {
+  return isalnum((unsigned char)c) || c == '_';
+}
+
+static bool has_emphasis_boundaries(const char *text, size_t len,
+                                    size_t open_index, size_t close_index,
+                                    size_t marker_len) {
+  char before = open_index == 0 ? ' ' : text[open_index - 1];
+  size_t after_index = close_index + marker_len;
+  char after = after_index < len ? text[after_index] : ' ';
+  return !is_identifier_char(before) && !is_identifier_char(after);
+}
+
+static bool try_parse_definition_list(const char **cursor_ptr, const char *end,
+                                      Document *doc) {
+  if (!cursor_ptr || !*cursor_ptr || *cursor_ptr >= end)
+    return false;
+
+  const char *cursor = *cursor_ptr;
+
+  char *term_probe_raw = NULL;
+  char *term_probe_trim = NULL;
+  const char *after_term_probe =
+      read_line_with_trim(cursor, end, &term_probe_raw, &term_probe_trim);
+  if (!term_probe_trim || *term_probe_trim == '\0') {
+    free(term_probe_raw);
+    return false;
+  }
+
+  char *def_probe_raw = NULL;
+  char *def_probe_trim = NULL;
+  read_line_with_trim(after_term_probe, end, &def_probe_raw, &def_probe_trim);
+  bool looks_like_definition =
+      (def_probe_trim && def_probe_trim[0] == ':' && def_probe_trim[1] != '\0');
+  free(term_probe_raw);
+  free(def_probe_raw);
+
+  if (!looks_like_definition)
+    return false;
+
+  ElementList list;
+  memset(&list, 0, sizeof(list));
+  list.kind = LIST_KIND_DEFINITION;
+  list.ordered = false;
+  list.start_index = 1;
+  list.item_capacity = 4;
+  list.items = calloc(list.item_capacity, sizeof(ElementListItem));
+  if (!list.items)
+    return false;
+
+  const char *local_cursor = cursor;
+
+  while (local_cursor < end) {
+    char *term_raw = NULL;
+    char *term_trim = NULL;
+    const char *after_term =
+        read_line_with_trim(local_cursor, end, &term_raw, &term_trim);
+    if (!term_trim) {
+      free(term_raw);
+      break;
+    }
+    trim_whitespace(term_raw);
+    if (term_raw[0] == '\0') {
+      free(term_raw);
+      local_cursor = after_term;
+      break;
+    }
+
+    char *def_raw = NULL;
+    char *def_trim = NULL;
+    const char *after_def =
+        read_line_with_trim(after_term, end, &def_raw, &def_trim);
+    if (!def_trim || def_trim[0] != ':') {
+      free(term_raw);
+      free(def_raw);
+      markdown_dispose_list(&list);
+      return false;
+    }
+
+    char *definition_text = def_trim + 1;
+    while (*definition_text == ' ' || *definition_text == '\t')
+      definition_text++;
+    trim_trailing_whitespace(definition_text);
+
+    if (list.item_count >= list.item_capacity) {
+      size_t new_cap = list.item_capacity * 2;
+      ElementListItem *resized =
+          realloc(list.items, new_cap * sizeof(ElementListItem));
+      if (!resized) {
+        free(term_raw);
+        free(def_raw);
+        markdown_dispose_list(&list);
+        return false;
+      }
+      memset(resized + list.item_capacity, 0,
+             (new_cap - list.item_capacity) * sizeof(ElementListItem));
+      list.items = resized;
+      list.item_capacity = new_cap;
+    }
+
+    ElementListItem item;
+    memset(&item, 0, sizeof(item));
+    item.is_definition = true;
+    item.term = build_text_element(term_raw, false);
+    item.definition = build_text_element(definition_text, false);
+    item.text = build_text_element(definition_text, false);
+
+    list.items[list.item_count++] = item;
+
+    free(term_raw);
+    free(def_raw);
+
+    local_cursor = after_def;
+
+    char *peek_term_raw = NULL;
+    char *peek_term_trim = NULL;
+    const char *after_peek_term =
+        read_line_with_trim(local_cursor, end, &peek_term_raw, &peek_term_trim);
+    if (!peek_term_trim) {
+      free(peek_term_raw);
+      break;
+    }
+    trim_whitespace(peek_term_raw);
+    if (peek_term_raw[0] == '\0') {
+      free(peek_term_raw);
+      local_cursor = after_peek_term;
+      break;
+    }
+
+    char *peek_def_raw = NULL;
+    char *peek_def_trim = NULL;
+    read_line_with_trim(after_peek_term, end, &peek_def_raw, &peek_def_trim);
+    bool has_next_pair =
+        (peek_def_trim && peek_def_trim[0] == ':' && peek_def_trim[1] != '\0');
+    free(peek_term_raw);
+    free(peek_def_raw);
+
+    if (!has_next_pair) {
+      break;
+    }
+  }
+
+  if (list.item_count == 0) {
+    markdown_dispose_list(&list);
+    return false;
+  }
+
+  if (!ensure_document_capacity(doc, 1)) {
+    markdown_dispose_list(&list);
+    return false;
+  }
+  doc->elements[doc->elements_len].kind = T_LIST;
+  doc->elements[doc->elements_len].as.list = list;
+  doc->elements_len++;
+
+  *cursor_ptr = local_cursor;
+  return true;
+}
+
+
+static bool is_note_link_path(const char *href) {
+  if (!href || !*href)
+    return false;
+
+  if (href[0] == '#')
+    return false;
+
+  if (strncasecmp(href, "mailto:", 7) == 0)
+    return false;
+
+  if (strncasecmp(href, "http://", 7) == 0 ||
+      strncasecmp(href, "https://", 8) == 0)
+    return false;
+
+  if (strncasecmp(href, "www.", 4) == 0)
+    return false;
+
+  if (strncasecmp(href, "file://", 7) == 0)
+    return true;
+
+  if (href[0] == '/' || href[0] == '~')
+    return true;
+
+  if (strstr(href, "://"))
+    return false;
+
+  if (strstr(href, ".md") || strstr(href, ".markdown"))
+    return true;
+
+  return true;
+}
+
+static bool ensure_document_capacity(Document *doc, size_t extra) {
+  if (!doc)
+    return false;
+  size_t needed = doc->elements_len + extra;
+  if (doc->elements_capacity >= needed)
+    return true;
+  size_t new_cap = doc->elements_capacity == 0 ? 8 : doc->elements_capacity;
+  while (new_cap < needed)
+    new_cap *= 2;
+  Element *new_elements = realloc(doc->elements, new_cap * sizeof(Element));
+  if (!new_elements)
+    return false;
+  doc->elements = new_elements;
+  doc->elements_capacity = new_cap;
+  return true;
+}
 
 int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
   if (!text || !spans || max_spans == 0)
@@ -61,7 +435,24 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
           break;
         }
       }
-    } 
+    }
+    // Parse ___ (bold+italic) with boundary detection
+    else if (i + 2 < len && text[i] == '_' && text[i + 1] == '_' &&
+             text[i + 2] == '_') {
+      size_t start = i;
+      for (size_t j = i + 3; j + 2 < len; j++) {
+        if (text[j] == '_' && text[j + 1] == '_' && text[j + 2] == '_' &&
+            has_emphasis_boundaries(text, len, start, j, 3)) {
+          spans[span_count].style = INLINE_BOLD_ITALIC;
+          spans[span_count].start = start;
+          spans[span_count].end = j + 3;
+          span_count++;
+          i = j + 3;
+          matched = true;
+          break;
+        }
+      }
+    }
     // Parse ** (bold)
     else if (i + 1 < len && text[i] == '*' && text[i + 1] == '*') {
       size_t start = i;
@@ -76,7 +467,23 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
           break;
         }
       }
-    } 
+    }
+    // Parse __ (bold)
+    else if (i + 1 < len && text[i] == '_' && text[i + 1] == '_') {
+      size_t start = i;
+      for (size_t j = i + 2; j + 1 < len; j++) {
+        if (text[j] == '_' && text[j + 1] == '_' &&
+            has_emphasis_boundaries(text, len, start, j, 2)) {
+          spans[span_count].style = INLINE_BOLD;
+          spans[span_count].start = start;
+          spans[span_count].end = j + 2;
+          span_count++;
+          i = j + 2;
+          matched = true;
+          break;
+        }
+      }
+    }
     // Parse * (italic)
     else if (text[i] == '*') {
       size_t start = i;
@@ -122,6 +529,107 @@ int parse_inline_styles(const char *text, InlineSpan *spans, size_t max_spans) {
         }
       }
     }
+    // Parse _ (italic) with boundary detection
+    else if (text[i] == '_') {
+      size_t start = i;
+      for (size_t j = i + 1; j < len; j++) {
+        if (text[j] == '_' && has_emphasis_boundaries(text, len, start, j, 1)) {
+          spans[span_count].style = INLINE_ITALIC;
+          spans[span_count].start = start;
+          spans[span_count].end = j + 1;
+          span_count++;
+          i = j + 1;
+          matched = true;
+          break;
+        }
+      }
+    }
+    // Parse ~~ (strikethrough)
+    else if (i + 1 < len && text[i] == '~' && text[i + 1] == '~') {
+      size_t start = i;
+      for (size_t j = i + 2; j + 1 < len; j++) {
+        if (text[j] == '~' && text[j + 1] == '~') {
+          spans[span_count].style = INLINE_STRIKETHROUGH;
+          spans[span_count].start = start;
+          spans[span_count].end = j + 2;
+          span_count++;
+          i = j + 2;
+          matched = true;
+          break;
+        }
+      }
+    }
+    // Parse `code`
+    else if (text[i] == '`') {
+      size_t start = i;
+      for (size_t j = i + 1; j < len; j++) {
+        if (text[j] == '`') {
+          spans[span_count].style = INLINE_CODE;
+          spans[span_count].start = start;
+          spans[span_count].end = j + 1;
+          span_count++;
+          i = j + 1;
+          matched = true;
+          break;
+        }
+      }
+    }
+    // Parse images ![alt](src)
+    else if (i + 1 < len && text[i] == '!' && text[i + 1] == '[') {
+      size_t start = i;
+      size_t bracket_end = 0;
+      size_t paren_end = 0;
+      for (size_t j = i + 2; j < len; j++) {
+        if (text[j] == ']') {
+          bracket_end = j;
+          break;
+        }
+      }
+      if (bracket_end > 0 && bracket_end + 1 < len && text[bracket_end + 1] == '(') {
+        for (size_t j = bracket_end + 2; j < len; j++) {
+          if (text[j] == ')') {
+            paren_end = j;
+            break;
+          }
+        }
+        if (paren_end > 0) {
+          spans[span_count].style = INLINE_IMAGE_REF;
+          spans[span_count].start = start;
+          spans[span_count].end = paren_end + 1;
+          span_count++;
+          i = paren_end + 1;
+          matched = true;
+        }
+      }
+    }
+    // Parse links [text](url)
+    else if (text[i] == '[') {
+      size_t start = i;
+      size_t bracket_end = 0;
+      size_t paren_end = 0;
+      for (size_t j = i + 1; j < len; j++) {
+        if (text[j] == ']') {
+          bracket_end = j;
+          break;
+        }
+      }
+      if (bracket_end > 0 && bracket_end + 1 < len && text[bracket_end + 1] == '(') {
+        for (size_t j = bracket_end + 2; j < len; j++) {
+          if (text[j] == ')') {
+            paren_end = j;
+            break;
+          }
+        }
+        if (paren_end > 0) {
+          spans[span_count].style = INLINE_LINK;
+          spans[span_count].start = start;
+          spans[span_count].end = paren_end + 1;
+          span_count++;
+          i = paren_end + 1;
+          matched = true;
+        }
+      }
+    }
 
     if (!matched) {
       i++;
@@ -145,13 +653,26 @@ static char *strip_all_markers(const char *text) {
       i += 3;
       skipped = true;
     }
+    else if (i + 2 < len && text[i] == '_' && text[i + 1] == '_' &&
+             text[i + 2] == '_') {
+      i += 3;
+      skipped = true;
+    }
     // Skip ** markers (bold)
     else if (i + 1 < len && text[i] == '*' && text[i + 1] == '*') {
       i += 2;
       skipped = true;
     }
+    else if (i + 1 < len && text[i] == '_' && text[i + 1] == '_') {
+      i += 2;
+      skipped = true;
+    }
     // Skip * markers (italic)
     else if (text[i] == '*') {
+      i++;
+      skipped = true;
+    }
+    else if (text[i] == '_') {
       i++;
       skipped = true;
     }
@@ -165,6 +686,16 @@ static char *strip_all_markers(const char *text) {
       i += 2;
       skipped = true;
     }
+    // Skip ~~ markers
+    else if (i + 1 < len && text[i] == '~' && text[i + 1] == '~') {
+      i += 2;
+      skipped = true;
+    }
+    // Skip ` markers
+    else if (text[i] == '`') {
+      i += 1;
+      skipped = true;
+    }
 
     if (!skipped) {
       result[write_pos++] = text[i];
@@ -176,20 +707,46 @@ static char *strip_all_markers(const char *text) {
   return result;
 }
 
+static char *join_text_spans(const TextSpan *spans, size_t span_count) {
+  size_t total_len = 0;
+  for (size_t i = 0; i < span_count; i++) {
+    if (spans[i].text) {
+      total_len += strlen(spans[i].text);
+    }
+  }
+
+  char *result = malloc(total_len + 1);
+  if (!result) {
+    return NULL;
+  }
+
+  char *write_ptr = result;
+  for (size_t i = 0; i < span_count; i++) {
+    if (!spans[i].text) {
+      continue;
+    }
+
+    size_t part_len = strlen(spans[i].text);
+    memcpy(write_ptr, spans[i].text, part_len);
+    write_ptr += part_len;
+  }
+
+  *write_ptr = '\0';
+  return result;
+}
+
 TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
                                       size_t span_count, size_t *out_count) {
   if (span_count == 0) {
     TextSpan *result = malloc(sizeof(TextSpan));
+    memset(result, 0, sizeof(TextSpan));
     result[0].text = strip_all_markers(text); // Clean up unmatched markers
-    result[0].bold = false;
-    result[0].italic = false;
-    result[0].has_highlight = false;
-    result[0].has_underline = false;
     *out_count = 1;
     return result;
   }
 
   TextSpan *result = malloc((span_count * 2 + 1) * sizeof(TextSpan));
+  memset(result, 0, (span_count * 2 + 1) * sizeof(TextSpan));
   size_t result_count = 0;
   size_t text_pos = 0;
 
@@ -204,11 +761,95 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
       free(temp_text);
 
       result[result_count].text = plain_text;
-      result[result_count].bold = false;
-      result[result_count].italic = false;
-      result[result_count].has_highlight = false;
-      result[result_count].has_underline = false;
       result_count++;
+    }
+
+    if (spans[i].style == INLINE_LINK) {
+      const char *link_text_start = text + spans[i].start + 1;
+      const char *link_text_end = strchr(link_text_start, ']');
+      const char *href_start = link_text_end ? link_text_end + 1 : NULL;
+      if (href_start && *href_start == '(')
+        href_start++;
+      if (href_start) {
+        while (href_start < text + spans[i].end &&
+               isspace((unsigned char)*href_start))
+          href_start++;
+      }
+      const char *href_end = text + spans[i].end;
+      if (href_end > text && *(href_end - 1) == ')')
+        href_end--;
+      while (href_end > href_start &&
+             isspace((unsigned char)*(href_end - 1)))
+        href_end--;
+
+      if (link_text_end && href_start && href_end &&
+          link_text_end > link_text_start && href_end > href_start) {
+        size_t link_len = (size_t)(link_text_end - link_text_start);
+        size_t href_len = (size_t)(href_end - href_start);
+
+        char *link_raw = malloc(link_len + 1);
+        memcpy(link_raw, link_text_start, link_len);
+        link_raw[link_len] = '\0';
+        char *link_text = strip_all_markers(link_raw);
+        free(link_raw);
+
+        char *href = malloc(href_len + 1);
+        memcpy(href, href_start, href_len);
+        href[href_len] = '\0';
+        trim_whitespace(href);
+
+        result[result_count].text = link_text ? link_text : strdup_safe("");
+        result[result_count].is_link = true;
+        result[result_count].link_href = href;
+        result[result_count].is_note_link = is_note_link_path(href);
+        result_count++;
+        text_pos = spans[i].end;
+        continue;
+      }
+    } else if (spans[i].style == INLINE_IMAGE_REF) {
+      const char *alt_start = text + spans[i].start + 2;
+      const char *alt_end = strchr(alt_start, ']');
+      const char *src_start = alt_end ? alt_end + 1 : NULL;
+      if (src_start && *src_start == '(')
+        src_start++;
+      if (src_start) {
+        while (src_start < text + spans[i].end &&
+               isspace((unsigned char)*src_start))
+          src_start++;
+      }
+      const char *src_end = text + spans[i].end;
+      if (src_end > text && *(src_end - 1) == ')')
+        src_end--;
+      while (src_end > src_start &&
+             isspace((unsigned char)*(src_end - 1)))
+        src_end--;
+
+      if (alt_end && src_start && src_end && alt_end > alt_start &&
+          src_end >= src_start) {
+        size_t alt_len = (size_t)(alt_end - alt_start);
+        size_t src_len = (size_t)(src_end - src_start);
+
+        char *alt_raw = malloc(alt_len + 1);
+        memcpy(alt_raw, alt_start, alt_len);
+        alt_raw[alt_len] = '\0';
+        char *alt_text = strip_all_markers(alt_raw);
+        free(alt_raw);
+
+        char *src = malloc(src_len + 1);
+        memcpy(src, src_start, src_len);
+        src[src_len] = '\0';
+        trim_whitespace(src);
+
+        result[result_count].text = alt_text ? alt_text : strdup_safe("");
+        result[result_count].is_image = true;
+        result[result_count].image_src = src;
+        result[result_count].image_alt = strdup_safe(result[result_count].text);
+        result[result_count].is_link = false;
+        result[result_count].is_note_link = false;
+        result_count++;
+        text_pos = spans[i].end;
+        continue;
+      }
     }
 
     size_t content_start = spans[i].start;
@@ -235,19 +876,31 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
       content_start += 2;
       content_end -= 2;
       break;
+    case INLINE_STRIKETHROUGH:
+      content_start += 2;
+      content_end -= 2;
+      break;
+    case INLINE_CODE:
+      content_start += 1;
+      content_end -= 1;
+      break;
     default:
       break;
     }
 
-    size_t styled_len = content_end - content_start;
-    char *temp_styled = malloc(styled_len + 1);
-    memcpy(temp_styled, text + content_start, styled_len);
-    temp_styled[styled_len] = '\0';
+    char *styled_text = NULL;
+    if (content_end > content_start) {
+      size_t styled_len = content_end - content_start;
+      char *temp_styled = malloc(styled_len + 1);
+      memcpy(temp_styled, text + content_start, styled_len);
+      temp_styled[styled_len] = '\0';
+      styled_text = strip_all_markers(temp_styled);
+      free(temp_styled);
+    } else {
+      styled_text = strdup_safe("");
+    }
 
-    char *styled_text = strip_all_markers(temp_styled);
-    free(temp_styled);
-
-    result[result_count].text = styled_text;
+    result[result_count].text = styled_text ? styled_text : strdup_safe("");
     result[result_count].bold =
         (spans[i].style == INLINE_BOLD || spans[i].style == INLINE_BOLD_ITALIC);
     result[result_count].italic = (spans[i].style == INLINE_ITALIC ||
@@ -261,13 +914,20 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
       result[result_count].underline_color = (RGBA){0.0f, 0.0f, 0.0f, 0.4f};
       result[result_count].underline_gap = 7;
     }
-    result_count++;
+    if (spans[i].style == INLINE_CODE) {
+      result[result_count].code = true;
+    }
+    if (spans[i].style == INLINE_STRIKETHROUGH) {
+      result[result_count].strikethrough = true;
+    }
 
+    result_count++;
     text_pos = spans[i].end;
   }
 
-  if (text_pos < strlen(text)) {
-    size_t len = strlen(text) - text_pos;
+  size_t text_len = strlen(text);
+  if (text_pos < text_len) {
+    size_t len = text_len - text_pos;
     char *temp_remaining = malloc(len + 1);
     memcpy(temp_remaining, text + text_pos, len);
     temp_remaining[len] = '\0';
@@ -276,15 +936,286 @@ TextSpan *convert_spans_to_text_spans(const char *text, const InlineSpan *spans,
     free(temp_remaining);
 
     result[result_count].text = remaining_text;
-    result[result_count].bold = false;
-    result[result_count].italic = false;
-    result[result_count].has_highlight = false;
-    result[result_count].has_underline = false;
     result_count++;
   }
 
   *out_count = result_count;
   return result;
+}
+
+void markdown_populate_text_spans(ElementText *text) {
+  if (!text)
+    return;
+
+  if (!text->text) {
+    text->text = strdup_safe("");
+  }
+
+  InlineSpan spans_buffer[128];
+  int parsed = parse_inline_styles(text->text, spans_buffer, 128);
+  size_t span_count = parsed > 0 ? (size_t)parsed : 0;
+
+  size_t new_span_count = 0;
+  TextSpan *converted = NULL;
+  if (span_count > 0) {
+    converted = convert_spans_to_text_spans(text->text, spans_buffer, span_count,
+                                            &new_span_count);
+  } else {
+    converted = convert_spans_to_text_spans(text->text, NULL, 0, &new_span_count);
+  }
+
+  bool preserve_bold = text->bold;
+  bool preserve_italic = text->italic;
+  bool preserve_highlight = text->has_highlight;
+  bool preserve_underline = text->has_underline;
+  RGBA preserve_highlight_color = text->highlight_color;
+  RGBA preserve_underline_color = text->underline_color;
+  int preserve_underline_gap = text->underline_gap;
+
+  free(text->text);
+
+  text->text = join_text_spans(converted, new_span_count);
+  if (!text->text) {
+    text->text = strdup_safe("");
+  }
+
+  bool any_bold = false;
+  bool any_italic = false;
+  bool any_highlight = false;
+  bool any_underline = false;
+  RGBA highlight_color = text->highlight_color;
+  RGBA underline_color = text->underline_color;
+  int underline_gap = text->underline_gap;
+
+  for (size_t i = 0; i < new_span_count; i++) {
+    if (converted[i].bold)
+      any_bold = true;
+    if (converted[i].italic)
+      any_italic = true;
+    if (converted[i].has_highlight) {
+      any_highlight = true;
+      highlight_color = converted[i].highlight_color;
+    }
+    if (converted[i].has_underline) {
+      any_underline = true;
+      underline_color = converted[i].underline_color;
+      underline_gap = converted[i].underline_gap;
+    }
+  }
+
+  text->bold = preserve_bold || any_bold;
+  text->italic = preserve_italic || any_italic;
+
+  if (any_highlight || preserve_highlight) {
+    text->has_highlight = true;
+    text->highlight_color = any_highlight ? highlight_color : preserve_highlight_color;
+  } else {
+    text->has_highlight = false;
+  }
+
+  if (any_underline || preserve_underline) {
+    text->has_underline = true;
+    text->underline_color = any_underline ? underline_color : preserve_underline_color;
+    text->underline_gap = any_underline ? underline_gap : preserve_underline_gap;
+  } else {
+    text->has_underline = false;
+  }
+
+  text->spans = converted;
+  text->spans_count = new_span_count;
+}
+
+static ElementText build_text_element(const char *content, bool allow_headers) {
+  ElementText text;
+  memset(&text, 0, sizeof(text));
+
+  if (!content)
+    content = "";
+
+  if (allow_headers && parse_header_line(content, &text) == 0) {
+    int header_level = text.level;
+    int header_font_size = text.font_size;
+    Align header_align = text.align;
+    RGBA header_color = text.color;
+    bool header_bold = text.bold;
+
+    markdown_populate_text_spans(&text);
+
+    text.level = header_level;
+    text.font_size = header_font_size;
+    text.align = header_align;
+    text.color = header_color;
+    text.bold = header_bold || text.bold;
+    return text;
+  }
+
+  text.text = strdup_safe(content);
+  text.font = NULL;
+  text.align = ALIGN_LEFT;
+  text.level = 0;
+  text.bold = false;
+  text.italic = false;
+  text.has_highlight = false;
+  text.has_underline = false;
+  text.font_size = 16;
+  text.color = (RGBA){0.0f, 0.0f, 0.0f, 1.0f};
+  text.highlight_color = (RGBA){1.0f, 1.0f, 0.0f, 0.3f};
+  text.underline_color = (RGBA){0.0f, 0.0f, 0.0f, 0.4f};
+  text.underline_gap = 7;
+
+  markdown_populate_text_spans(&text);
+  return text;
+}
+
+static bool is_horizontal_rule_line(const char *line) {
+  if (!line)
+    return false;
+
+  const char *p = line;
+  char marker = 0;
+  int count = 0;
+
+  while (*p) {
+    if (*p == ' ' || *p == '\t') {
+      p++;
+      continue;
+    }
+    if (*p == '-' || *p == '*' || *p == '_') {
+      if (!marker)
+        marker = *p;
+      else if (*p != marker)
+        return false;
+      count++;
+      p++;
+      continue;
+    }
+    return false;
+  }
+
+  return marker != 0 && count >= 3;
+}
+
+static bool parse_list_marker(const char *line, bool *ordered, int *indent_level,
+                              bool *has_checkbox, bool *checkbox_checked,
+                              int *number, const char **content_start) {
+  if (!line)
+    return false;
+
+  const char *p = line;
+  int indent = 0;
+  while (*p == ' ' || *p == '\t') {
+    indent += (*p == '\t') ? 4 : 1;
+    p++;
+  }
+
+  if (*p == '\0')
+    return false;
+
+  bool is_ordered = false;
+  int parsed_number = 0;
+  const char *marker_end = NULL;
+  const char *after_marker = NULL;
+  bool checkbox = false;
+  bool checkbox_state = false;
+  bool forced_checkbox_marker = false;
+
+  if (*p == '[' && p[1] && p[2] == ']') {
+    char checkbox_flag = p[1];
+    if (checkbox_flag == ' ' || checkbox_flag == 'x' || checkbox_flag == 'X') {
+      marker_end = p + 3;
+      after_marker = marker_end;
+      checkbox = true;
+      checkbox_state = (checkbox_flag == 'x' || checkbox_flag == 'X');
+      forced_checkbox_marker = true;
+    }
+  }
+
+  if (!marker_end) {
+    bool has_leading_paren = false;
+    if (*p == '(' && isdigit((unsigned char)*(p + 1))) {
+      has_leading_paren = true;
+      p++;
+    }
+
+    if (isdigit((unsigned char)*p)) {
+      const char *num_start = p;
+      while (isdigit((unsigned char)*p))
+        p++;
+
+      char closing = *p;
+      if (closing == '.' || closing == ')' || closing == ']') {
+        marker_end = p + 1;
+        if (closing == ']' && *marker_end == ')') {
+          marker_end++;
+        } else if (closing == '.' && has_leading_paren && *marker_end == ')') {
+          marker_end++;
+        }
+        is_ordered = true;
+        parsed_number = atoi(num_start);
+      } else {
+        return false;
+      }
+      after_marker = marker_end;
+    } else if (*p == '-' || *p == '*' || *p == '+') {
+      marker_end = p + 1;
+      after_marker = marker_end;
+    } else {
+      return false;
+    }
+  }
+
+  if (!after_marker)
+    return false;
+
+  if (*after_marker == ' ' || *after_marker == '\t') {
+    while (*after_marker == ' ' || *after_marker == '\t')
+      after_marker++;
+  } else if (*after_marker == '\0') {
+    // Allow empty list items
+  } else {
+    return false;
+  }
+
+  if (!forced_checkbox_marker && after_marker[0] == '[' && after_marker[1] &&
+      after_marker[2] == ']') {
+    checkbox = true;
+    checkbox_state = (after_marker[1] == 'x' || after_marker[1] == 'X');
+    after_marker += 3;
+    while (*after_marker == ' ' || *after_marker == '\t')
+      after_marker++;
+  }
+
+  if (ordered)
+    *ordered = is_ordered;
+  if (indent_level)
+    *indent_level = indent / 2;
+  if (has_checkbox)
+    *has_checkbox = checkbox;
+  if (checkbox_checked)
+    *checkbox_checked = checkbox_state;
+  if (number)
+    *number = is_ordered ? (parsed_number > 0 ? parsed_number : 1) : 0;
+  if (content_start)
+    *content_start = after_marker;
+
+  return true;
+}
+
+static bool parse_blockquote_line(const char *line, const char **content_start) {
+  if (!line)
+    return false;
+
+  const char *p = line;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (*p != '>')
+    return false;
+  p++;
+  if (*p == ' ' || *p == '\t')
+    p++;
+  if (content_start)
+    *content_start = p;
+  return true;
 }
 
 int parse_image_line(const char *line, ElementImage *image) {
@@ -293,7 +1224,7 @@ int parse_image_line(const char *line, ElementImage *image) {
   image->align = ALIGN_LEFT;
 
   const char *p = line;
-  while (*p && isspace(*p))
+  while (*p && isspace((unsigned char)*p))
     p++;
 
   if (p[0] != '!' || p[1] != '[') {
@@ -412,6 +1343,8 @@ int parse_header_line(const char *line, ElementText *text) {
 
 bool is_table_separator_line(const char *line) {
   const char *p = line;
+  
+  // Ignorer les espaces en début de ligne
   while (*p && isspace(*p))
     p++;
 
@@ -421,6 +1354,10 @@ bool is_table_separator_line(const char *line) {
   while (*p) {
     while (*p && isspace(*p))
       p++;
+
+    // Si on arrive à la fin de ligne (espaces inclus), c'est valide
+    if (*p == '\0')
+      break;
 
     if (*p == ':')
       p++;
@@ -566,6 +1503,52 @@ int parse_table_block(MarkdownParser *parser, ElementTable *table) {
 
   table->cols = first_row_cols;
   table->rows = 1;
+  table->header_rows = table->rows;
+
+  table->column_align_count = table->cols;
+  table->column_align = calloc(table->cols, sizeof(Align));
+  table->column_align_defined = calloc(table->cols, sizeof(bool));
+
+  int sep_cols = 0;
+  char **sep_cells = split_table_row(sep_line, &sep_cols);
+  if (table->column_align && table->column_align_defined && sep_cells) {
+    for (size_t c = 0; c < table->cols; c++) {
+      Align align = ALIGN_LEFT;
+      bool defined = false;
+      if ((int)c < sep_cols && sep_cells[c]) {
+        char *token = sep_cells[c];
+        size_t len = strlen(token);
+        bool left = false, right = false;
+        for (size_t i = 0; i < len; i++) {
+          if (token[i] == ':') {
+            if (i == 0)
+              left = true;
+            if (i == len - 1)
+              right = true;
+          }
+        }
+        if (left && right) {
+          align = ALIGN_CENTER;
+          defined = true;
+        } else if (right) {
+          align = ALIGN_RIGHT;
+          defined = true;
+        } else if (left) {
+          align = ALIGN_LEFT;
+          defined = true;
+        }
+      }
+      table->column_align[c] = align;
+      table->column_align_defined[c] = defined;
+    }
+  }
+
+  if (sep_cells) {
+    for (int i = 0; i < sep_cols; i++) {
+      free(sep_cells[i]);
+    }
+    free(sep_cells);
+  }
 
   char ***all_rows = malloc(sizeof(char **));
   all_rows[0] = first_row;
@@ -631,20 +1614,15 @@ int parse_table_block(MarkdownParser *parser, ElementTable *table) {
     table->cells[r] = malloc(table->cols * sizeof(ElementText *));
 
     for (size_t c = 0; c < table->cols; c++) {
+      const char *cell_content =
+          (c < (size_t)row_col_counts[r] && all_rows[r][c]) ? all_rows[r][c] : "";
+      ElementText cell_text = build_table_cell_text(cell_content);
       table->cells[r][c] = malloc(sizeof(ElementText));
-      memset(table->cells[r][c], 0, sizeof(ElementText));
-
-      if (c < (size_t)row_col_counts[r] && all_rows[r][c]) {
-        table->cells[r][c]->text = strdup_safe(all_rows[r][c]);
-        table->cells[r][c]->level = 0;
-        table->cells[r][c]->align = ALIGN_LEFT;
-        table->cells[r][c]->color = (RGBA){0.0f, 0.0f, 0.0f, 1.0f};
-      } else {
-        table->cells[r][c]->text = strdup_safe("");
-        table->cells[r][c]->level = 0;
-        table->cells[r][c]->align = ALIGN_LEFT;
-        table->cells[r][c]->color = (RGBA){0.0f, 0.0f, 0.0f, 1.0f};
+      if (!table->cells[r][c]) {
+        markdown_free_text(&cell_text);
+        continue;
       }
+      *table->cells[r][c] = cell_text;
     }
   }
 
@@ -659,133 +1637,116 @@ int parse_table_block(MarkdownParser *parser, ElementTable *table) {
   free(first_line);
   free(sep_line);
 
+  // Calculate column widths for consistent line-by-line rendering
+  table_calculate_column_widths(table);
+
   return 0;
 }
 
-int markdown_to_json(const char *markdown, Document *doc) {
-  editor_init(doc);
+static ElementText build_table_cell_text(const char *content) {
+  ElementText cell = build_text_element(content ? content : "", false);
+  cell.align = ALIGN_LEFT;
+  cell.level = 0;
+  return cell;
+}
 
-  const char *pos = markdown;
+
+int markdown_to_json(const char *markdown, Document *doc) {
+  if (!doc) {
+    return -1;
+  }
+
+  editor_init(doc);
+  if (!markdown) {
+    return 0;
+  }
+
+  const char *cursor = markdown;
   const char *end = markdown + strlen(markdown);
 
-  while (pos < end) {
-    const char *line_end = strchr(pos, '\n');
-    if (!line_end)
+  while (cursor < end) {
+    const char *line_end = strchr(cursor, '\n');
+    if (!line_end) {
       line_end = end;
-
-    size_t line_len = line_end - pos;
-    if (line_len == 0) {
-      // Create empty text element for empty line
-      if (doc->elements_len >= doc->elements_capacity) {
-        size_t new_cap =
-            doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
-        doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
-        doc->elements_capacity = new_cap;
-      }
-
-      doc->elements[doc->elements_len].kind = T_TEXT;
-      ElementText *text_element = &doc->elements[doc->elements_len].as.text;
-      text_element->text = strdup_safe("");
-      text_element->font = NULL;
-      text_element->align = ALIGN_LEFT;
-      text_element->level = 0;
-      text_element->bold = false;
-      text_element->italic = false;
-      text_element->has_highlight = false;
-      text_element->has_underline = false;
-      text_element->font_size = 16;
-      text_element->color = (RGBA){0.0f, 0.0f, 0.0f, 1.0f};
-      text_element->underline_color = (RGBA){0.0f, 0.0f, 0.0f, 0.4f};
-      text_element->underline_gap = 7;
-      text_element->highlight_color = (RGBA){1.0f, 1.0f, 0.0f, 0.3f};
-      text_element->spans = NULL;
-      text_element->spans_count = 0;
-      doc->elements_len++;
-
-      pos = line_end < end ? line_end + 1 : end;
-      continue;
     }
 
-    char *line = malloc(line_len + 1);
-    memcpy(line, pos, line_len);
-    line[line_len] = '\0';
+    size_t raw_len = (size_t)(line_end - cursor);
+    char *raw_line = malloc(raw_len + 1);
+    if (!raw_line) {
+      return -1;
+    }
+    memcpy(raw_line, cursor, raw_len);
+    raw_line[raw_len] = '\0';
+
+    char *line = strdup_safe(raw_line);
+    if (!line) {
+      free(raw_line);
+      return -1;
+    }
     trim_whitespace(line);
+    const char *trimmed = line;
 
-    if (strlen(line) == 0) {
-      // Treat empty lines as empty text elements
-      if (doc->elements_len >= doc->elements_capacity) {
-        size_t new_cap =
-            doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
-        doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
-        doc->elements_capacity = new_cap;
+    const char *next_cursor = (line_end < end) ? line_end + 1 : end;
+    bool handled = false;
+
+    if (raw_len == 0 || *trimmed == '\0') {
+      if (!ensure_document_capacity(doc, 1)) {
+        free(raw_line);
+        free(line);
+        return -1;
       }
-
+      ElementText empty = build_text_element("", false);
       doc->elements[doc->elements_len].kind = T_TEXT;
-      ElementText *text_element = &doc->elements[doc->elements_len].as.text;
-      text_element->text = strdup_safe("");
-      text_element->font = NULL;
-      text_element->align = ALIGN_LEFT;
-      text_element->level = 0;
-      text_element->bold = false;
-      text_element->italic = false;
-      text_element->has_highlight = false;
-      text_element->has_underline = false;
-      text_element->font_size = 16;
-      text_element->color = (RGBA){0.0f, 0.0f, 0.0f, 1.0f};
-      text_element->underline_color = (RGBA){0.0f, 0.0f, 0.0f, 0.4f};
-      text_element->underline_gap = 7;
-      text_element->highlight_color = (RGBA){1.0f, 1.0f, 0.0f, 0.3f};
-      text_element->spans = NULL;
-      text_element->spans_count = 0;
+      doc->elements[doc->elements_len].as.text = empty;
       doc->elements_len++;
-
-      free(line);
-      pos = line_end < end ? line_end + 1 : end;
-      continue;
+      handled = true;
     }
 
-    const char *trimmed = line;
-    while (*trimmed && isspace(*trimmed))
-      trimmed++;
-    if (strncmp(trimmed, "```", 3) == 0) {
-      const char *original_pos = pos;
+    if (!handled && strncmp(trimmed, "```", 3) == 0) {
       const char *language_start = trimmed + 3;
-      while (*language_start == ' ' || *language_start == '\t')
+      while (*language_start == ' ' || *language_start == '	') {
         language_start++;
+      }
       char *language = strdup_safe(language_start);
       trim_whitespace(language);
 
-      const char *local_pos = (line_end < end) ? line_end + 1 : end;
+      const char *local_cursor = (line_end < end) ? line_end + 1 : end;
       size_t content_len = 0;
       size_t content_cap = 0;
       char *content = NULL;
       bool closed = false;
 
-      while (local_pos < end) {
-        const char *next_line_end = strchr(local_pos, '\n');
-        if (!next_line_end)
+      while (local_cursor < end) {
+        const char *next_line_end = strchr(local_cursor, '\n');
+        if (!next_line_end) {
           next_line_end = end;
-        size_t segment_len = next_line_end - local_pos;
+        }
+        size_t segment_len = (size_t)(next_line_end - local_cursor);
         char *segment = malloc(segment_len + 1);
-        memcpy(segment, local_pos, segment_len);
+        if (!segment) {
+          break;
+        }
+        memcpy(segment, local_cursor, segment_len);
         segment[segment_len] = '\0';
 
         char *segment_trim = segment;
-        while (*segment_trim && isspace(*segment_trim))
+        while (*segment_trim && isspace(*segment_trim)) {
           segment_trim++;
+        }
 
         if (strncmp(segment_trim, "```", 3) == 0) {
           closed = true;
           free(segment);
-          local_pos = (next_line_end < end) ? next_line_end + 1 : end;
+          local_cursor = (next_line_end < end) ? next_line_end + 1 : end;
           break;
         }
 
         size_t needed = segment_len + 1;
         if (content_len + needed + 1 > content_cap) {
-          size_t new_cap = (content_cap == 0) ? (needed + 64) : content_cap;
-          while (content_len + needed + 1 > new_cap)
+          size_t new_cap = content_cap == 0 ? (needed + 64) : content_cap;
+          while (content_len + needed + 1 > new_cap) {
             new_cap *= 2;
+          }
           char *new_buf = realloc(content, new_cap);
           if (!new_buf) {
             free(segment);
@@ -793,30 +1754,27 @@ int markdown_to_json(const char *markdown, Document *doc) {
             content = NULL;
             content_cap = 0;
             content_len = 0;
-            free(language);
-            pos = original_pos;
-            closed = false;
             break;
           }
           content = new_buf;
           content_cap = new_cap;
         }
 
-        memcpy(content + content_len, local_pos, segment_len);
+        memcpy(content + content_len, local_cursor, segment_len);
         content_len += segment_len;
         content[content_len++] = '\n';
 
         free(segment);
-        local_pos = (next_line_end < end) ? next_line_end + 1 : end;
+        local_cursor = (next_line_end < end) ? next_line_end + 1 : end;
       }
 
       if (closed) {
-        if (content_len == 0) {
-          free(content);
+        if (!content) {
           content = strdup_safe("");
         } else {
-          if (content[content_len - 1] == '\n')
+          if (content_len > 0 && content[content_len - 1] == '\n') {
             content_len--;
+          }
           content[content_len] = '\0';
         }
 
@@ -826,161 +1784,453 @@ int markdown_to_json(const char *markdown, Document *doc) {
         code.content = content;
         code.fenced = true;
 
-        if (doc->elements_len >= doc->elements_capacity) {
-          size_t new_cap = doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
-          doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
-          doc->elements_capacity = new_cap;
+        if (!ensure_document_capacity(doc, 1)) {
+          markdown_dispose_code(&code);
+          free(raw_line);
+          free(line);
+          return -1;
         }
-
         doc->elements[doc->elements_len].kind = T_CODE;
         doc->elements[doc->elements_len].as.code = code;
         doc->elements_len++;
 
-        free(line);
-        pos = local_pos;
-        continue;
+        handled = true;
+        next_cursor = local_cursor;
+        if (next_cursor <= cursor) {
+          next_cursor = (line_end < end) ? line_end + 1 : end;
+        }
       } else {
-        free(content);
         free(language);
-        pos = original_pos;
+        free(content);
       }
     }
 
-    ElementImage image;
-    if (parse_image_line(line, &image) == 0) {
-      if (doc->elements_len >= doc->elements_capacity) {
-        size_t new_cap =
-            doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
-        doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
-        doc->elements_capacity = new_cap;
+    if (!handled && is_horizontal_rule_line(trimmed)) {
+      ElementDivider divider;
+      divider.thickness = 1;
+      divider.color = (RGBA){0.7f, 0.7f, 0.7f, 1.0f};
+
+      if (!ensure_document_capacity(doc, 1)) {
+        free(raw_line);
+        free(line);
+        return -1;
+      }
+      doc->elements[doc->elements_len].kind = T_DIVIDER;
+      doc->elements[doc->elements_len].as.divider = divider;
+      doc->elements_len++;
+      handled = true;
+    }
+
+    if (!handled && trimmed[0] == '{') {
+      const char *brace_end = strchr(trimmed, '}');
+      if (brace_end && brace_end > trimmed + 1) {
+        size_t name_len = (size_t)(brace_end - (trimmed + 1));
+        char *setting_name = malloc(name_len + 1);
+        if (setting_name) {
+          memcpy(setting_name, trimmed + 1, name_len);
+          setting_name[name_len] = '\0';
+          trim_whitespace(setting_name);
+
+          const char *value_start = brace_end + 1;
+          while (*value_start == ' ' || *value_start == '\t')
+            value_start++;
+
+          if (*value_start == '[') {
+            const char *value_end = strchr(value_start + 1, ']');
+            if (value_end) {
+              size_t value_len = (size_t)(value_end - (value_start + 1));
+              char *setting_value = malloc(value_len + 1);
+              if (setting_value) {
+                memcpy(setting_value, value_start + 1, value_len);
+                setting_value[value_len] = '\0';
+                trim_whitespace(setting_value);
+
+                ElementSettings settings = {
+                    .name = setting_name,
+                    .value = setting_value };
+
+                if (!ensure_document_capacity(doc, 1)) {
+                  markdown_dispose_settings(&settings);
+                  free(raw_line);
+                  free(line);
+                  return -1;
+                }
+                doc->elements[doc->elements_len].kind = T_SETTINGS;
+                doc->elements[doc->elements_len].as.settings = settings;
+                doc->elements_len++;
+                handled = true;
+              } else {
+                free(setting_name);
+              }
+            } else {
+              free(setting_name);
+            }
+          } else {
+            free(setting_name);
+          }
+        }
+      }
+    }
+
+    bool ordered = false;
+    int indent_level = 0;
+    bool has_checkbox = false;
+    bool checkbox_checked = false;
+    int list_number = 0;
+    const char *list_content = NULL;
+
+    if (!handled &&
+        parse_list_marker(raw_line, &ordered, &indent_level, &has_checkbox,
+                          &checkbox_checked, &list_number, &list_content)) {
+      ElementList list;
+      memset(&list, 0, sizeof(list));
+      list.kind = has_checkbox ? LIST_KIND_TASK
+                                : (ordered ? LIST_KIND_ORDERED : LIST_KIND_BULLET);
+      list.ordered = ordered;
+      list.start_index = ordered ? (list_number > 0 ? list_number : 1) : 1;
+      list.item_capacity = 4;
+      list.items = calloc(list.item_capacity, sizeof(ElementListItem));
+
+      ElementListItem first;
+      memset(&first, 0, sizeof(first));
+      first.indent_level = 0;
+      first.has_checkbox = has_checkbox;
+      first.checkbox_checked = checkbox_checked;
+      first.is_task = has_checkbox;
+      first.number = ordered ? (list_number > 0 ? list_number : list.start_index)
+                             : 0;
+      first.text = build_text_element(list_content ? list_content : "", false);
+      list.items[list.item_count++] = first;
+      if (first.has_checkbox && list.kind != LIST_KIND_TASK) {
+        list.kind = LIST_KIND_TASK;
       }
 
-      doc->elements[doc->elements_len].kind = T_IMAGE;
-      doc->elements[doc->elements_len].as.image = image;
-      doc->elements_len++;
-    } else if (strchr(line, '|')) {
-      // Check if this could be a table
+      const char *local_cursor = (line_end < end) ? line_end + 1 : end;
+      int base_indent = indent_level;
+
+      while (local_cursor < end) {
+        const char *next_line_end = strchr(local_cursor, '\n');
+        if (!next_line_end) {
+          next_line_end = end;
+        }
+        size_t local_len = (size_t)(next_line_end - local_cursor);
+        char *local_raw = malloc(local_len + 1);
+        if (!local_raw) {
+          break;
+        }
+        memcpy(local_raw, local_cursor, local_len);
+        local_raw[local_len] = '\0';
+
+        bool local_ordered = false;
+        int local_indent = 0;
+        bool local_has_checkbox = false;
+        bool local_checkbox_checked = false;
+        int local_number = 0;
+        const char *local_content = NULL;
+
+        bool parsed = parse_list_marker(local_raw, &local_ordered, &local_indent,
+                                        &local_has_checkbox,
+                                        &local_checkbox_checked, &local_number,
+                                        &local_content);
+
+        if (!parsed || local_ordered != ordered || local_indent < base_indent) {
+          free(local_raw);
+          break;
+        }
+
+        if (list.item_count >= list.item_capacity) {
+          size_t new_cap = list.item_capacity * 2;
+          ElementListItem *new_items =
+              realloc(list.items, new_cap * sizeof(ElementListItem));
+          if (!new_items) {
+            free(local_raw);
+            break;
+          }
+          memset(new_items + list.item_capacity, 0,
+                 (new_cap - list.item_capacity) * sizeof(ElementListItem));
+          list.items = new_items;
+          list.item_capacity = new_cap;
+        }
+
+        ElementListItem item;
+        memset(&item, 0, sizeof(item));
+        item.indent_level = local_indent - base_indent;
+        item.has_checkbox = local_has_checkbox;
+        item.checkbox_checked = local_checkbox_checked;
+        item.is_task = local_has_checkbox;
+        item.number = local_ordered
+                          ? (local_number > 0 ? local_number
+                                               : list.start_index + (int)list.item_count)
+                          : 0;
+        item.text =
+            build_text_element(local_content ? local_content : "", false);
+
+        list.items[list.item_count++] = item;
+        if (item.has_checkbox && list.kind != LIST_KIND_TASK) {
+          list.kind = LIST_KIND_TASK;
+        }
+
+        free(local_raw);
+        local_cursor = (next_line_end < end) ? next_line_end + 1 : end;
+      }
+
+      if (list.item_count > 0) {
+        if (!ensure_document_capacity(doc, 1)) {
+          markdown_dispose_list(&list);
+          free(raw_line);
+          free(line);
+          return -1;
+        }
+        doc->elements[doc->elements_len].kind = T_LIST;
+        doc->elements[doc->elements_len].as.list = list;
+        doc->elements_len++;
+        handled = true;
+        next_cursor = local_cursor;
+        if (next_cursor <= cursor) {
+          next_cursor = (line_end < end) ? line_end + 1 : end;
+        }
+      } else {
+        free(list.items);
+      }
+    }
+
+    if (!handled) {
+      const char *definition_cursor = cursor;
+      if (try_parse_definition_list(&definition_cursor, end, doc)) {
+        handled = true;
+        next_cursor = definition_cursor;
+      }
+    }
+
+    if (!handled) {
+      const char *quote_content = NULL;
+      if (parse_blockquote_line(raw_line, &quote_content)) {
+        ElementQuote quote;
+        memset(&quote, 0, sizeof(quote));
+        quote.item_capacity = 4;
+        quote.items = calloc(quote.item_capacity, sizeof(ElementText));
+        quote.items[quote.item_count++] =
+            build_text_element(quote_content ? quote_content : "", false);
+
+        const char *local_cursor = (line_end < end) ? line_end + 1 : end;
+
+        while (local_cursor < end) {
+          const char *next_line_end = strchr(local_cursor, '\n');
+          if (!next_line_end) {
+            next_line_end = end;
+          }
+          size_t local_len = (size_t)(next_line_end - local_cursor);
+          char *local_raw = malloc(local_len + 1);
+          if (!local_raw) {
+            break;
+          }
+          memcpy(local_raw, local_cursor, local_len);
+          local_raw[local_len] = '\0';
+
+          const char *local_quote_content = NULL;
+          if (!parse_blockquote_line(local_raw, &local_quote_content)) {
+            free(local_raw);
+            break;
+          }
+
+          if (quote.item_count >= quote.item_capacity) {
+            size_t new_cap = quote.item_capacity * 2;
+            ElementText *new_items =
+                realloc(quote.items, new_cap * sizeof(ElementText));
+            if (!new_items) {
+              free(local_raw);
+              break;
+            }
+            quote.items = new_items;
+            quote.item_capacity = new_cap;
+          }
+
+          quote.items[quote.item_count++] =
+              build_text_element(local_quote_content ? local_quote_content : "",
+                                 false);
+
+          free(local_raw);
+          local_cursor = (next_line_end < end) ? next_line_end + 1 : end;
+        }
+
+        if (quote.item_count > 0) {
+          if (!ensure_document_capacity(doc, 1)) {
+            markdown_dispose_quote(&quote);
+            free(raw_line);
+            free(line);
+            return -1;
+          }
+          doc->elements[doc->elements_len].kind = T_QUOTE;
+          doc->elements[doc->elements_len].as.quote = quote;
+          doc->elements_len++;
+          handled = true;
+          next_cursor = local_cursor;
+          if (next_cursor <= cursor) {
+            next_cursor = (line_end < end) ? line_end + 1 : end;
+          }
+        } else {
+          free(quote.items);
+        }
+      }
+    }
+
+    if (!handled) {
+      ElementImage image;
+      if (parse_image_line(trimmed, &image) == 0) {
+        if (!ensure_document_capacity(doc, 1)) {
+          markdown_dispose_image(&image);
+          free(raw_line);
+          free(line);
+          return -1;
+        }
+        doc->elements[doc->elements_len].kind = T_IMAGE;
+        doc->elements[doc->elements_len].as.image = image;
+        doc->elements_len++;
+        handled = true;
+      }
+    }
+
+    if (!handled && strchr(trimmed, '|')) {
       MarkdownParser parser;
-      parser.text = pos;
+      parser.text = cursor;
       parser.pos = 0;
-      parser.len = end - pos;
+      parser.len = end - cursor;
 
       ElementTable table;
       if (parse_table_block(&parser, &table) == 0) {
-        if (doc->elements_len >= doc->elements_capacity) {
-          size_t new_cap =
-              doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
-          doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
-          doc->elements_capacity = new_cap;
+        if (!ensure_document_capacity(doc, 1)) {
+          markdown_dispose_table(&table);
+          free(raw_line);
+          free(line);
+          return -1;
         }
-
         doc->elements[doc->elements_len].kind = T_TABLE;
         doc->elements[doc->elements_len].as.table = table;
         doc->elements_len++;
+        handled = true;
+        next_cursor = cursor + parser.pos;
+        if (next_cursor <= cursor) {
+          next_cursor = (line_end < end) ? line_end + 1 : end;
+        }
+      }
+    }
 
-        // Advance position to after the table
-        pos = pos + parser.pos;
+    if (!handled) {
+      ElementText text_elem = build_text_element(trimmed, true);
+      if (!ensure_document_capacity(doc, 1)) {
+        markdown_free_text(&text_elem);
+        free(raw_line);
         free(line);
-        continue;
+        return -1;
       }
-    } else {
-      ElementText text;
-      if (parse_header_line(line, &text) != 0) {
-        memset(&text, 0, sizeof(text));
-        text.text = strdup_safe(line);
-        text.level = 0;
-        text.align = ALIGN_LEFT;
-        text.color = (RGBA){0.0f, 0.0f, 0.0f, 1.0f};
-      }
-
-      InlineSpan spans[32];
-      int span_count = parse_inline_styles(text.text, spans, 32);
-      if (span_count > 0) {
-        text.spans = convert_spans_to_text_spans(text.text, spans, span_count,
-                                                 &text.spans_count);
-      } else {
-        text.spans =
-            convert_spans_to_text_spans(text.text, NULL, 0, &text.spans_count);
-      }
-
-      // Headers keep original case for idempotence
-
-      // Replace text.text with cleaned text (without markdown markers)
-      free(text.text);
-      text.text = NULL;
-
-      // Reconstruct clean text from spans
-      size_t total_len = 0;
-      for (size_t i = 0; i < text.spans_count; i++) {
-        if (text.spans[i].text) {
-          total_len += strlen(text.spans[i].text);
-        }
-      }
-
-      text.text = malloc(total_len + 1);
-      text.text[0] = '\0';
-      for (size_t i = 0; i < text.spans_count; i++) {
-        if (text.spans[i].text) {
-          strcat(text.text, text.spans[i].text);
-        }
-      }
-
-      // Set global style flags based on spans (preserve existing flags for
-      // headers)
-      bool preserve_bold = text.bold; // Headers already have bold=true
-      text.bold = preserve_bold;
-      text.italic = false;
-      text.has_highlight = false;
-      text.has_underline = false;
-      for (size_t i = 0; i < text.spans_count; i++) {
-        if (text.spans[i].bold)
-          text.bold = true;
-        if (text.spans[i].italic)
-          text.italic = true;
-        if (text.spans[i].has_highlight) {
-          text.has_highlight = true;
-          text.highlight_color = text.spans[i].highlight_color;
-        }
-        if (text.spans[i].has_underline) {
-          text.has_underline = true;
-          text.underline_color = text.spans[i].underline_color;
-          text.underline_gap = text.spans[i].underline_gap;
-        }
-      }
-
-      if (doc->elements_len >= doc->elements_capacity) {
-        size_t new_cap =
-            doc->elements_capacity == 0 ? 8 : doc->elements_capacity * 2;
-        doc->elements = realloc(doc->elements, new_cap * sizeof(Element));
-        doc->elements_capacity = new_cap;
-      }
-
       doc->elements[doc->elements_len].kind = T_TEXT;
-      doc->elements[doc->elements_len].as.text = text;
+      doc->elements[doc->elements_len].as.text = text_elem;
       doc->elements_len++;
     }
 
+    free(raw_line);
     free(line);
-    pos = line_end < end ? line_end + 1 : end;
+    cursor = next_cursor;
   }
 
   return 0;
 }
 
-static void write_inline_markup(FILE *fp, const char *text, bool bold,
-                                bool italic, bool highlight, bool underline) {
-  if (bold && italic) {
-    fprintf(fp, "***%s***", text);
-  } else if (bold) {
-    fprintf(fp, "**%s**", text);
-  } else if (italic) {
-    fprintf(fp, "*%s*", text);
-  } else if (highlight) {
-    fprintf(fp, "==%s==", text);
-  } else if (underline) {
-    fprintf(fp, "++%s++", text);
+
+
+static void write_inline_span_text(FILE *fp, const TextSpan *span) {
+  if (!span) {
+    return;
+  }
+
+  const char *content = span->text ? span->text : "";
+
+  if (span->code) {
+    fprintf(fp, "`%s`", content);
+    return;
+  }
+
+  if (span->strikethrough) {
+    fprintf(fp, "~~");
+  }
+  if (span->has_highlight) {
+    fprintf(fp, "==");
+  }
+  if (span->has_underline) {
+    fprintf(fp, "++");
+  }
+
+  if (span->bold && span->italic) {
+    fprintf(fp, "***%s***", content);
+  } else if (span->bold) {
+    fprintf(fp, "**%s**", content);
+  } else if (span->italic) {
+    fprintf(fp, "*%s*", content);
   } else {
-    fprintf(fp, "%s", text);
+    fprintf(fp, "%s", content);
+  }
+
+  if (span->has_underline) {
+    fprintf(fp, "++");
+  }
+  if (span->has_highlight) {
+    fprintf(fp, "==");
+  }
+  if (span->strikethrough) {
+    fprintf(fp, "~~");
+  }
+}
+
+static void write_inline_markup(FILE *fp, const TextSpan *span) {
+  if (!span) {
+    return;
+  }
+
+  if (span->is_image && span->image_src) {
+    const char *alt = span->image_alt && span->image_alt[0]
+                          ? span->image_alt
+                          : (span->text ? span->text : "");
+    fprintf(fp, "![%s](%s)", alt, span->image_src);
+    return;
+  }
+
+  if (span->is_link && span->link_href) {
+    fprintf(fp, "[");
+    TextSpan inner = *span;
+    inner.is_link = false;
+    inner.link_href = NULL;
+    inner.is_image = false;
+    inner.image_src = NULL;
+    inner.image_alt = NULL;
+    write_inline_span_text(fp, &inner);
+    fprintf(fp, "](%s)", span->link_href);
+    return;
+  }
+
+  write_inline_span_text(fp, span);
+}
+
+static void write_element_text_inline(FILE *fp, const ElementText *text) {
+  if (!text) {
+    return;
+  }
+
+  if (text->spans && text->spans_count > 0) {
+    for (size_t i = 0; i < text->spans_count; i++) {
+      write_inline_markup(fp, &text->spans[i]);
+    }
+  } else {
+    TextSpan temp;
+    memset(&temp, 0, sizeof(temp));
+    temp.text = text->text ? text->text : (char *)"";
+    temp.bold = text->bold;
+    temp.italic = text->italic;
+    temp.has_highlight = text->has_highlight;
+    temp.highlight_color = text->highlight_color;
+    temp.has_underline = text->has_underline;
+    temp.underline_color = text->underline_color;
+    temp.underline_gap = text->underline_gap;
+    write_inline_span_text(fp, &temp);
   }
 }
 
@@ -995,46 +2245,53 @@ int json_to_markdown(const Document *doc, char **out_markdown) {
     switch (elem->kind) {
     case T_TEXT: {
       const ElementText *text = &elem->as.text;
+      bool has_spans = text->spans && text->spans_count > 0;
+      bool has_non_empty_span = false;
+      if (has_spans) {
+        for (size_t s = 0; s < text->spans_count; s++) {
+          const TextSpan *span = &text->spans[s];
+          if ((span->text && span->text[0] != '\0') || span->is_link ||
+              span->is_image || span->code) {
+            has_non_empty_span = true;
+            break;
+          }
+        }
+      }
 
-      // Check if this text element has any actual content
-      bool has_content = false;
+      const char *plain = text->text ? text->text : "";
+      bool has_content = has_non_empty_span || (!has_spans && plain[0] != '\0');
 
-      // Check if element has explicit text content (for empty lines)
-      if (text->text && strlen(text->text) == 0 && text->spans_count == 0) {
-        // This is an empty line - output as empty line
+      if (!has_content && text->level == 0) {
         fprintf(fp, "\n");
         break;
       }
 
-      // Check spans for content
-      for (size_t s = 0; s < text->spans_count; s++) {
-        const char *span_text = text->spans[s].text ? text->spans[s].text : "";
-        if (strlen(span_text) > 0) {
-          has_content = true;
-          break;
+      if (text->level > 0) {
+        for (int j = 0; j < text->level; j++) {
+          fputc('#', fp);
         }
+        fputc(' ', fp);
       }
 
-      // Only output if there's actual content or it's a header (level > 0)
-      if (has_content || text->level > 0) {
-        if (text->level > 0) {
-          for (int j = 0; j < text->level; j++) {
-            fputc('#', fp);
-          }
-          fputc(' ', fp);
-        }
-
-        // Reconstruct content from spans
+      if (has_spans) {
         for (size_t s = 0; s < text->spans_count; s++) {
-          const char *span_text =
-              text->spans[s].text ? text->spans[s].text : "";
-          write_inline_markup(
-              fp, span_text, text->spans[s].bold, text->spans[s].italic,
-              text->spans[s].has_highlight, text->spans[s].has_underline);
+          write_inline_markup(fp, &text->spans[s]);
         }
-
-        fprintf(fp, "\n");
+      } else {
+        TextSpan temp;
+        memset(&temp, 0, sizeof(temp));
+        temp.text = text->text ? text->text : (char *)"";
+        temp.bold = text->bold;
+        temp.italic = text->italic;
+        temp.has_highlight = text->has_highlight;
+        temp.highlight_color = text->highlight_color;
+        temp.has_underline = text->has_underline;
+        temp.underline_color = text->underline_color;
+        temp.underline_gap = text->underline_gap;
+        write_inline_span_text(fp, &temp);
       }
+
+      fprintf(fp, "\n");
       break;
     }
 
@@ -1091,38 +2348,122 @@ int json_to_markdown(const Document *doc, char **out_markdown) {
 
     case T_TABLE: {
       const ElementTable *table = &elem->as.table;
-
-      for (size_t c = 0; c < table->cols; c++) {
-        fprintf(fp, "| ");
-        if (table->cells[0] && table->cells[0][c] && table->cells[0][c]->text) {
-          write_inline_markup(
-              fp, table->cells[0][c]->text, table->cells[0][c]->bold,
-              table->cells[0][c]->italic, table->cells[0][c]->has_highlight,
-              table->cells[0][c]->has_underline);
-        }
-        fprintf(fp, " ");
+      if (table->rows == 0 || table->cols == 0) {
+        fprintf(fp, "\n");
+        break;
       }
-      fprintf(fp, "|\n");
 
-      for (size_t c = 0; c < table->cols; c++) {
-        fprintf(fp, "|---");
+      size_t header_rows = 0;
+      if (table->header_rows > 0 && table->header_rows <= table->rows) {
+        header_rows = table->header_rows;
+      } else {
+        header_rows = 1;
       }
-      fprintf(fp, "|\n");
 
-      for (size_t r = 1; r < table->rows; r++) {
+      if (header_rows > 0) {
+        size_t header_index = 0;
+        fprintf(fp, "|");
         for (size_t c = 0; c < table->cols; c++) {
-          fprintf(fp, "| ");
-          if (table->cells[r] && table->cells[r][c] &&
-              table->cells[r][c]->text) {
-            write_inline_markup(
-                fp, table->cells[r][c]->text, table->cells[r][c]->bold,
-                table->cells[r][c]->italic, table->cells[r][c]->has_highlight,
-                table->cells[r][c]->has_underline);
-          }
           fprintf(fp, " ");
+          if (table->cells[header_index] && table->cells[header_index][c]) {
+            write_element_text_inline(fp, table->cells[header_index][c]);
+          }
+          fprintf(fp, " |");
         }
-        fprintf(fp, "|\n");
+        fprintf(fp, "\n|");
+        for (size_t c = 0; c < table->cols; c++) {
+          bool defined = table->column_align_defined &&
+                         c < table->column_align_count &&
+                         table->column_align_defined[c];
+          Align align = ALIGN_LEFT;
+          if (table->column_align && c < table->column_align_count) {
+            align = table->column_align[c];
+          }
+          const char *sep = "---";
+          if (defined) {
+            if (align == ALIGN_CENTER) {
+              sep = ":---:";
+            } else if (align == ALIGN_RIGHT) {
+              sep = "---:";
+            } else {
+              sep = ":---";
+            }
+          }
+          fprintf(fp, "%s|", sep);
+        }
+        fprintf(fp, "\n");
       }
+
+      for (size_t r = header_rows; r < table->rows; r++) {
+        fprintf(fp, "|");
+        for (size_t c = 0; c < table->cols; c++) {
+          fprintf(fp, " ");
+          if (table->cells[r] && table->cells[r][c]) {
+            write_element_text_inline(fp, table->cells[r][c]);
+          }
+          fprintf(fp, " |");
+        }
+        fprintf(fp, "\n");
+      }
+      break;
+    }
+    case T_LIST: {
+      const ElementList *list = &elem->as.list;
+      if (list->kind == LIST_KIND_DEFINITION) {
+        for (size_t item_index = 0; item_index < list->item_count;
+             item_index++) {
+          const ElementListItem *item = &list->items[item_index];
+          int indent_spaces = item->indent_level > 0 ? item->indent_level * 2 : 0;
+          for (int s = 0; s < indent_spaces; s++) {
+            fputc(' ', fp);
+          }
+          write_element_text_inline(fp,
+                                    item->is_definition ? &item->term : &item->text);
+          fprintf(fp, "\n");
+          for (int s = 0; s < indent_spaces; s++) {
+            fputc(' ', fp);
+          }
+          fprintf(fp, ": ");
+          write_element_text_inline(
+              fp, item->is_definition ? &item->definition : &item->text);
+          fprintf(fp, "\n");
+        }
+        break;
+      }
+
+      int counter = list->start_index > 0 ? list->start_index : 1;
+      for (size_t item_index = 0; item_index < list->item_count; item_index++) {
+        const ElementListItem *item = &list->items[item_index];
+        int indent_spaces = item->indent_level > 0 ? item->indent_level * 2 : 0;
+        for (int s = 0; s < indent_spaces; s++) {
+          fputc(' ', fp);
+        }
+        if (list->ordered) {
+          int number = item->number > 0 ? item->number : counter;
+          fprintf(fp, "%d. ", number);
+          counter = number + 1;
+        } else {
+          fprintf(fp, "- ");
+        }
+        if (item->has_checkbox) {
+          fprintf(fp, "[%c] ", item->checkbox_checked ? 'x' : ' ');
+        }
+        write_element_text_inline(fp, &item->text);
+        fprintf(fp, "\n");
+      }
+      break;
+    }
+    case T_QUOTE: {
+      const ElementQuote *quote = &elem->as.quote;
+      for (size_t q = 0; q < quote->item_count; q++) {
+        fprintf(fp, "> ");
+        write_element_text_inline(fp, &quote->items[q]);
+        fprintf(fp, "\n");
+      }
+      break;
+    }
+    case T_DIVIDER: {
+      fprintf(fp, "---\n");
       break;
     }
     case T_CODE: {
@@ -1135,6 +2476,13 @@ int json_to_markdown(const Document *doc, char **out_markdown) {
         }
       }
       fprintf(fp, "```\n");
+      break;
+    }
+    case T_SETTINGS: {
+      const ElementSettings *settings = &elem->as.settings;
+      const char *name = settings->name ? settings->name : "";
+      const char *value = settings->value ? settings->value : "";
+      fprintf(fp, "{%s}[%s]\n", name, value);
       break;
     }
 

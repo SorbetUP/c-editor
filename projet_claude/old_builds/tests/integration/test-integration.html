@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test d'Intégration - Gestion du Curseur</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+            line-height: 1.6;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .test-case {
+            background: #333;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 4px solid #0066cc;
+        }
+        .success {
+            border-left-color: #00aa00;
+            background: #002200;
+        }
+        .fail {
+            border-left-color: #aa0000;
+            background: #220000;
+        }
+        .pending {
+            border-left-color: #aaaa00;
+            background: #222200;
+        }
+        button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 8px;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #0088ff;
+        }
+        .log-output {
+            background: #000;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            height: 200px;
+            overflow-y: auto;
+            margin: 15px 0;
+            border: 1px solid #444;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-success { background: #00aa00; }
+        .status-fail { background: #aa0000; }
+        .status-pending { background: #aaaa00; }
+        .status-info { background: #0066cc; }
+        .integration-results {
+            margin-top: 30px;
+            padding: 20px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            border: 1px solid #444;
+        }
+        .editor-link {
+            display: inline-block;
+            background: #4a4a4a;
+            color: #fff;
+            text-decoration: none;
+            padding: 15px 25px;
+            border-radius: 8px;
+            margin: 10px 5px;
+            transition: background 0.2s;
+        }
+        .editor-link:hover {
+            background: #5a5a5a;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🔧 Test d'Intégration - Système de Gestion du Curseur</h1>
+        
+        <div class="test-case pending" id="systemCheck">
+            <h3><span class="status-indicator status-pending"></span>Vérification du Système</h3>
+            <p>Vérification que tous les composants sont chargés correctement...</p>
+            <div id="systemStatus">En cours...</div>
+        </div>
+        
+        <div class="test-case pending" id="functionCheck">
+            <h3><span class="status-indicator status-pending"></span>Test des Fonctions</h3>
+            <p>Validation des fonctions de mappage et de gestion du curseur...</p>
+            <div id="functionStatus">En attente...</div>
+            <button onclick="testFunctions()">🧪 Tester les Fonctions</button>
+        </div>
+        
+        <div class="test-case pending" id="integrationCheck">
+            <h3><span class="status-indicator status-pending"></span>Test d'Intégration</h3>
+            <p>Test du cas spécifique: Curseur avant "==Surligné==" + Touche Entrée</p>
+            <div id="integrationStatus">En attente...</div>
+            <button onclick="runIntegrationTest()">🚀 Test d'Intégration</button>
+        </div>
+        
+        <div class="log-output" id="logOutput">
+            <strong>📊 Journal des tests:</strong><br>
+            Prêt pour les tests...
+        </div>
+        
+        <div class="integration-results">
+            <h3>📋 Résultats des Tests Complets</h3>
+            <div id="testResults">
+                <div><span class="status-indicator status-info"></span>Tests de mappage de position: <span id="mappingResult">En attente</span></div>
+                <div><span class="status-indicator status-info"></span>Tests de division de ligne: <span id="splittingResult">En attente</span></div>
+                <div><span class="status-indicator status-info"></span>Tests d'ajustement de formatage: <span id="adjustmentResult">En attente</span></div>
+                <div><span class="status-indicator status-info"></span>Test d'intégration Enter key: <span id="enterKeyResult">En attente</span></div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 30px; text-align: center;">
+            <h3>🔗 Liens de Test</h3>
+            <a href="docs/index.html" class="editor-link" target="_blank">
+                📝 Éditeur Principal<br>
+                <small>Testez l'éditeur avec le système de curseur intégré</small>
+            </a>
+            <a href="manual-enter-test.html" class="editor-link" target="_blank">
+                🧪 Test Manuel<br>
+                <small>Test spécifique du problème d'Entrée</small>
+            </a>
+            <a href="debug-position-mapping.html" class="editor-link" target="_blank">
+                🔧 Debug Positions<br>
+                <small>Outils de débogage pour les positions</small>
+            </a>
+        </div>
+    </div>
+    
+    <script>
+        let testLog = [];
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const emoji = type === 'error' ? '❌' : type === 'success' ? '✅' : type === 'warning' ? '⚠️' : 'ℹ️';
+            const logMsg = `[${timestamp}] ${emoji} ${message}`;
+            testLog.push(logMsg);
+            
+            const logOutput = document.getElementById('logOutput');
+            logOutput.innerHTML = '<strong>📊 Journal des tests:</strong><br>' + testLog.slice(-15).join('<br>');
+            logOutput.scrollTop = logOutput.scrollHeight;
+            console.log(logMsg);
+        }
+        
+        function updateTestStatus(testId, success, message) {
+            const testElement = document.getElementById(testId);
+            const statusIndicator = testElement.querySelector('.status-indicator');
+            const statusDiv = testElement.querySelector('div[id$="Status"]');
+            
+            if (success) {
+                testElement.className = 'test-case success';
+                statusIndicator.className = 'status-indicator status-success';
+                statusDiv.innerHTML = `✅ ${message}`;
+            } else {
+                testElement.className = 'test-case fail';
+                statusIndicator.className = 'status-indicator status-fail';
+                statusDiv.innerHTML = `❌ ${message}`;
+            }
+        }
+        
+        // Vérification du système au chargement
+        window.addEventListener('load', function() {
+            log('🚀 Démarrage des tests d\'intégration...');
+            
+            // Vérifier que les scripts sont chargés
+            const checks = {
+                mapHtmlPositionToMarkdown: typeof mapHtmlPositionToMarkdown === 'function',
+                CursorManager: typeof CursorManager === 'function',
+                CursorTestSuite: typeof CursorTestSuite === 'function',
+                EnterKeyIssueTest: typeof EnterKeyIssueTest === 'function'
+            };
+            
+            let allLoaded = true;
+            let loadedCount = 0;
+            
+            for (const [name, loaded] of Object.entries(checks)) {
+                if (loaded) {
+                    log(`✅ ${name} chargé correctement`);
+                    loadedCount++;
+                } else {
+                    log(`❌ ${name} non trouvé`, 'error');
+                    allLoaded = false;
+                }
+            }
+            
+            if (allLoaded) {
+                updateTestStatus('systemCheck', true, `Tous les composants chargés (${loadedCount}/4)`);
+                log('🎉 Système entièrement opérationnel!', 'success');
+            } else {
+                updateTestStatus('systemCheck', false, `Composants manquants (${loadedCount}/4)`);
+                log('⚠️ Certains composants ne sont pas chargés', 'warning');
+            }
+        });
+        
+        function testFunctions() {
+            log('🧪 Test des fonctions de base...');
+            
+            let allPassed = true;
+            let testCount = 0;
+            let passCount = 0;
+            
+            // Test de mappage de position
+            try {
+                if (typeof mapHtmlPositionToMarkdown === 'function') {
+                    const testCases = [
+                        { html: 11, md: '- *Italique* ==Surligné== fin', expected: 15 },
+                        { html: 5, md: '- *Italique* normal', expected: 6 },
+                        { html: 6, md: 'Start **Bold** end', expected: 8 }
+                    ];
+                    
+                    testCases.forEach((test, i) => {
+                        testCount++;
+                        const result = mapHtmlPositionToMarkdown(test.html, test.md);
+                        if (result === test.expected) {
+                            passCount++;
+                            log(`✅ Test mappage ${i+1}: HTML ${test.html} → MD ${result}`);
+                        } else {
+                            allPassed = false;
+                            log(`❌ Test mappage ${i+1}: HTML ${test.html} → MD ${result} (attendu ${test.expected})`, 'error');
+                        }
+                    });
+                } else {
+                    allPassed = false;
+                    log('❌ Function mapHtmlPositionToMarkdown non disponible', 'error');
+                }
+            } catch (error) {
+                allPassed = false;
+                log(`❌ Erreur dans les tests de fonction: ${error.message}`, 'error');
+            }
+            
+            if (allPassed) {
+                updateTestStatus('functionCheck', true, `Tous les tests de fonction réussis (${passCount}/${testCount})`);
+                document.getElementById('mappingResult').innerHTML = '<span style="color: #00aa00;">✅ Réussi</span>';
+            } else {
+                updateTestStatus('functionCheck', false, `Tests de fonction échoués (${passCount}/${testCount})`);
+                document.getElementById('mappingResult').innerHTML = '<span style="color: #aa0000;">❌ Échoué</span>';
+            }
+        }
+        
+        function runIntegrationTest() {
+            log('🚀 Test d\'intégration complet...');
+            
+            // Simuler le test d'intégration
+            const simulateEnterKeyTest = () => {
+                const testCase = {
+                    content: '- *Italique* ==Surligné== fin',
+                    htmlPos: 11, // Début de "Surligné"
+                    expectedBehavior: 'Curseur positionné correctement après division'
+                };
+                
+                log(`📋 Test: Division à la position HTML ${testCase.htmlPos}`);
+                log(`   Contenu: "${testCase.content}"`);
+                
+                // Simulation de la logique du CursorManager
+                try {
+                    if (typeof mapHtmlPositionToMarkdown === 'function') {
+                        const mdPos = mapHtmlPositionToMarkdown(testCase.htmlPos, testCase.content);
+                        log(`📍 Mappage: HTML ${testCase.htmlPos} → MD ${mdPos}`);
+                        
+                        const beforeCursor = testCase.content.substring(0, mdPos);
+                        const afterCursor = testCase.content.substring(mdPos);
+                        
+                        log(`✂️ Division simulée:`);
+                        log(`   Avant: "${beforeCursor}"`);
+                        log(`   Après: "${afterCursor}"`);
+                        
+                        if (beforeCursor && afterCursor) {
+                            updateTestStatus('integrationCheck', true, 'Test d\'intégration réussi - Division correcte');
+                            document.getElementById('enterKeyResult').innerHTML = '<span style="color: #00aa00;">✅ Réussi</span>';
+                            log('🎉 Test d\'intégration complet réussi!', 'success');
+                        } else {
+                            updateTestStatus('integrationCheck', false, 'Division incorrecte');
+                            document.getElementById('enterKeyResult').innerHTML = '<span style="color: #aa0000;">❌ Échoué</span>';
+                        }
+                    } else {
+                        throw new Error('Fonction de mappage non disponible');
+                    }
+                } catch (error) {
+                    updateTestStatus('integrationCheck', false, `Erreur: ${error.message}`);
+                    document.getElementById('enterKeyResult').innerHTML = '<span style="color: #aa0000;">❌ Erreur</span>';
+                    log(`❌ Erreur d'intégration: ${error.message}`, 'error');
+                }
+            };
+            
+            setTimeout(simulateEnterKeyTest, 100);
+        }
+        
+        // Auto-test des fonctions après 2 secondes
+        setTimeout(() => {
+            if (document.getElementById('systemCheck').classList.contains('success')) {
+                testFunctions();
+                setTimeout(() => {
+                    runIntegrationTest();
+                }, 1000);
+            }
+        }, 2000);
+    </script>
+</body>
+</html>

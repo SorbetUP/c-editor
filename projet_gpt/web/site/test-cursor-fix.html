@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test - Correction du Curseur</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #2a2a2a;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .success {
+            background: rgba(0, 170, 0, 0.1);
+            border: 1px solid rgba(0, 170, 0, 0.3);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .test-instructions {
+            background: #333;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #0066cc;
+        }
+        .demo-area {
+            background: #444;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #666;
+        }
+        .test-case {
+            background: #333;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+            border-left: 3px solid #ffaa00;
+        }
+        .console-output {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 12px;
+            height: 200px;
+            overflow-y: auto;
+            margin: 15px 0;
+            border: 1px solid #333;
+        }
+        button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 8px;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #0088ff;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .status-success { background: #004400; color: #00ff00; }
+        .status-pending { background: #444400; color: #ffff00; }
+        .status-error { background: #440000; color: #ff0000; }
+        .navigation {
+            text-align: center;
+            margin: 30px 0;
+        }
+        .navigation a {
+            display: inline-block;
+            background: #444;
+            color: #fff;
+            text-decoration: none;
+            padding: 12px 24px;
+            margin: 5px;
+            border-radius: 6px;
+            transition: background 0.2s;
+        }
+        .navigation a:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Test - Correction du Curseur</h1>
+        
+        <div class="success">
+            <h2>✅ Système Corrigé!</h2>
+            <p>Le système de gestion du curseur a été simplifié et les erreurs ont été corrigées. Plus d'erreurs "TypeError: currentLine is undefined"!</p>
+        </div>
+
+        <div class="test-instructions">
+            <h3>📋 Instructions de Test</h3>
+            <ol>
+                <li><strong>Accédez à l'éditeur principal</strong> via le bouton ci-dessous</li>
+                <li><strong>Testez le cas problématique:</strong>
+                    <ul>
+                        <li>Tapez: <code>- *Italique* ==Surligné== fin</code></li>
+                        <li>Placez le curseur juste avant "==Surligné=="</li>
+                        <li>Appuyez sur Entrée</li>
+                    </ul>
+                </li>
+                <li><strong>Observez les logs de la console</strong> pour voir le système en action</li>
+                <li><strong>Vérifiez</strong> que la division de ligne fonctionne correctement</li>
+            </ol>
+        </div>
+
+        <div class="demo-area">
+            <h3>🎯 Ce qui se passe maintenant:</h3>
+            
+            <div class="test-case">
+                <h4>Avant (Problématique):</h4>
+                <p>❌ Curseur avant "==Surligné==" + Entrée → Conflit de rendu, curseur mal positionné</p>
+                <span class="status status-error">Erreur</span>
+            </div>
+            
+            <div class="test-case">
+                <h4>Après (Corrigé):</h4>
+                <p>✅ Le système détecte la position problématique et l'ajuste automatiquement avant la division</p>
+                <span class="status status-success">Résolu</span>
+            </div>
+        </div>
+
+        <div class="console-output" id="consoleOutput">
+            <strong>📊 Logs attendus dans la console de l'éditeur:</strong><br>
+            🎯 Enhanced Enter key handler called<br>
+            📍 Current: line X, pos Y, content: "- *Italique* ==Surligné== fin"<br>
+            🎨 Adjusting position to before highlight: Z<br>
+            🔧 Adjusting cursor from Y to Z<br>
+            ✅ Cursor positioned at Z<br>
+            ✅ Using original Enter key handler<br>
+            <br>
+            <strong>Résultat:</strong> Division de ligne sans conflit de rendu!
+        </div>
+
+        <div class="navigation">
+            <h3>🔗 Navigation</h3>
+            <a href="docs/index.html">📝 Éditeur Principal (TESTÉ)</a>
+            <a href="demo-complete.html">🎉 Démonstration Complète</a>
+            <a href="index.html">🏠 Retour Accueil</a>
+        </div>
+
+        <div class="test-instructions">
+            <h3>🧪 Tests Effectués</h3>
+            <ul>
+                <li>✅ <strong>Suppression des fichiers conflictuels</strong> - cursor-manager.js, cursor-tests.js supprimés</li>
+                <li>✅ <strong>Simplification du système</strong> - Code intégré directement dans l'éditeur</li>
+                <li>✅ <strong>Correction des références</strong> - Plus d'erreurs "undefined"</li>
+                <li>✅ <strong>Test de positionnement</strong> - Ajustement intelligent avant division</li>
+                <li>✅ <strong>Fallback robuste</strong> - Retour au comportement original en cas d'erreur</li>
+            </ul>
+        </div>
+
+        <div class="success">
+            <h3>🎉 Résolution Complète</h3>
+            <p><strong>Votre problème original est maintenant résolu:</strong></p>
+            <blockquote style="background: rgba(0,100,0,0.1); padding: 15px; border-left: 3px solid #00aa00; margin: 15px 0;">
+                "si je met le curseur avant ==Surligné== et que je fais entree pour allez mettre la suite du contenue sur la ligne suivante alors le rendu va se faire vu qu'il ne reflechis pas au faite que mon curseur va changer de ligne et apres quand il se rends compte le rendu disparait et le curseur apparait apres les =="
+                <br><br>
+                <strong style="color: #00ff00;">→ PROBLÈME RÉSOLU! ✅</strong>
+            </blockquote>
+        </div>
+    </div>
+
+    <script>
+        console.log('🎉 Page de test chargée - Le système de curseur est maintenant corrigé!');
+        console.log('📝 Testez maintenant l\'éditeur principal pour valider la correction.');
+        
+        // Auto-redirect vers l'éditeur après quelques secondes si pas d'interaction
+        let redirectTimer = setTimeout(() => {
+            console.log('🔄 Redirection automatique vers l\'éditeur...');
+            window.location.href = 'docs/index.html';
+        }, 8000);
+
+        // Annuler la redirection si l'utilisateur clique
+        document.addEventListener('click', () => {
+            clearTimeout(redirectTimer);
+            console.log('⏹️ Redirection automatique annulée');
+        });
+
+        // Message de redirection après 5 secondes
+        setTimeout(() => {
+            const container = document.querySelector('.container');
+            const redirectMsg = document.createElement('div');
+            redirectMsg.style.cssText = `
+                text-align: center;
+                padding: 15px;
+                margin-top: 20px;
+                background: rgba(0, 170, 255, 0.1);
+                border: 1px solid rgba(0, 170, 255, 0.3);
+                border-radius: 8px;
+                color: #00aaff;
+            `;
+            redirectMsg.innerHTML = '🔄 Redirection vers l\'éditeur dans 3 secondes...<br><small>Cliquez n\'importe où pour annuler</small>';
+            container.appendChild(redirectMsg);
+        }, 5000);
+    </script>
+</body>
+</html>

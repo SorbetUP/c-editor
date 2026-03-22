@@ -1,0 +1,26 @@
+name: c_editor_web
+description: A simple web editor for C Markdown using Flutter
+version: 1.0.0+1
+publish_to: 'none'
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  js: ^0.6.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
+  
+  # Assets for WASM
+  assets:
+    - web/editor.wasm
+    - web/editor.js

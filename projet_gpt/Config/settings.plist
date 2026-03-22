@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>autoFocusSearch</key>
+	<true/>
+	<key>autoLoadLastVault</key>
+	<true/>
+	<key>autoSave</key>
+	<true/>
+	<key>autoSaveInterval</key>
+	<integer>0</integer>
+	<key>caseSensitiveSearch</key>
+	<false/>
+	<key>currentVaultPath</key>
+	<string>/Users/sorbet/.elephantnotes/test_vault</string>
+	<key>defaultFont</key>
+	<string>Helvetica</string>
+	<key>defaultFontSize</key>
+	<real>14</real>
+	<key>defaultVaultPath</key>
+	<string>/Users/sorbet/.elephantnotes/test_vault</string>
+	<key>enableAdvancedSearch</key>
+	<true/>
+	<key>enableFileLogging</key>
+	<true/>
+	<key>enableVersionControl</key>
+	<false/>
+	<key>lastWindowFrame</key>
+	<string>{{100, 100}, {1200, 800}}</string>
+	<key>liveSearch</key>
+	<true/>
+	<key>logLevel</key>
+	<integer>0</integer>
+	<key>maxLogFiles</key>
+	<integer>5</integer>
+	<key>maxLogSize</key>
+	<integer>10485760</integer>
+	<key>preferredTheme</key>
+	<string>auto</string>
+	<key>recentVaults</key>
+	<array>
+		<string>/Users/sorbet/.elephantnotes/test_vault</string>
+	</array>
+	<key>rememberWindowPosition</key>
+	<true/>
+	<key>searchDelayMs</key>
+	<integer>300</integer>
+	<key>searchHistory</key>
+	<array/>
+	<key>showHiddenFiles</key>
+	<false/>
+	<key>showLineNumbers</key>
+	<false/>
+	<key>sidebarWidth</key>
+	<real>60</real>
+	<key>startMaximized</key>
+	<false/>
+	<key>undoLevels</key>
+	<integer>50</integer>
+</dict>
+</plist>

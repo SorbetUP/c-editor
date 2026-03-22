@@ -1,0 +1,73 @@
+# Makefile for TUI Editor with Cursor Management
+# Compiles the TUI test editor using our C cursor management library
+
+CC = clang
+CFLAGS = -std=c11 -Wall -Wextra -Werror -O2 -g
+
+# Source files
+CURSOR_SOURCES = src/cursor_manager.c
+EDITOR_SOURCES = src/editor.c src/markdown.c src/json.c
+TUI_SOURCES = src/tui_editor.c
+HEADERS = src/cursor_manager.h src/editor.h src/markdown.h src/json.h
+
+# Output
+TUI_EDITOR = tui_editor
+
+# Debug flags
+DEBUG_FLAGS = -DDEBUG_CURSOR=1
+RELEASE_FLAGS = -DDEBUG_CURSOR=0 -DNDEBUG
+
+.PHONY: all clean debug test run
+
+# Default target
+all: $(TUI_EDITOR)
+
+# Compile TUI editor
+$(TUI_EDITOR): $(CURSOR_SOURCES) $(EDITOR_SOURCES) $(TUI_SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) $(RELEASE_FLAGS) $(CURSOR_SOURCES) $(EDITOR_SOURCES) $(TUI_SOURCES) -o $(TUI_EDITOR)
+	@echo "✅ TUI Editor compiled: $(TUI_EDITOR)"
+
+# Debug version with verbose output
+debug:
+	$(CC) $(CFLAGS) $(DEBUG_FLAGS) -DDEBUG_VERBOSE=1 $(CURSOR_SOURCES) $(EDITOR_SOURCES) $(TUI_SOURCES) -o $(TUI_EDITOR)_debug
+	@echo "✅ Debug TUI Editor compiled: $(TUI_EDITOR)_debug"
+
+# Clean build artifacts
+clean:
+	rm -f $(TUI_EDITOR) $(TUI_EDITOR)_debug
+	rm -f *.o
+	@echo "🧹 Clean completed"
+
+# Run the TUI editor
+run: $(TUI_EDITOR)
+	@echo "🚀 Starting TUI Editor - Press Ctrl+Q to quit"
+	./$(TUI_EDITOR)
+
+# Test the cursor management functions
+test: debug
+	@echo "🧪 Running TUI Editor in debug mode"
+	./$(TUI_EDITOR)_debug
+
+# Help
+help:
+	@echo "TUI Editor Build System"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all      - Build TUI editor (default)"
+	@echo "  debug    - Build debug version with verbose output" 
+	@echo "  run      - Build and run TUI editor"
+	@echo "  test     - Build and run debug version"
+	@echo "  clean    - Remove build artifacts"
+	@echo "  help     - Show this help"
+	@echo ""
+	@echo "Usage:"
+	@echo "  make run     - Quick build and test"
+	@echo "  make test    - Debug version for detailed testing"
+	@echo ""
+	@echo "In the TUI editor:"
+	@echo "  - Arrow keys to move cursor"
+	@echo "  - Enter to split lines (with smart formatting)"
+	@echo "  - Backspace to merge lines (with smart formatting)"
+	@echo "  - Type text to insert characters"
+	@echo "  - Ctrl+Q to quit"
+	@echo "  - Status bar shows formatting context at cursor"

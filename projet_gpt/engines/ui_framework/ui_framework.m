@@ -20,9 +20,13 @@
 #import "ui_framework.h"
 #import "../editor/editor_abi.h"
 #import "../editor/editor.h"
+#include <ctype.h>
+#import <QuartzCore/QuartzCore.h>
 #include <string.h>
 
 static void ui_framework_layout_icons(UIFramework* framework);
+static void ui_framework_update_editor_intrinsics(UIFramework* framework, CGFloat editorWidth);
+static CGFloat ui_framework_sidebar_button_height(const UIFramework* framework);
 
 // ==========================================
 // MARK: - Local Type Definitions
@@ -62,6 +66,8 @@ static const NSTimeInterval UI_MARKDOWN_UPDATE_INTERVAL = 0.1;
 /// Configuration par défaut pour l'éditeur
 static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
 
+static NSString * const ENNoteLinkAttribute = @"ENNoteLink";
+
 // ==========================================
 // MARK: - MarkdownEditor Interface & Implementation
 // ==========================================
@@ -75,7 +81,7 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
  * - Gestion des couleurs et polices pour le code
  * - Support des thèmes sombre/clair
  */
-@interface MarkdownEditor : NSTextView {
+@interface MarkdownEditor : NSTextView <NSTextViewDelegate> {
     NSInteger currentLine;
     NSTimer *timer;
     BOOL isRendering;
@@ -136,7 +142,12 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
     [self setRichText:YES];
     [self setAllowsUndo:YES];
     [self setString:@""];
-    
+    [self setDelegate:self];
+    NSDictionary *linkAttributes = @{ NSForegroundColorAttributeName: [NSColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0],
+                                      NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle),
+                                      NSCursorAttributeName: [NSCursor pointingHandCursor] };
+    [self setLinkTextAttributes:linkAttributes];
+
     // Écouter les changements de sélection pour détecter les mouvements de curseur
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(selectionDidChange:)
@@ -171,6 +182,51 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
     }
 }
 
+
+- (BOOL)textView:(NSTextView *)textView clickedOnLink:(id)link atIndex:(NSUInteger)charIndex {
+    NSString *href = nil;
+    if ([link isKindOfClass:[NSURL class]]) {
+        href = [(NSURL *)link absoluteString];
+    } else if ([link isKindOfClass:[NSString class]]) {
+        href = (NSString *)link;
+    }
+
+    if (!href || [href length] == 0) {
+        return NO;
+    }
+
+    NSDictionary *attributes = [[textView textStorage] attributesAtIndex:charIndex effectiveRange:NULL];
+    BOOL isNoteLink = NO;
+    id noteAttribute = attributes[ENNoteLinkAttribute];
+    if ([noteAttribute respondsToSelector:@selector(boolValue)]) {
+        isNoteLink = [noteAttribute boolValue];
+    }
+
+    if (!isNoteLink) {
+        if (![href containsString:@"://"] || [href hasPrefix:@"file://"]) {
+            isNoteLink = YES;
+        }
+    }
+
+    if (isNoteLink) {
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"ENMarkdownNoteLinkClicked"
+                                                            object:self
+                                                          userInfo:@{ @"path": href }];
+        return YES;
+    }
+
+    if ([href hasPrefix:@"www."]) {
+        href = [NSString stringWithFormat:@"https://%@", href];
+    }
+
+    NSURL *url = [NSURL URLWithString:href];
+    if (url) {
+        [[NSWorkspace sharedWorkspace] openURL:url];
+        return YES;
+    }
+
+    return NO;
+}
 
 /**
  * @brief Obtient le numéro de ligne du curseur en utilisant la librairie C cursor
@@ -557,7 +613,12 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
         
     } else if ([type isEqualToString:@"link"]) {
         NSString *url = element[@"url"] ?: element[@"href"];
-        [self formatAsLink:text range:range url:url];
+        BOOL noteLink = NO;
+        id noteFlag = element[@"note_link"] ?: element[@"noteLink"];
+        if ([noteFlag respondsToSelector:@selector(boolValue)]) {
+            noteLink = [noteFlag boolValue];
+        }
+        [self formatAsLink:text range:range url:url noteLink:noteLink];
         NSLog(@"🎯 Link appliqué à %@ (URL: %@)", NSStringFromRange(range), url);
         return YES;
         
@@ -575,6 +636,11 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
         BOOL isOrdered = [element[@"ordered"] boolValue];
         [self formatAsListItem:text range:range ordered:isOrdered];
         NSLog(@"🎯 List item appliqué à %@", NSStringFromRange(range));
+        return YES;
+        
+    } else if ([type isEqualToString:@"table"]) {
+        [self formatAsTable:text range:range element:element];
+        NSLog(@"🎯 Table appliqué à %@", NSStringFromRange(range));
         return YES;
         
     } else {
@@ -602,17 +668,25 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
  * @param range Range à formater
  * @param url URL du lien
  */
-- (void)formatAsLink:(NSMutableAttributedString *)text range:(NSRange)range url:(NSString *)url {
+- (void)formatAsLink:(NSMutableAttributedString *)text
+               range:(NSRange)range
+                 url:(NSString *)url
+            noteLink:(BOOL)noteLink {
     NSMutableDictionary *attributes = [@{
-        NSForegroundColorAttributeName: [NSColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0], // Bleu
-        NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle)
+        NSForegroundColorAttributeName: [NSColor colorWithRed:0.0 green:0.5 blue:1.0 alpha:1.0],
+        NSUnderlineStyleAttributeName: @(NSUnderlineStyleSingle),
+        NSCursorAttributeName: [NSCursor pointingHandCursor]
     } mutableCopy];
-    
+
     if (url) {
         attributes[NSLinkAttributeName] = url;
         attributes[NSToolTipAttributeName] = url;
     }
-    
+
+    if (noteLink) {
+        attributes[ENNoteLinkAttribute] = @YES;
+    }
+
     [text addAttributes:attributes range:range];
 }
 
@@ -642,25 +716,778 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
 }
 
 /**
- * @brief Formate un range comme élément de liste
+ * @brief Formate un range comme élément de liste avec rendu moderne inspiré du web
  * @param text Texte à modifier
  * @param range Range à formater
  * @param ordered YES pour liste numérotée, NO pour liste à puces
  */
 - (void)formatAsListItem:(NSMutableAttributedString *)text range:(NSRange)range ordered:(BOOL)ordered {
-    NSColor *listColor = ordered ? 
-        [NSColor colorWithRed:0.9 green:0.7 blue:0.3 alpha:1.0] : // Orange pour numérotée
-        [NSColor colorWithRed:0.7 green:0.9 blue:0.7 alpha:1.0];   // Vert pour puces
-    
-    [text addAttributes:@{
-        NSForegroundColorAttributeName: listColor,
-        NSFontAttributeName: [NSFont systemFontOfSize:UI_DEFAULT_EDITOR_FONT_SIZE weight:NSFontWeightMedium]
-    } range:range];
+    [self formatAsAdvancedListItem:text range:range ordered:ordered level:0 index:1];
 }
 
+/**
+ * @brief Formate un élément de liste avec support multi-niveaux et styling moderne
+ * @param text Texte à modifier
+ * @param range Range à formater  
+ * @param ordered YES pour liste numérotée, NO pour liste à puces
+ * @param level Niveau d'indentation (0 = racine, 1 = sous-liste, etc.)
+ * @param index Index de l'élément pour les listes numérotées
+ */
+- (void)formatAsAdvancedListItem:(NSMutableAttributedString *)text 
+                           range:(NSRange)range 
+                         ordered:(BOOL)ordered 
+                           level:(NSInteger)level 
+                           index:(NSInteger)index {
+    
+    if (range.location >= [text length] || range.length == 0) {
+        return;
+    }
+    
+    NSString *originalText = [[text string] substringWithRange:range];
+    NSMutableString *formattedText = [[NSMutableString alloc] init];
+    
+    // === PHASE 1: Calculer l'indentation basée sur le niveau ===
+    NSString *indentationPrefix = @"";
+    for (NSInteger i = 0; i < level; i++) {
+        indentationPrefix = [indentationPrefix stringByAppendingString:@"    "]; // 4 espaces par niveau
+    }
+    
+    // === PHASE 2: Générer le marqueur de liste selon le type et niveau ===
+    NSString *listMarker;
+    NSColor *markerColor;
+    NSColor *contentColor;
+    
+    if (ordered) {
+        // Liste numérotée avec différents styles selon le niveau
+        switch (level % 3) {
+            case 0: // Niveau racine: 1. 2. 3.
+                listMarker = [NSString stringWithFormat:@"%ld. ", (long)index];
+                markerColor = [NSColor colorWithRed:0.2 green:0.4 blue:0.8 alpha:1.0];
+                break;
+            case 1: // Premier sous-niveau: a. b. c.
+                listMarker = [NSString stringWithFormat:@"%c. ", (char)('a' + (index - 1) % 26)];
+                markerColor = [NSColor colorWithRed:0.6 green:0.4 blue:0.8 alpha:1.0];
+                break;
+            case 2: // Deuxième sous-niveau: i. ii. iii.
+                listMarker = [self romanNumeralForNumber:index];
+                markerColor = [NSColor colorWithRed:0.8 green:0.4 blue:0.4 alpha:1.0];
+                break;
+        }
+        contentColor = [NSColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
+    } else {
+        // Liste à puces avec différents symboles selon le niveau
+        switch (level % 4) {
+            case 0: // Niveau racine: bullet plein
+                listMarker = @"● ";
+                markerColor = [NSColor colorWithRed:0.3 green:0.7 blue:0.3 alpha:1.0];
+                break;
+            case 1: // Premier sous-niveau: bullet vide
+                listMarker = @"○ ";
+                markerColor = [NSColor colorWithRed:0.5 green:0.7 blue:0.5 alpha:1.0];
+                break;
+            case 2: // Deuxième sous-niveau: carré
+                listMarker = @"▪ ";
+                markerColor = [NSColor colorWithRed:0.7 green:0.5 blue:0.7 alpha:1.0];
+                break;
+            case 3: // Troisième sous-niveau: tiret
+                listMarker = @"– ";
+                markerColor = [NSColor colorWithRed:0.6 green:0.6 blue:0.8 alpha:1.0];
+                break;
+        }
+        contentColor = [NSColor colorWithRed:0.2 green:0.2 blue:0.2 alpha:1.0];
+    }
+    
+    // === PHASE 3: Construire le texte formaté ===
+    // Nettoyer le texte original des marqueurs markdown existants
+    NSString *cleanContent = [self cleanMarkdownListMarkers:originalText];
+    [formattedText appendFormat:@"%@%@%@", indentationPrefix, listMarker, cleanContent];
+    
+    // === PHASE 4: Remplacer le texte et appliquer le styling ===
+    [text replaceCharactersInRange:range withString:formattedText];
+    
+    // Nouveau range après remplacement
+    NSRange newRange = NSMakeRange(range.location, [formattedText length]);
+    NSRange markerRange = NSMakeRange(range.location + [indentationPrefix length], [listMarker length]);
+    NSRange contentRange = NSMakeRange(markerRange.location + markerRange.length, [cleanContent length]);
+    
+    // === PHASE 5: Styling du marqueur ===
+    if (markerRange.location + markerRange.length <= [text length]) {
+        [text addAttributes:@{
+            NSForegroundColorAttributeName: markerColor,
+            NSFontAttributeName: [NSFont boldSystemFontOfSize:UI_DEFAULT_EDITOR_FONT_SIZE],
+            NSParagraphStyleAttributeName: [self createListParagraphStyleWithLevel:level]
+        } range:markerRange];
+    }
+    
+    // === PHASE 6: Styling du contenu ===
+    if (contentRange.location + contentRange.length <= [text length]) {
+        [text addAttributes:@{
+            NSForegroundColorAttributeName: contentColor,
+            NSFontAttributeName: [NSFont systemFontOfSize:UI_DEFAULT_EDITOR_FONT_SIZE weight:NSFontWeightRegular],
+            NSParagraphStyleAttributeName: [self createListParagraphStyleWithLevel:level]
+        } range:contentRange];
+    }
+    
+    NSLog(@"📝 Liste formatée: %@ (niveau %ld) -> %@", ordered ? @"numérotée" : @"puces", (long)level, listMarker);
+}
 
+/**
+ * @brief Génère un chiffre romain pour les listes numérotées de niveau 3
+ * @param number Nombre à convertir
+ * @return NSString contenant le chiffre romain suivi d'un point
+ */
+- (NSString *)romanNumeralForNumber:(NSInteger)number {
+    NSArray *romanNumerals = @[@"i", @"ii", @"iii", @"iv", @"v", @"vi", @"vii", @"viii", @"ix", @"x",
+                              @"xi", @"xii", @"xiii", @"xiv", @"xv", @"xvi", @"xvii", @"xviii", @"xix", @"xx"];
+    
+    if (number > 0 && number <= [romanNumerals count]) {
+        return [NSString stringWithFormat:@"%@. ", romanNumerals[number - 1]];
+    }
+    return [NSString stringWithFormat:@"%ld. ", (long)number]; // Fallback aux nombres normaux
+}
 
+/**
+ * @brief Nettoie les marqueurs Markdown des listes du texte
+ * @param text Texte contenant potentiellement des marqueurs Markdown
+ * @return Texte nettoyé
+ */
+- (NSString *)cleanMarkdownListMarkers:(NSString *)text {
+    NSString *cleaned = text;
+    
+    // Supprimer les marqueurs de liste Markdown
+    NSRegularExpression *unorderedRegex = [NSRegularExpression 
+        regularExpressionWithPattern:@"^\\s*[-*+]\\s+" 
+        options:NSRegularExpressionAnchorsMatchLines 
+        error:nil];
+    cleaned = [unorderedRegex stringByReplacingMatchesInString:cleaned
+                                                       options:0
+                                                         range:NSMakeRange(0, [cleaned length])
+                                                  withTemplate:@""];
+    
+    NSRegularExpression *orderedRegex = [NSRegularExpression 
+        regularExpressionWithPattern:@"^\\s*\\d+\\.\\s+" 
+        options:NSRegularExpressionAnchorsMatchLines 
+        error:nil];
+    cleaned = [orderedRegex stringByReplacingMatchesInString:cleaned
+                                                     options:0
+                                                       range:NSMakeRange(0, [cleaned length])
+                                                withTemplate:@""];
+    
+    return [cleaned stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
 
+/**
+ * @brief Crée un style de paragraphe adapté aux listes avec indentation
+ * @param level Niveau d'indentation de la liste
+ * @return NSParagraphStyle configuré pour les listes
+ */
+- (NSParagraphStyle *)createListParagraphStyleWithLevel:(NSInteger)level {
+    NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
+    
+    // Indentation basée sur le niveau (16 points par niveau)
+    CGFloat indent = level * 16.0;
+    [paragraphStyle setFirstLineHeadIndent:indent];
+    [paragraphStyle setHeadIndent:indent + 20.0]; // Décalage pour le contenu
+    
+    // Espacement entre les éléments de liste
+    [paragraphStyle setParagraphSpacing:4.0];
+    [paragraphStyle setParagraphSpacingBefore:2.0];
+    
+    // Alignement et interligne
+    [paragraphStyle setAlignment:NSTextAlignmentLeft];
+    [paragraphStyle setLineSpacing:2.0];
+    [paragraphStyle setLineHeightMultiple:1.2];
+    
+    return paragraphStyle;
+}
+
+/**
+ * @brief Structure pour spécifier les colonnes d'un tableau
+ */
+typedef struct {
+    NSInteger widthChars;
+    NSTextAlignment alignment;
+} ColumnSpec;
+
+/**
+ * @brief Extrait le texte d'une cellule JSON pour l'estimation de largeur
+ * @param cellArray Array JSON représentant une cellule
+ * @return Texte simple de la cellule
+ */
+- (NSString *)extractCellText:(NSArray *)cellArray {
+    if (!cellArray || [cellArray count] == 0) return @"";
+    
+    NSDictionary *cellData = cellArray[0];
+    if (!cellData) return @"";
+    
+    NSString *text = cellData[@"text"] ?: @"";
+    // Nettoyer le markdown (enlever **bold**, *italic*, etc.)
+    text = [text stringByReplacingOccurrencesOfString:@"**" withString:@""];
+    text = [text stringByReplacingOccurrencesOfString:@"*" withString:@""];
+    text = [text stringByReplacingOccurrencesOfString:@"`" withString:@""];
+    
+    return text;
+}
+
+/**
+ * @brief Calcule le schéma de colonnes optimal pour un tableau
+ * @param header Array des cellules d'en-tête
+ * @param rowsData Array des lignes de données
+ * @param alignments Array des alignements par colonne (optionnel)
+ * @return Array de ColumnSpec
+ */
+- (NSArray<NSValue *> *)calculateColumnSpecs:(NSArray *)header 
+                                        rows:(NSArray *)rowsData 
+                                  alignments:(NSArray *)alignments {
+    
+    NSInteger cols = [header count];
+    if (cols == 0) return @[];
+    
+    // Initialiser les largeurs minimales
+    NSMutableArray *widths = [[NSMutableArray alloc] init];
+    for (NSInteger i = 0; i < cols; i++) {
+        [widths addObject:@(8)]; // largeur minimale de 8 caractères
+    }
+    
+    // Mesurer l'en-tête
+    for (NSInteger col = 0; col < cols; col++) {
+        NSArray *headerCell = header[col];
+        NSString *headerText = [self extractCellText:headerCell];
+        NSInteger currentWidth = [widths[col] integerValue];
+        NSInteger headerWidth = [headerText length] + 2; // +2 pour padding
+        if (headerWidth > currentWidth) {
+            widths[col] = @(headerWidth);
+        }
+    }
+    
+    // Mesurer un échantillon des lignes (max 20 pour performance)
+    NSInteger sampleSize = MIN([rowsData count], 20);
+    for (NSInteger row = 0; row < sampleSize; row++) {
+        NSArray *rowArray = rowsData[row];
+        for (NSInteger col = 0; col < cols && col < [rowArray count]; col++) {
+            NSArray *cellArray = rowArray[col];
+            NSString *cellText = [self extractCellText:cellArray];
+            NSInteger currentWidth = [widths[col] integerValue];
+            NSInteger cellWidth = [cellText length] + 2; // +2 pour padding
+            if (cellWidth > currentWidth) {
+                widths[col] = @(cellWidth);
+            }
+        }
+    }
+    
+    // Limiter les largeurs (min: 8, max: 24 caractères)
+    NSMutableArray *specs = [[NSMutableArray alloc] init];
+    for (NSInteger col = 0; col < cols; col++) {
+        ColumnSpec spec;
+        spec.widthChars = MIN(24, MAX(8, [widths[col] integerValue]));
+        
+        // Déterminer l'alignement (si fourni)
+        spec.alignment = NSTextAlignmentLeft; // par défaut
+        if (alignments && col < [alignments count]) {
+            NSString *align = alignments[col];
+            if ([align isEqualToString:@"center"]) {
+                spec.alignment = NSTextAlignmentCenter;
+            } else if ([align isEqualToString:@"right"]) {
+                spec.alignment = NSTextAlignmentRight;
+            }
+        }
+        
+        [specs addObject:[NSValue valueWithBytes:&spec objCType:@encode(ColumnSpec)]];
+    }
+    
+    return specs;
+}
+
+/**
+ * @brief Crée les spécifications de colonnes à partir des largeurs pré-calculées du C engine
+ * @param preCalculatedWidths Largeurs calculées par le système ligne par ligne
+ * @param alignments Alignements par colonne (optionnel)
+ * @return Array de ColumnSpec pour rendu cohérent
+ */
+- (NSArray<NSValue *> *)createColumnSpecsFromWidths:(NSArray *)preCalculatedWidths
+                                          alignments:(NSArray *)alignments {
+    NSInteger cols = [preCalculatedWidths count];
+    NSMutableArray *specs = [[NSMutableArray alloc] init];
+    
+    for (NSInteger col = 0; col < cols; col++) {
+        ColumnSpec spec;
+        
+        // Utiliser les largeurs pré-calculées par le C engine
+        NSInteger calculatedWidth = [preCalculatedWidths[col] integerValue];
+        spec.widthChars = MAX(8, calculatedWidth + 2); // +2 pour padding, minimum 8
+        
+        // Déterminer l'alignement (si fourni)
+        spec.alignment = NSTextAlignmentLeft; // par défaut
+        if (alignments && col < [alignments count]) {
+            NSString *align = alignments[col];
+            if ([align isEqualToString:@"center"]) {
+                spec.alignment = NSTextAlignmentCenter;
+            } else if ([align isEqualToString:@"right"]) {
+                spec.alignment = NSTextAlignmentRight;
+            }
+        }
+        
+        [specs addObject:[NSValue valueWithBytes:&spec objCType:@encode(ColumnSpec)]];
+    }
+    
+    NSLog(@"📊 Spécifications créées à partir des largeurs C engine: %ld colonnes", (long)cols);
+    return specs;
+}
+
+/**
+ * @brief Formate une cellule selon sa spécification de colonne
+ * @param cellArray Données JSON de la cellule
+ * @param spec Spécification de la colonne
+ * @return Texte formaté de la cellule
+ */
+- (NSString *)formatCell:(NSArray *)cellArray withSpec:(ColumnSpec)spec {
+    NSString *cellText = [self extractCellText:cellArray];
+    
+    // Tronquer si trop long
+    if ([cellText length] > spec.widthChars - 2) {
+        cellText = [[cellText substringToIndex:spec.widthChars - 5] stringByAppendingString:@"..."];
+    }
+    
+    // Appliquer l'alignement avec padding
+    NSString *paddedText;
+    switch (spec.alignment) {
+        case NSTextAlignmentCenter: {
+            NSInteger totalPadding = spec.widthChars - [cellText length];
+            NSInteger leftPadding = totalPadding / 2;
+            NSInteger rightPadding = totalPadding - leftPadding;
+            
+            NSString *leftSpaces = [@"" stringByPaddingToLength:leftPadding withString:@" " startingAtIndex:0];
+            NSString *rightSpaces = [@"" stringByPaddingToLength:rightPadding withString:@" " startingAtIndex:0];
+            paddedText = [NSString stringWithFormat:@"%@%@%@", leftSpaces, cellText, rightSpaces];
+            break;
+        }
+        case NSTextAlignmentRight: {
+            NSInteger padding = spec.widthChars - [cellText length];
+            NSString *spaces = [@"" stringByPaddingToLength:padding withString:@" " startingAtIndex:0];
+            paddedText = [NSString stringWithFormat:@"%@%@", spaces, cellText];
+            break;
+        }
+        case NSTextAlignmentLeft:
+        default:
+            paddedText = [cellText stringByPaddingToLength:spec.widthChars withString:@" " startingAtIndex:0];
+            break;
+    }
+    
+    return paddedText;
+}
+
+/**
+ * @brief Génère les bordures Unicode pour une ligne
+ * @param specs Spécifications des colonnes
+ * @param position Position de la ligne (top, middle, bottom)
+ * @return Chaîne des bordures
+ */
+- (NSString *)generateBorderLine:(NSArray<NSValue *> *)specs position:(NSString *)position {
+    NSMutableString *border = [[NSMutableString alloc] init];
+    
+    // Caractères de bordure selon la position
+    NSString *left, *middle, *right, *horizontal;
+    if ([position isEqualToString:@"top"]) {
+        left = @"┌"; middle = @"┬"; right = @"┐"; horizontal = @"─";
+    } else if ([position isEqualToString:@"middle"]) {
+        left = @"├"; middle = @"┼"; right = @"┤"; horizontal = @"─";
+    } else { // bottom
+        left = @"└"; middle = @"┴"; right = @"┘"; horizontal = @"─";
+    }
+    
+    [border appendString:left];
+    
+    for (NSInteger col = 0; col < [specs count]; col++) {
+        ColumnSpec spec;
+        [specs[col] getValue:&spec];
+        
+        // Ajouter les caractères horizontaux
+        for (NSInteger i = 0; i < spec.widthChars; i++) {
+            [border appendString:horizontal];
+        }
+        
+        // Ajouter le connecteur (sauf pour la dernière colonne)
+        if (col < [specs count] - 1) {
+            [border appendString:middle];
+        }
+    }
+    
+    [border appendString:right];
+    return border;
+}
+
+/**
+ * @brief Génère une ligne de données du tableau
+ * @param rowData Array des cellules de la ligne (ou header)
+ * @param specs Spécifications des colonnes
+ * @return Chaîne formatée de la ligne
+ */
+- (NSString *)generateTableRow:(NSArray *)rowData withSpecs:(NSArray<NSValue *> *)specs {
+    NSMutableString *line = [[NSMutableString alloc] init];
+    [line appendString:@"│"];
+    
+    for (NSInteger col = 0; col < [specs count]; col++) {
+        ColumnSpec spec;
+        [specs[col] getValue:&spec];
+        
+        // Récupérer la cellule (ou cellule vide si pas assez de colonnes)
+        NSArray *cellArray = (col < [rowData count]) ? rowData[col] : @[];
+        NSString *formattedCell = [self formatCell:cellArray withSpec:spec];
+        
+        [line appendString:formattedCell];
+        [line appendString:@"│"];
+    }
+    
+    return line;
+}
+
+/**
+ * @brief Formate un range comme tableau Markdown avec rendu ligne par ligne cohérent
+ * @param text Texte à modifier
+ * @param range Range à formater
+ * @param element Dictionnaire contenant les informations du tableau
+ */
+- (void)formatAsTable:(NSMutableAttributedString *)text range:(NSRange)range element:(NSDictionary *)element {
+    // Récupérer les données du tableau depuis le JSON généré par le C engine
+    NSArray *header = element[@"header"];
+    NSArray *rowsData = element[@"rows"];
+    NSArray *alignments = element[@"align"]; // Alignements par colonne (optionnel)
+    
+    if (!header || !rowsData) {
+        NSLog(@"⚠️ Données de tableau manquantes (header ou rows), affichage markdown brut");
+        return;
+    }
+    
+    NSInteger cols = [header count];
+    if (cols == 0) {
+        NSLog(@"⚠️ Tableau sans colonnes, affichage markdown brut");
+        return;
+    }
+    
+    // === PHASE 1: Calculer le schéma de colonnes (une seule fois) ===
+    // Utiliser les largeurs calculées par le C engine si disponibles (nouveau système ligne par ligne)
+    NSArray *preCalculatedWidths = element[@"columnWidths"];
+    NSArray<NSValue *> *columnSpecs;
+    
+    if (preCalculatedWidths && [preCalculatedWidths count] == cols) {
+        NSLog(@"📊 Utilisation des largeurs pré-calculées du C engine pour rendu cohérent");
+        columnSpecs = [self createColumnSpecsFromWidths:preCalculatedWidths alignments:alignments];
+    } else {
+        NSLog(@"📊 Calcul dynamique des largeurs (mode compatibilité)");
+        columnSpecs = [self calculateColumnSpecs:header rows:rowsData alignments:alignments];
+    }
+    
+    // === PHASE 2: Générer le tableau ligne par ligne (cohérent) ===
+    NSMutableString *tableOutput = [[NSMutableString alloc] init];
+    
+    // Bordure supérieure
+    [tableOutput appendString:[self generateBorderLine:columnSpecs position:@"top"]];
+    [tableOutput appendString:@"\n"];
+    
+    // En-tête
+    [tableOutput appendString:[self generateTableRow:header withSpecs:columnSpecs]];
+    [tableOutput appendString:@"\n"];
+    
+    // Séparateur après en-tête
+    [tableOutput appendString:[self generateBorderLine:columnSpecs position:@"middle"]];
+    [tableOutput appendString:@"\n"];
+    
+    // Lignes de données (rendu ligne par ligne)
+    for (NSArray *rowData in rowsData) {
+        [tableOutput appendString:[self generateTableRow:rowData withSpecs:columnSpecs]];
+        [tableOutput appendString:@"\n"];
+    }
+    
+    // Bordure inférieure
+    [tableOutput appendString:[self generateBorderLine:columnSpecs position:@"bottom"]];
+    
+    // === PHASE 3: Intégration dans le texte ===
+    [text replaceCharactersInRange:range withString:tableOutput];
+    
+    // Style du tableau avec police monospace et couleurs
+    NSRange newRange = NSMakeRange(range.location, [tableOutput length]);
+    [text addAttributes:@{
+        NSForegroundColorAttributeName: [NSColor colorWithRed:0.2 green:0.4 blue:0.8 alpha:1.0],
+        NSFontAttributeName: [NSFont monospacedSystemFontOfSize:UI_DEFAULT_EDITOR_FONT_SIZE weight:NSFontWeightRegular],
+        NSBackgroundColorAttributeName: [NSColor colorWithRed:0.95 green:0.97 blue:1.0 alpha:1.0]
+    } range:newRange];
+    
+    NSLog(@"📊 Tableau cohérent rendu: %ld lignes × %ld colonnes avec largeurs optimales", 
+          (long)[rowsData count] + 1, (long)cols);
+}
+
+/**
+ * @brief Détecte et rend les tableaux markdown directement dans le texte
+ * @param text Le texte contenant potentiellement des tableaux markdown
+ * @return Le texte avec les tableaux rendus visuellement
+ */
+- (NSString *)renderMarkdownTables:(NSString *)text {
+    if (!text || [text length] == 0) {
+        return text;
+    }
+    
+    NSMutableString *result = [text mutableCopy];
+    NSError *error = nil;
+    
+    // Pattern pour détecter les tableaux markdown
+    NSString *tablePattern = @"(\\|[^\\n]*\\|\\n\\|[-:| ]+\\|\\n(?:\\|[^\\n]*\\|\\n?)+)";
+    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:tablePattern 
+                                                                           options:NSRegularExpressionDotMatchesLineSeparators 
+                                                                             error:&error];
+    
+    if (error) {
+        NSLog(@"⚠️ Erreur dans le regex de tableau: %@", error.localizedDescription);
+        return text;
+    }
+    
+    NSArray *matches = [regex matchesInString:result options:0 range:NSMakeRange(0, [result length])];
+    
+    // Traiter les matches en ordre inverse pour préserver les indices
+    for (NSTextCheckingResult *match in [matches reverseObjectEnumerator]) {
+        NSRange matchRange = [match range];
+        NSString *tableMarkdown = [result substringWithRange:matchRange];
+        NSString *renderedTable = [self convertMarkdownTableToVisual:tableMarkdown];
+        [result replaceCharactersInRange:matchRange withString:renderedTable];
+        NSLog(@"📊 Tableau markdown détecté et remplacé");
+    }
+    
+    return result;
+}
+
+/**
+ * @brief Parse les données d'un tableau markdown en structure de données
+ * @param markdownTable Le tableau markdown brut
+ * @return NSArray de NSArray contenant les données des cellules
+ */
+- (NSArray *)parseMarkdownTableData:(NSString *)markdownTable {
+    NSArray *lines = [markdownTable componentsSeparatedByString:@"\n"];
+    NSMutableArray *tableData = [[NSMutableArray alloc] init];
+    
+    for (NSString *line in lines) {
+        NSString *trimmedLine = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        
+        if ([trimmedLine length] == 0) continue;
+        
+        // Ignorer les lignes de séparation (contenant seulement |, -, : et espaces)
+        if ([trimmedLine rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"|:- "] invertedSet]].location == NSNotFound) {
+            continue;
+        }
+        
+        // Parser les cellules de la ligne
+        if ([trimmedLine hasPrefix:@"|"] && [trimmedLine hasSuffix:@"|"]) {
+            // Enlever les | du début et de la fin
+            NSString *content = [trimmedLine substringWithRange:NSMakeRange(1, [trimmedLine length] - 2)];
+            NSArray *cells = [content componentsSeparatedByString:@"|"];
+            
+            NSMutableArray *rowData = [[NSMutableArray alloc] init];
+            for (NSString *cell in cells) {
+                NSString *cleanCell = [cell stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                [rowData addObject:cleanCell];
+            }
+            
+            [tableData addObject:rowData];
+        }
+    }
+    
+    return tableData;
+}
+
+/**
+ * @brief Créer une NSTextAttachment avec un tableau visuel réel
+ * @param tableData Les données du tableau parsées
+ * @return NSTextAttachment contenant une vue tableau
+ */
+- (NSTextAttachment *)createVisualTableAttachment:(NSArray *)tableData {
+    if (!tableData || [tableData count] == 0) return nil;
+    
+    // Calculer les dimensions du tableau
+    NSInteger numRows = [tableData count];
+    NSInteger numCols = 0;
+    for (NSArray *row in tableData) {
+        if ([row count] > numCols) numCols = [row count];
+    }
+    
+    CGFloat cellWidth = 120.0;
+    CGFloat cellHeight = 30.0;
+    CGFloat tableWidth = numCols * cellWidth;
+    CGFloat tableHeight = numRows * cellHeight;
+    
+    // Créer une image avec Core Graphics pour dessiner le tableau
+    NSImage *tableImage = [[NSImage alloc] initWithSize:NSMakeSize(tableWidth, tableHeight)];
+    [tableImage lockFocus];
+    
+    CGContextRef context = [[NSGraphicsContext currentContext] CGContext];
+    
+    // Couleur de fond blanc
+    CGContextSetFillColorWithColor(context, [NSColor whiteColor].CGColor);
+    CGContextFillRect(context, CGRectMake(0, 0, tableWidth, tableHeight));
+    
+    // Dessiner les bordures du tableau
+    CGContextSetStrokeColorWithColor(context, [NSColor blackColor].CGColor);
+    CGContextSetLineWidth(context, 1.0);
+    
+    // Bordures horizontales
+    for (NSInteger i = 0; i <= numRows; i++) {
+        CGFloat y = i * cellHeight;
+        CGContextMoveToPoint(context, 0, y);
+        CGContextAddLineToPoint(context, tableWidth, y);
+        CGContextStrokePath(context);
+    }
+    
+    // Bordures verticales
+    for (NSInteger j = 0; j <= numCols; j++) {
+        CGFloat x = j * cellWidth;
+        CGContextMoveToPoint(context, x, 0);
+        CGContextAddLineToPoint(context, x, tableHeight);
+        CGContextStrokePath(context);
+    }
+    
+    // Dessiner le contenu des cellules
+    NSFont *font = [NSFont systemFontOfSize:12.0];
+    NSMutableParagraphStyle *paragraphStyle = [[NSMutableParagraphStyle alloc] init];
+    [paragraphStyle setAlignment:NSTextAlignmentCenter];
+    
+    NSDictionary *attributes = @{
+        NSFontAttributeName: font,
+        NSForegroundColorAttributeName: [NSColor blackColor],
+        NSParagraphStyleAttributeName: paragraphStyle
+    };
+    
+    for (NSInteger i = 0; i < [tableData count]; i++) {
+        NSArray *row = [tableData objectAtIndex:i];
+        for (NSInteger j = 0; j < [row count]; j++) {
+            NSString *cellText = [row objectAtIndex:j];
+            if (!cellText) cellText = @"";
+            
+            // Nettoyer le texte (enlever ** pour le gras)
+            cellText = [cellText stringByReplacingOccurrencesOfString:@"**" withString:@""];
+            
+            CGRect cellRect = CGRectMake(j * cellWidth + 2, 
+                                       (numRows - i - 1) * cellHeight + 5, 
+                                       cellWidth - 4, 
+                                       cellHeight - 10);
+            
+            [cellText drawInRect:cellRect withAttributes:attributes];
+        }
+    }
+    
+    [tableImage unlockFocus];
+    
+    // Créer NSTextAttachment avec l'image
+    NSTextAttachment *attachment = [[NSTextAttachment alloc] init];
+    [attachment setImage:tableImage];
+    
+    return attachment;
+}
+
+/**
+ * @brief Convertit un tableau markdown en tableau visuel avec bordures Unicode (fallback)
+ * @param markdownTable Le tableau markdown brut
+ * @return Le tableau formaté avec bordures Unicode
+ */
+- (NSString *)convertMarkdownTableToVisual:(NSString *)markdownTable {
+    NSArray *lines = [markdownTable componentsSeparatedByString:@"\n"];
+    NSMutableArray *tableRows = [[NSMutableArray alloc] init];
+    BOOL isFirstRowProcessed = NO;
+    
+    for (NSString *line in lines) {
+        NSString *trimmedLine = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        
+        if ([trimmedLine length] == 0) continue;
+        
+        // Ignorer la ligne de séparation (---|---|)
+        if ([trimmedLine rangeOfString:@"---"].location != NSNotFound) {
+            continue;
+        }
+        
+        // Parser une ligne de tableau
+        if ([trimmedLine hasPrefix:@"|"] && [trimmedLine hasSuffix:@"|"]) {
+            NSString *content = [trimmedLine substringWithRange:NSMakeRange(1, [trimmedLine length] - 2)];
+            NSArray *cells = [content componentsSeparatedByString:@"|"];
+            NSMutableArray *cleanCells = [[NSMutableArray alloc] init];
+            
+            for (NSString *cell in cells) {
+                NSString *cleanCell = [cell stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                [cleanCells addObject:cleanCell];
+            }
+            
+            [tableRows addObject:cleanCells];
+        }
+    }
+    
+    if ([tableRows count] == 0) {
+        return markdownTable; // Retourner l'original si parsing échoue
+    }
+    
+    // Déterminer la largeur maximale des colonnes
+    NSInteger maxCols = 0;
+    for (NSArray *row in tableRows) {
+        if ([row count] > maxCols) {
+            maxCols = [row count];
+        }
+    }
+    
+    // Créer le tableau visuel
+    NSMutableString *visualTable = [[NSMutableString alloc] init];
+    
+    // Ligne du haut
+    [visualTable appendString:@"┌"];
+    for (NSInteger col = 0; col < maxCols; col++) {
+        [visualTable appendString:@"────────────────"];
+        if (col < maxCols - 1) {
+            [visualTable appendString:@"┬"];
+        }
+    }
+    [visualTable appendString:@"┐\n"];
+    
+    // Lignes de données
+    for (NSInteger rowIndex = 0; rowIndex < [tableRows count]; rowIndex++) {
+        NSArray *row = tableRows[rowIndex];
+        [visualTable appendString:@"│"];
+        
+        for (NSInteger col = 0; col < maxCols; col++) {
+            NSString *cellContent = @"";
+            if (col < [row count]) {
+                cellContent = row[col];
+            }
+            
+            // Limiter et padder le contenu
+            if ([cellContent length] > 16) {
+                cellContent = [[cellContent substringToIndex:13] stringByAppendingString:@"..."];
+            }
+            NSString *paddedContent = [cellContent stringByPaddingToLength:16 
+                                                                withString:@" " 
+                                                           startingAtIndex:0];
+            [visualTable appendString:paddedContent];
+            [visualTable appendString:@"│"];
+        }
+        [visualTable appendString:@"\n"];
+        
+        // Ligne de séparation après l'en-tête
+        if (rowIndex == 0) {
+            [visualTable appendString:@"├"];
+            for (NSInteger col = 0; col < maxCols; col++) {
+                [visualTable appendString:@"────────────────"];
+                if (col < maxCols - 1) {
+                    [visualTable appendString:@"┼"];
+                }
+            }
+            [visualTable appendString:@"┤\n"];
+        }
+    }
+    
+    // Ligne du bas
+    [visualTable appendString:@"└"];
+    for (NSInteger col = 0; col < maxCols; col++) {
+        [visualTable appendString:@"────────────────"];
+        if (col < maxCols - 1) {
+            [visualTable appendString:@"┴"];
+        }
+    }
+    [visualTable appendString:@"┘"];
+    
+    return visualTable;
+}
 
 - (void)keyDown:(NSEvent *)event {
     [super keyDown:event];
@@ -803,7 +1630,7 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
     NSInteger lineIndex = 0;
     
     for (NSString *line in lines) {
-        NSUInteger lineLength = [line length];
+        NSInteger lineLength = (NSInteger)[line length];
         BOOL isActiveLine = (lineIndex == activeLine);
         
         // === HEADERS ===
@@ -833,8 +1660,19 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
         // === ITALIC (*text*) - Traiter après (moins spécifique) ===
         [self formatMarkdownItalicInLine:line atPosition:currentPosition text:text hideCharacters:!isActiveLine];
         
+        NSRange lineRange = NSMakeRange(currentPosition, (NSUInteger)lineLength);
+        NSInteger delta = [self decorateTaskMarkersInText:text lineRange:lineRange];
+        if (delta != 0) {
+            lineLength += delta;
+            lineRange.length += delta;
+        }
+        delta = [self normalizeNumericMarkersInText:text lineRange:lineRange];
+        if (delta != 0) {
+            lineLength += delta;
+        }
+
         // Passer à la ligne suivante (+1 pour le \n)
-        currentPosition += lineLength + 1;
+        currentPosition += (NSUInteger)lineLength + 1;
         lineIndex++;
     }
     
@@ -908,6 +1746,93 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
             }
         }
     }
+}
+
+- (NSInteger)decorateTaskMarkersInText:(NSMutableAttributedString *)text lineRange:(NSRange)lineRange {
+    if (lineRange.length == 0 || lineRange.location + lineRange.length > [text length]) {
+        return 0;
+    }
+    NSString *lineText = [[text string] substringWithRange:lineRange];
+    NSUInteger length = [lineText length];
+    NSUInteger idx = 0;
+    while (idx < length && ([lineText characterAtIndex:idx] == ' ' || [lineText characterAtIndex:idx] == '\t')) {
+        idx++;
+    }
+    NSUInteger markerStart = idx;
+    if (markerStart >= length)
+        return 0;
+
+    BOOL hasBullet = NO;
+    if (idx < length && ([lineText characterAtIndex:idx] == '-' || [lineText characterAtIndex:idx] == '*' || [lineText characterAtIndex:idx] == '+')) {
+        hasBullet = YES;
+        idx++;
+        if (idx < length && [lineText characterAtIndex:idx] == ' ')
+            idx++;
+    }
+
+    if (idx + 2 >= length || [lineText characterAtIndex:idx] != '[' || [lineText characterAtIndex:idx + 2] != ']') {
+        return 0;
+    }
+    unichar stateChar = [lineText characterAtIndex:idx + 1];
+    BOOL checked = (stateChar == 'x' || stateChar == 'X');
+    NSUInteger markerEnd = idx + 3;
+    if (markerEnd < length && [lineText characterAtIndex:markerEnd] == ' ')
+        markerEnd++;
+    NSString *markerReplacement = checked ? @"☑ " : @"☐ ";
+    if (hasBullet && markerStart > 0 && [lineText characterAtIndex:markerStart - 1] == ' ')
+        ;
+    NSRange replaceRange = NSMakeRange(lineRange.location + markerStart, markerEnd - markerStart);
+    [text replaceCharactersInRange:replaceRange withString:markerReplacement];
+    return (NSInteger)markerReplacement.length - (NSInteger)(markerEnd - markerStart);
+}
+
+- (NSInteger)normalizeNumericMarkersInText:(NSMutableAttributedString *)text lineRange:(NSRange)lineRange {
+    if (lineRange.length == 0 || lineRange.location + lineRange.length > [text length]) {
+        return 0;
+    }
+    NSString *lineText = [[text string] substringWithRange:lineRange];
+    NSUInteger length = [lineText length];
+    NSUInteger idx = 0;
+    while (idx < length && ([lineText characterAtIndex:idx] == ' ' || [lineText characterAtIndex:idx] == '\t')) {
+        idx++;
+    }
+    NSUInteger markerStart = idx;
+    if (markerStart >= length)
+        return 0;
+
+    BOOL hadLeadingParen = NO;
+    if ([lineText characterAtIndex:idx] == '(') {
+        hadLeadingParen = YES;
+        idx++;
+    }
+
+    NSUInteger digitsStart = idx;
+    while (idx < length && isdigit([lineText characterAtIndex:idx])) {
+        idx++;
+    }
+    if (idx == digitsStart)
+        return 0;
+
+    NSString *numberString = [lineText substringWithRange:NSMakeRange(digitsStart, idx - digitsStart)];
+
+    if (idx < length && ([lineText characterAtIndex:idx] == ']' || [lineText characterAtIndex:idx] == ')')) {
+        idx++;
+    } else if (hadLeadingParen && idx < length && [lineText characterAtIndex:idx] == ')') {
+        idx++;
+    }
+
+    if (idx < length && [lineText characterAtIndex:idx] == '.') {
+        idx++;
+    }
+
+    while (idx < length && [lineText characterAtIndex:idx] == ' ') {
+        idx++;
+    }
+
+    NSString *replacement = [NSString stringWithFormat:@"%@. ", numberString];
+    NSRange replaceRange = NSMakeRange(lineRange.location + markerStart, idx - markerStart);
+    [text replaceCharactersInRange:replaceRange withString:replacement];
+    return (NSInteger)replacement.length - (NSInteger)(idx - markerStart);
 }
 
 /**
@@ -1190,7 +2115,44 @@ static const CGFloat UI_DEFAULT_EDITOR_FONT_SIZE = 14.0;
         } range:[match range]];
     }];
     
-    NSLog(@"🎨 Styles regex appliqués sur %lu caractères", [string length]);
+    // Listes à puces (- * +)
+    NSRegularExpression *unorderedListRegex = [NSRegularExpression regularExpressionWithPattern:@"^(\\s*)[-*+]\\s+(.+)$" 
+                                                                                        options:NSRegularExpressionAnchorsMatchLines 
+                                                                                          error:&error];
+    [unorderedListRegex enumerateMatchesInString:string options:0 range:NSMakeRange(0, [string length]) 
+                               usingBlock:^(NSTextCheckingResult *match, NSMatchingFlags flags, BOOL *stop) {
+        NSRange fullRange = [match range];
+        NSRange indentRange = [match rangeAtIndex:1]; 
+        NSRange contentRange = [match rangeAtIndex:2];
+        
+        // Calculer le niveau d'indentation 
+        NSInteger level = indentRange.length / 4; // 4 espaces = 1 niveau
+        
+        // Formater cet élément avec notre nouveau système avancé
+        [self formatAsAdvancedListItem:text range:fullRange ordered:NO level:level index:1];
+    }];
+    
+    // Listes numérotées (1. 2. 3.)
+    NSRegularExpression *orderedListRegex = [NSRegularExpression regularExpressionWithPattern:@"^(\\s*)(\\d+)\\.\\s+(.+)$" 
+                                                                                       options:NSRegularExpressionAnchorsMatchLines 
+                                                                                         error:&error];
+    [orderedListRegex enumerateMatchesInString:string options:0 range:NSMakeRange(0, [string length]) 
+                               usingBlock:^(NSTextCheckingResult *match, NSMatchingFlags flags, BOOL *stop) {
+        NSRange fullRange = [match range];
+        NSRange indentRange = [match rangeAtIndex:1];
+        NSRange numberRange = [match rangeAtIndex:2]; 
+        NSRange contentRange = [match rangeAtIndex:3];
+        
+        // Calculer le niveau et extraire le numéro
+        NSInteger level = indentRange.length / 4;
+        NSString *numberStr = [string substringWithRange:numberRange];
+        NSInteger index = [numberStr integerValue];
+        
+        // Formater cet élément avec notre nouveau système avancé
+        [self formatAsAdvancedListItem:text range:fullRange ordered:YES level:level index:index];
+    }];
+    
+    NSLog(@"🎨 Styles regex (+ listes avancées) appliqués sur %lu caractères", [string length]);
 }
 
 /**
@@ -1421,12 +2383,76 @@ int parse_inline_styles_local(const char *text, InlineSpan *spans, size_t max_sp
 
 @end
 
+@interface ENSidebarContainerView : NSView
+@property (nonatomic, assign) __unsafe_unretained NSResponder *lastResponder;
+@end
+
+@implementation ENSidebarContainerView
+
+- (NSView *)hitTest:(NSPoint)point {
+    NSView *hitView = [super hitTest:point];
+    if (!hitView && NSPointInRect(point, self.bounds)) {
+        return self; // capture sidebar background clicks
+    }
+    return hitView;
+}
+
+- (BOOL)acceptsFirstResponder {
+    return NO;
+}
+
+- (BOOL)mouseDownCanMoveWindow {
+    return NO;
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    self.lastResponder = self.window.firstResponder;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self restoreLastResponderIfNeeded];
+    });
+}
+
+- (void)rightMouseDown:(NSEvent *)event {
+    self.lastResponder = self.window.firstResponder;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self restoreLastResponderIfNeeded];
+    });
+}
+
+- (void)otherMouseDown:(NSEvent *)event {
+    self.lastResponder = self.window.firstResponder;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self restoreLastResponderIfNeeded];
+    });
+}
+
+- (void)restoreLastResponderIfNeeded {
+    NSResponder *target = self.lastResponder;
+    if (!target || target == self) {
+        return;
+    }
+    if (self.window.firstResponder != target) {
+        [self.window makeFirstResponder:target];
+    }
+    self.lastResponder = nil;
+}
+
+@end
+
 @interface UIIconButton : NSButton
 @property (nonatomic, assign) UIIconType iconType;
 @property (nonatomic, assign) UIFramework* framework;
 @end
 
 @implementation UIIconButton
+
+- (BOOL)acceptsFirstResponder {
+    return NO;
+}
+
+- (BOOL)canBecomeKeyView {
+    return NO;
+}
 
 - (void)mouseEntered:(NSEvent *)event {
     [super mouseEntered:event];
@@ -1492,19 +2518,21 @@ bool ui_framework_setup_layout(UIFramework* framework) {
     [contentView addSubview:framework->containerView];
     
     // Créer la barre latérale
+    CGFloat sidebarWidth = framework->sidebarConfig.width;
     NSRect sidebarFrame = NSMakeRect(0, 0, 
-                                    framework->sidebarConfig.width, 
+                                    sidebarWidth, 
                                     NSHeight(windowFrame));
-    framework->sidebarView = [[NSView alloc] initWithFrame:sidebarFrame];
+    framework->sidebarView = [[ENSidebarContainerView alloc] initWithFrame:sidebarFrame];
     [framework->sidebarView setAutoresizingMask:NSViewHeightSizable];
     [framework->sidebarView setWantsLayer:YES];
     [framework->sidebarView.layer setBackgroundColor:framework->sidebarConfig.backgroundColor.CGColor];
-    
+    framework->sidebarView.layer.zPosition = 500;
+    framework->sidebarView.layer.masksToBounds = NO;
+
     // Créer l'éditeur avec scroll view
-    NSRect editorFrame = NSMakeRect(0, 0, // La barre latérale sera en superposition
-                                   NSWidth(windowFrame), 
-                                   NSHeight(windowFrame));
-    
+    CGFloat editorWidth = MAX(0.0, NSWidth(windowFrame) - sidebarWidth);
+    NSRect editorFrame = NSMakeRect(sidebarWidth, 0, editorWidth, NSHeight(windowFrame));
+
     framework->editorScrollView = [[NSScrollView alloc] initWithFrame:editorFrame];
     [framework->editorScrollView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [framework->editorScrollView setHasVerticalScroller:YES];
@@ -1513,24 +2541,26 @@ bool ui_framework_setup_layout(UIFramework* framework) {
     [framework->editorScrollView setBorderType:NSNoBorder];
     
     // Créer l'éditeur Markdown
-    framework->editorView = [[MarkdownEditor alloc] initWithFrame:editorFrame];
+    framework->editorView = [[MarkdownEditor alloc] initWithFrame:NSMakeRect(0, 0, editorWidth, NSHeight(editorFrame))];
     [(NSView*)framework->editorView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     
     // Marge gauche pour éviter la superposition avec la barre latérale
     NSTextContainer* textContainer = [framework->editorView textContainer];
-    [textContainer setContainerSize:NSMakeSize(NSWidth(editorFrame) - framework->editorConfig.marginLeft, 1e6)];
     [textContainer setWidthTracksTextView:NO];
-    [framework->editorView setTextContainerInset:NSMakeSize(framework->editorConfig.marginLeft + 10, 10)];
-    
+    framework->editorConfig.marginLeft = MAX(framework->editorConfig.marginLeft,
+                                             sidebarWidth + 24.0f);
+    ui_framework_update_editor_intrinsics(framework, editorWidth);
+
     [framework->editorScrollView setDocumentView:framework->editorView];
     
     // Ajouter les vues au conteneur (ordre important pour superposition)
     [framework->containerView addSubview:framework->editorScrollView];
     [framework->containerView addSubview:framework->sidebarView]; // En dernier pour être au-dessus
-    
+
     // Ajouter les icônes par défaut dans l'ordre du workflow
     ui_framework_add_icon(framework, UI_ICON_SEARCH);   // Recherche
     ui_framework_add_icon(framework, UI_ICON_BACK);     // Retour
+    ui_framework_add_icon(framework, UI_ICON_EDITOR);   // Composer
     ui_framework_add_icon(framework, UI_ICON_HOME);     // Tableau de bord
     ui_framework_add_icon(framework, UI_ICON_SETTINGS); // Paramètres
     
@@ -1540,13 +2570,13 @@ bool ui_framework_setup_layout(UIFramework* framework) {
 
 UISidebarConfig ui_framework_get_default_sidebar_config(void) {
     UISidebarConfig config = {
-        .width = 60.0,
+        .width = 74.0,
         .backgroundColor = [NSColor colorWithRed:0.95 green:0.95 blue:0.95 alpha:0.95], // Fond semi-transparent
         .iconColor = [NSColor colorWithRed:0.3 green:0.3 blue:0.3 alpha:1.0],
         .hoverColor = [NSColor colorWithRed:0.2 green:0.4 blue:0.8 alpha:1.0],
         .activeColor = [NSColor colorWithRed:0.1 green:0.3 blue:0.7 alpha:1.0],
-        .iconSize = 24.0,
-        .iconSpacing = 20.0
+        .iconSize = 28.0,
+        .iconSpacing = 28.0
     };
     return config;
 }
@@ -1556,7 +2586,7 @@ UIEditorConfig ui_framework_get_default_editor_config(void) {
         .backgroundColor = [NSColor textBackgroundColor],
         .textColor = [NSColor textColor],
         .font = [NSFont fontWithName:@"Monaco" size:14] ?: [NSFont monospacedSystemFontOfSize:14 weight:NSFontWeightRegular],
-        .marginLeft = 60.0, // Espace pour la barre latérale
+        .marginLeft = 32.0, // Ajusté dynamiquement par ui_framework_setup_layout
         .showLineNumbers = false
     };
     return config;
@@ -1566,7 +2596,8 @@ void ui_framework_add_icon(UIFramework* framework, UIIconType iconType) {
     if (!framework || !framework->sidebarView) return;
     
     CGFloat iconSize = framework->sidebarConfig.iconSize;
-    NSRect iconFrame = NSMakeRect(0, 0, iconSize, iconSize);
+    CGFloat buttonHeight = ui_framework_sidebar_button_height(framework);
+    NSRect iconFrame = NSMakeRect(0, 0, framework->sidebarConfig.width, buttonHeight);
     
     UIIconButton* iconButton = [[UIIconButton alloc] initWithFrame:iconFrame];
     iconButton.iconType = iconType;
@@ -1575,6 +2606,10 @@ void ui_framework_add_icon(UIFramework* framework, UIIconType iconType) {
     [iconButton setBordered:NO];
     [iconButton setButtonType:NSButtonTypeMomentaryChange];
     [iconButton setImagePosition:NSImageOnly];
+    [iconButton setRefusesFirstResponder:YES];
+    [iconButton setFocusRingType:NSFocusRingTypeNone];
+    [iconButton setImageScaling:NSImageScaleProportionallyUpOrDown];
+    [iconButton setContentTintColor:framework->sidebarConfig.iconColor];
     
     // Créer l'image de l'icône
     NSImage* iconImage = ui_framework_create_icon_image(iconType, iconSize, framework->sidebarConfig.iconColor);
@@ -1600,13 +2635,13 @@ void ui_framework_add_icon(UIFramework* framework, UIIconType iconType) {
 static void ui_framework_layout_icons(UIFramework* framework) {
     if (!framework || !framework->sidebarView) return;
 
-    CGFloat iconSize = framework->sidebarConfig.iconSize;
+    CGFloat buttonHeight = ui_framework_sidebar_button_height(framework);
     CGFloat sidebarWidth = framework->sidebarConfig.width;
     CGFloat sidebarHeight = NSHeight([framework->sidebarView bounds]);
     CGFloat topMargin = 40.0;
     CGFloat bottomMargin = 40.0;
 
-    NSArray<NSNumber*>* iconOrder = @[ @(UI_ICON_SEARCH), @(UI_ICON_BACK), @(UI_ICON_HOME), @(UI_ICON_SETTINGS) ];
+    NSArray<NSNumber*>* iconOrder = @[ @(UI_ICON_SEARCH), @(UI_ICON_BACK), @(UI_ICON_EDITOR), @(UI_ICON_HOME), @(UI_ICON_SETTINGS) ];
     NSMutableArray<UIIconButton*>* orderedButtons = [NSMutableArray arrayWithCapacity:[iconOrder count]];
 
     for (NSNumber* iconNumber in iconOrder) {
@@ -1624,23 +2659,28 @@ static void ui_framework_layout_icons(UIFramework* framework) {
         return;
     }
 
-    CGFloat availableHeight = MAX(sidebarHeight - topMargin - bottomMargin - (iconSize * count), 0.0);
+    CGFloat availableHeight = MAX(sidebarHeight - topMargin - bottomMargin - (buttonHeight * count), 0.0);
     CGFloat spacing = (count > 1) ? availableHeight / (count - 1) : 0.0;
-    CGFloat startY = sidebarHeight - topMargin - iconSize;
-    CGFloat x = (sidebarWidth - iconSize) / 2.0;
+    CGFloat startY = sidebarHeight - topMargin - buttonHeight;
 
     for (NSInteger idx = 0; idx < count; idx++) {
         UIIconButton* button = orderedButtons[idx];
-        CGFloat y = startY - idx * (iconSize + spacing);
-        if (y < bottomMargin) {
-            y = bottomMargin;
-        }
+        CGFloat y = startY - idx * (buttonHeight + spacing);
         NSRect frame = button.frame;
-        frame.origin.x = x;
+        frame.origin.x = 0.0;
         frame.origin.y = y;
-        frame.size = NSMakeSize(iconSize, iconSize);
+        frame.size = NSMakeSize(sidebarWidth, buttonHeight);
         [button setFrame:frame];
     }
+}
+
+static CGFloat ui_framework_sidebar_button_height(const UIFramework* framework) {
+    if (!framework) {
+        return 44.0;
+    }
+    CGFloat iconSize = framework->sidebarConfig.iconSize;
+    CGFloat padding = MAX(framework->sidebarConfig.iconSpacing, 28.0);
+    return iconSize + padding;
 }
 
 NSImage* ui_framework_create_icon_image(UIIconType iconType, CGFloat size, NSColor* color) {
@@ -1898,14 +2938,36 @@ void ui_framework_update_layout(UIFramework* framework) {
     [framework->containerView setFrame:windowFrame];
     
     // Mettre à jour l'éditeur
-    NSRect editorFrame = NSMakeRect(0, 0, NSWidth(windowFrame), NSHeight(windowFrame));
+    CGFloat sidebarWidth = framework->sidebarConfig.width;
+    CGFloat editorWidth = MAX(0.0, NSWidth(windowFrame) - sidebarWidth);
+    NSRect editorFrame = NSMakeRect(sidebarWidth, 0, editorWidth, NSHeight(windowFrame));
     [framework->editorScrollView setFrame:editorFrame];
+    if ([framework->editorView isKindOfClass:[NSView class]]) {
+        NSView* editorView = (NSView*)framework->editorView;
+        [editorView setFrame:NSMakeRect(0, 0, editorWidth, NSHeight(editorFrame))];
+    }
+    ui_framework_update_editor_intrinsics(framework, editorWidth);
     
     // Mettre à jour la barre latérale
     NSRect sidebarFrame = NSMakeRect(0, 0, framework->sidebarConfig.width, NSHeight(windowFrame));
     [framework->sidebarView setFrame:sidebarFrame];
 
     ui_framework_layout_icons(framework);
+}
+
+static void ui_framework_update_editor_intrinsics(UIFramework* framework, CGFloat editorWidth) {
+    if (!framework || !framework->editorView) {
+        return;
+    }
+    NSTextView* textView = framework->editorView;
+    NSTextContainer* textContainer = [textView textContainer];
+    if (!textContainer) {
+        return;
+    }
+    CGFloat inset = MAX(framework->editorConfig.marginLeft, 0.0);
+    CGFloat effectiveWidth = MAX(editorWidth - inset * 2.0, 100.0);
+    [textContainer setContainerSize:NSMakeSize(effectiveWidth, CGFLOAT_MAX)];
+    [textView setTextContainerInset:NSMakeSize(inset, 12.0)];
 }
 
 // Fonctions de thème

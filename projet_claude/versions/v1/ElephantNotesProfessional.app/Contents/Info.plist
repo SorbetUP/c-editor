@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>ElephantNotesProfessional</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.elephantnotes.professional.ElephantNotesProfessional</string>
+    <key>CFBundleName</key>
+    <string>ElephantNotes Professional</string>
+    <key>CFBundleVersion</key>
+    <string>2.1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>md</string>
+                <string>markdown</string>
+                <string>mdown</string>
+                <string>mkd</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>Markdown Document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeIconFile</key>
+            <string>document</string>
+        </dict>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>workspace</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>ElephantNotes Workspace</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+        </dict>
+    </array>
+    <key>NSAppleScriptEnabled</key>
+    <true/>
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>Edit in ElephantNotes Professional</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>openWithElephantNotes</string>
+            <key>NSPortName</key>
+            <string>ElephantNotesProfessional</string>
+            <key>NSSendTypes</key>
+            <array>
+                <string>NSStringPboardType</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>
