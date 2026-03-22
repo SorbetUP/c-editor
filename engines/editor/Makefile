@@ -4,11 +4,11 @@ CFLAGS = -std=c11 -Wall -Wextra -Werror -O2 -g
 EMCC = emcc
 
 # Include paths  
-INCLUDES = -I../markdown -I.
+INCLUDES = -I../markdown -I../render_ext -I.
 
 # Source files
-SOURCES = editor.c editor_abi.c
-WASM_SOURCES = editor.c editor_abi.c ../markdown/markdown.c ../markdown/json.c
+SOURCES = editor.c editor_abi.c ../render_ext/render_ext.c
+WASM_SOURCES = editor.c editor_abi.c ../render_ext/render_ext.c ../markdown/markdown.c ../markdown/json.c
 HEADERS = editor.h editor_abi.h
 
 # Output files
@@ -39,7 +39,8 @@ static: $(STATIC_LIB)
 $(STATIC_LIB): $(SOURCES) $(HEADERS)
 	$(CC) $(CFLAGS) $(RELEASE_FLAGS) $(INCLUDES) -c editor.c -o editor.o
 	$(CC) $(CFLAGS) $(RELEASE_FLAGS) $(INCLUDES) -c editor_abi.c -o editor_abi.o
-	ar rcs $(STATIC_LIB) editor.o editor_abi.o
+	$(CC) $(CFLAGS) $(RELEASE_FLAGS) $(INCLUDES) -c ../render_ext/render_ext.c -o render_ext.o
+	ar rcs $(STATIC_LIB) editor.o editor_abi.o render_ext.o
 	@echo "✅ Static library built: $(STATIC_LIB)"
 
 # Shared library  
@@ -60,7 +61,8 @@ $(WASM_OUTPUT): $(SOURCES) $(HEADERS)
 debug-static:
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDES) -c editor.c -o editor_debug.o  
 	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDES) -c editor_abi.c -o editor_abi_debug.o
-	ar rcs libeditor_debug.a editor_debug.o editor_abi_debug.o
+	$(CC) $(CFLAGS) $(DEBUG_FLAGS) $(INCLUDES) -c ../render_ext/render_ext.c -o render_ext_debug.o
+	ar rcs libeditor_debug.a editor_debug.o editor_abi_debug.o render_ext_debug.o
 	@echo "✅ Debug static library: libeditor_debug.a"
 
 debug-wasm:
@@ -88,7 +90,7 @@ install: static
 clean:
 	rm -f $(STATIC_LIB) $(SHARED_LIB) libeditor_debug.a
 	rm -f $(WASM_OUTPUT) $(WASM_WASM) editor_debug.wasm.*
-	rm -f *.o editor_test
+	rm -f *.o render_ext.o render_ext_debug.o editor_test
 	@echo "🧹 Cleaned build artifacts"
 
 # Help

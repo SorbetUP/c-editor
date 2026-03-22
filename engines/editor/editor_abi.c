@@ -3,6 +3,7 @@
 #include "editor.h"
 #include "json.h"
 #include "markdown.h"
+#include "../render_ext/render_ext.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -486,21 +487,50 @@ static bool render_element_html(HtmlBuilder *builder, const Element *element) {
   case T_TABLE:
     return render_table_html(builder, &element->as.table);
   case T_CODE:
-    if (!html_builder_append(builder, "<pre><code")) {
+  {
+    const char *language =
+        element->as.code.language ? element->as.code.language : "";
+    RenderExtensionType ext = render_ext_detect_fence(language);
+
+    if (render_ext_is_supported(ext)) {
+      if (!html_builder_append(builder,
+                               "<div class=\"render-ext-block\" data-render-ext=\"") ||
+          !html_builder_append_escaped(builder, render_ext_type_name(ext)) ||
+          !html_builder_append(builder, "\"")) {
+        return false;
+      }
+      if (language[0] != '\0' &&
+          (!html_builder_append(builder, " data-language=\"") ||
+           !html_builder_append_escaped(builder, language) ||
+           !html_builder_append(builder, "\""))) {
+        return false;
+      }
+      if (!html_builder_append(builder, "><pre><code")) {
+        return false;
+      }
+    } else if (!html_builder_append(builder, "<pre><code")) {
       return false;
     }
-    if (element->as.code.language && element->as.code.language[0] != '\0') {
+
+    if (language[0] != '\0') {
       if (!html_builder_append(builder, " class=\"language-") ||
-          !html_builder_append_escaped(builder, element->as.code.language) ||
+          !html_builder_append_escaped(builder, language) ||
           !html_builder_append(builder, "\"")) {
         return false;
       }
     }
-    return html_builder_append(builder, ">") &&
-           html_builder_append_escaped(
-               builder,
-               element->as.code.content ? element->as.code.content : "") &&
-           html_builder_append(builder, "</code></pre>");
+    if (!html_builder_append(builder, ">") ||
+        !html_builder_append_escaped(
+            builder, element->as.code.content ? element->as.code.content : "") ||
+        !html_builder_append(builder, "</code></pre>")) {
+      return false;
+    }
+
+    if (render_ext_is_supported(ext)) {
+      return html_builder_append(builder, "</div>");
+    }
+    return true;
+  }
   case T_LIST:
     return render_list_html(builder, &element->as.list);
   case T_QUOTE:

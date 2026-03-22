@@ -3,7 +3,7 @@ CC = clang
 CFLAGS = -std=c11 -Wall -Wextra -Werror -O2 -g -DNDEBUG
 
 # Engine directories
-ENGINE_DIRS = cursor markdown editor search_engine render_engine backup_engine crypto_engine
+ENGINE_DIRS = cursor markdown editor search_engine render_engine backup_engine crypto_engine vault_core link_engine privacy_engine sync_engine render_ext
 
 # Default target
 all: engines
@@ -42,6 +42,21 @@ backup_engine:
 
 crypto_engine:
 	$(MAKE) -C crypto_engine static
+
+vault_core:
+	$(MAKE) -C vault_core static
+
+link_engine:
+	$(MAKE) -C link_engine static
+
+privacy_engine:
+	$(MAKE) -C privacy_engine static
+
+sync_engine:
+	$(MAKE) -C sync_engine static
+
+render_ext:
+	$(MAKE) -C render_ext static
 
 # Clean all engines
 clean:
@@ -113,4 +128,4 @@ status:
 		fi; \
 	done
 
-.PHONY: all engines clean test create-makefiles status cursor markdown editor search_engine render_engine backup_engine crypto_engine
+.PHONY: all engines clean test create-makefiles status cursor markdown editor search_engine render_engine backup_engine crypto_engine vault_core link_engine privacy_engine sync_engine render_ext

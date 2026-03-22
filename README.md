@@ -4,6 +4,9 @@ ElephantNote est le projet unique du depot.
 
 Le depot est organise autour d'un coeur natif en C, decoupe en sous-librairies dans `engines/`, puis reutilise par la couche web/WASM, les outils de test, Flutter et l'application macOS.
 
+Une vue architecture avec diagrammes Mermaid est disponible dans [docs/architecture.md](docs/architecture.md).
+La roadmap de fondation pour le chantier "vault local + sync + UI moderne + extensions Markdown" est dans [feature-incoming/elephant-platform-foundation/PLAN.md](feature-incoming/elephant-platform-foundation/PLAN.md).
+
 ## Structure
 
 - `README.md`, `Makefile`, `.github/workflows/pages.yml` : entrees racine et automatisation principale
@@ -12,6 +15,7 @@ Le depot est organise autour d'un coeur natif en C, decoupe en sous-librairies d
 - `engines/cursor` : gestion intelligente du curseur et edition hybride
 - `engines/render_engine` : rendu natif
 - `engines/search_engine`, `engines/vault_manager`, `engines/file_manager`, `engines/crypto_engine` : sous-librairies C de support
+- `engines/vault_core`, `engines/link_engine`, `engines/privacy_engine`, `engines/sync_engine`, `engines/render_ext` : fondations du futur mode vault/sync/liens/confidentialite/extensions
 - `web/site` : site GitHub Pages et demo principale
 - `dist/github-pages` : artefact propre genere pour la publication Pages
 - `flutter` : application Flutter

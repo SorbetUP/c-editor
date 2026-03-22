@@ -10,7 +10,7 @@ RESOURCES_DIR = $(CONTENTS_DIR)/Resources
 CC = clang
 OBJC_FLAGS = -x objective-c -fobjc-arc -fobjc-weak
 CFLAGS = -std=c11 -Wall -Wextra -O2 -g
-FRAMEWORKS = -framework Cocoa -framework Foundation -framework UniformTypeIdentifiers
+FRAMEWORKS = -framework Cocoa -framework Foundation -framework UniformTypeIdentifiers -framework WebKit
 
 # Include paths for the C engines
 INCLUDES = \

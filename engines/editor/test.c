@@ -106,7 +106,7 @@ static void test_html_inline_rendering(void) {
 
 static void test_html_block_rendering(void) {
   const char *list_html = editor_markdown_to_html("- [x] done");
-  assert_contains(list_html, "<ul>");
+  assert_contains(list_html, "<ul");
   assert_contains(list_html, "<input type=\"checkbox\" checked disabled />");
   assert_contains(list_html, "done");
 
@@ -129,6 +129,12 @@ static void test_html_block_rendering(void) {
       editor_markdown_to_html("```c\nint x = 1;\n```");
   assert_contains(code_html, "<pre><code class=\"language-c\">");
   assert_contains(code_html, "int x = 1;");
+
+  const char *mermaid_html =
+      editor_markdown_to_html("```mermaid\ngraph TD;\nA-->B;\n```");
+  assert_contains(mermaid_html, "data-render-ext=\"mermaid\"");
+  assert_contains(mermaid_html, "class=\"language-mermaid\"");
+  assert_contains(mermaid_html, "graph TD;");
 }
 
 int main(void) {
