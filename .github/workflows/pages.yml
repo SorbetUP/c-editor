@@ -21,31 +21,18 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-      
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential clang
-        
+
     - name: Setup Emscripten
       uses: mymindstorm/setup-emsdk@v13
       with:
         version: 'latest'
-        
-    - name: Build C library
+
+    - name: Build unified Pages site
       run: |
-        make clean
-        make -j$(nproc)
-        
-    - name: Build WASM
-      run: |
-        cd wasm
-        ./build-wasm.sh
-        
-    - name: Verify WASM files
-      run: |
-        ls -la docs/
-        echo "WASM files built successfully"
+        chmod +x scripts/build_github_pages.sh
+        ./scripts/build_github_pages.sh
+        ls -la web/site
+        ls -la web/site/docs
         
     - name: Setup Pages
       uses: actions/configure-pages@v4
@@ -53,7 +40,7 @@ jobs:
     - name: Upload artifact
       uses: actions/upload-pages-artifact@v3
       with:
-        path: 'docs'
+        path: 'web/site'
 
   deploy:
     environment:
