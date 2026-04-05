@@ -186,10 +186,15 @@
             padding: 18px 24px 72px;
         }
 
-        #hybridEditor {
+        .editor-surface {
             width: min(920px, calc(100vw - 48px));
-            min-height: calc(100vh - 180px);
             margin: 0 auto;
+        }
+
+        #hybridEditor {
+            width: 100%;
+            min-height: calc(100vh - 180px);
+            margin: 0;
             background: var(--canvas-bg);
             color: var(--page-ink);
             border: 1px solid var(--canvas-border);
@@ -204,8 +209,11 @@
         }
 
         @media (max-width: 720px) {
-            #hybridEditor {
+            .editor-surface {
                 width: calc(100vw - 20px);
+            }
+
+            #hybridEditor {
                 min-height: calc(100vh - 132px);
                 border-radius: 16px;
                 padding: 40px 22px 72px;
@@ -357,6 +365,16 @@
         .editor-line .list-marker,
         .editor-line .quote-marker {
             color: var(--line-accent);
+        }
+
+        .editor-line .list-marker-bullet {
+            display: inline-block;
+            width: 0.62rem;
+            height: 0.62rem;
+            margin-top: 0.42rem;
+            border-radius: 999px;
+            background: currentColor;
+            vertical-align: top;
         }
 
         .editor-line .definition-line.definition-term-line {
@@ -588,16 +606,18 @@
         </div>
     </div>
 
-    <div class="main-content">
-        <div class="hybrid-editor">
-            <div class="pane-header">Éditeur Hybride - Ligne courante en Markdown, autres lignes rendues</div>
-            <div class="hybrid-editor-container">
-                <div id="hybridEditor" contenteditable="true" spellcheck="false">
-                    <div class="editor-line" data-line="0">Chargement du document de demonstration...</div>
+        <div class="main-content">
+            <div class="hybrid-editor">
+                <div class="pane-header">Éditeur Hybride - Ligne courante en Markdown, autres lignes rendues</div>
+                <div class="hybrid-editor-container">
+                    <div class="editor-surface">
+                        <div id="hybridEditor" contenteditable="true" spellcheck="false">
+                            <div class="editor-line" data-line="0">Chargement du document de demonstration...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
 
     <div class="footer">
         ElephantNote Web - Powered by Emscripten WASM | 
@@ -622,7 +642,6 @@
         let lineContents = [];
         let activeGroupedBlock = null;
         let isRefreshingEditableLine = false;
-
         function applyTheme(theme) {
             const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
             document.body.dataset.theme = normalizedTheme;
@@ -655,8 +674,91 @@
                 console.warn('Unable to save theme preference:', error);
             }
         }
+
+        function getFilenameTitle(filename) {
+            const base = String(filename || '')
+                .replace(/\.[^/.]+$/, '')
+                .replace(/[_-]+/g, ' ')
+                .trim();
+            return base || 'Nouvelle page';
+        }
+
+        function normalizeTitleText(value, fallbackTitle = 'Nouvelle page') {
+            const normalized = String(value || '')
+                .replace(/^\uFEFF/, '')
+                .replace(/^#+\s*/, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            return normalized || fallbackTitle;
+        }
+
+        function normalizeMarkdownDocument(markdownText, fallbackTitle = 'Nouvelle page') {
+            const lines = String(markdownText || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
+            const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
+
+            if (firstContentIndex === -1) {
+                return `# ${normalizeTitleText('', fallbackTitle)}\n`;
+            }
+
+            const firstContentLine = lines[firstContentIndex];
+            const headingMatch = firstContentLine.match(/^\s*\uFEFF?\s*#\s+(.+?)\s*$/);
+            const title = normalizeTitleText(
+                headingMatch ? headingMatch[1] : firstContentLine,
+                fallbackTitle
+            );
+
+            const remainingLines = lines.slice(firstContentIndex + 1);
+            while (remainingLines.length > 0 && remainingLines[0].trim() === '') {
+                remainingLines.shift();
+            }
+
+            const normalizedLines = [`# ${title}`];
+            if (remainingLines.length > 0) {
+                normalizedLines.push('', ...remainingLines);
+            }
+
+            return normalizedLines.join('\n');
+        }
+
+        function normalizeImportedMarkdownDocument(markdownText, filename) {
+            const importTitle = getFilenameTitle(filename);
+            const source = String(markdownText || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+            const trimmedSource = source.trim();
+            if (!trimmedSource) {
+                return `# ${importTitle}\n`;
+            }
+            return `# ${importTitle}\n\n${source}`;
+        }
+
+        function getCurrentMarkdownContent() {
+            return lineContents.join('\n');
+        }
+
+        function getMarkdownDocumentTitle(markdownText, fallbackTitle = 'Nouvelle page') {
+            const lines = String(markdownText || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').split('\n');
+            const firstContentIndex = lines.findIndex((line) => line.trim().length > 0);
+
+            if (firstContentIndex === -1) {
+                return normalizeTitleText('', fallbackTitle);
+            }
+
+            const firstContentLine = lines[firstContentIndex];
+            const headingMatch = firstContentLine.match(/^\s*\uFEFF?\s*#\s+(.+?)\s*$/);
+            return normalizeTitleText(
+                headingMatch ? headingMatch[1] : firstContentLine,
+                fallbackTitle
+            );
+        }
+
+        function buildMarkdownFilename(title) {
+            const safeTitle = normalizeTitleText(title, 'Nouvelle page')
+                .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            return `${safeTitle || 'Nouvelle page'}.md`;
+        }
         const DEFAULT_MARKDOWN_EXAMPLE = [
-            "# ElephantNote - Document de validation",
+            "# Nouvelle page",
             "",
             "Paragraphe simple pour verifier le rendu de base et la stabilite generale du moteur.",
             "",
@@ -1012,11 +1114,11 @@
             }
             
             // Switch new current line to raw markdown
-            if (newLineIndex >= 0 && newLineIndex < editorLines.length) {
-                currentLineIndex = newLineIndex;
-                const activeTargetBlock = getGroupedMarkdownBlock(currentLineIndex);
-                if (activeTargetBlock) {
-                    if (!isSameGroupedBlock(activeGroupedBlock, activeTargetBlock)) {
+                if (newLineIndex >= 0 && newLineIndex < editorLines.length) {
+                    currentLineIndex = newLineIndex;
+                    const activeTargetBlock = getGroupedMarkdownBlock(currentLineIndex);
+                    if (activeTargetBlock) {
+                        if (!isSameGroupedBlock(activeGroupedBlock, activeTargetBlock)) {
                         activeGroupedBlock = activeTargetBlock;
                         expandGroupedBlockForEditing(activeGroupedBlock);
                     }
@@ -1489,6 +1591,8 @@
                 let markerHtml = escapeHtml(listInfo.number || listInfo.marker);
                 if (listInfo.task) {
                     markerHtml = `<input type="checkbox"${listInfo.checked ? ' checked' : ''} disabled />`;
+                } else if (!listInfo.ordered) {
+                    markerHtml = '<span class="list-marker-bullet" aria-hidden="true"></span>';
                 }
 
                 return `<span class="list-line"${indentStyle}><span class="list-marker">${markerHtml}</span> ${renderInlineMarkdown(listInfo.content)}</span>`;
@@ -2088,7 +2192,8 @@
             if (selection.rangeCount === 0) return false;
             
             const content = lineElement.textContent || '';
-            if (content.length <= 1) return true; // 0 or 1 char left
+            if (content.length === 0) return false; // Already empty: next backspace should merge
+            if (content.length === 1) return true; // Deleting the final remaining character
             
             const range = selection.getRangeAt(0);
             const preCaretRange = range.cloneRange();
@@ -2357,22 +2462,26 @@
                         
                         console.log(`🔍 Backspace: line ${lineIndex}, content: "${currentContent}", at start: ${cursorAtStart}`);
                         
+                        if (cursorAtStart && currentContent.length === 0 && lineIndex > 0 && lineIndex < editorLines.length) {
+                            // Line is already empty and cursor at start - merge with previous line
+                            e.preventDefault();
+                            console.log(`🚨 Empty line merge - handling backspace at line start`);
+                            handleBackspaceAtLineStart(lineIndex);
+                            return;
+                        }
+
                         // Check if backspace will empty the line
                         const willEmpty = willBackspaceEmptyLine(currentLine);
                         
                         if (willEmpty) {
                             // Don't merge - let backspace empty the line first
                             console.log(`🚫 Backspace will empty line - allowing normal backspace`);
-                        } else if (cursorAtStart && currentContent.length === 0 && lineIndex > 0 && lineIndex < editorLines.length) {
-                            // Line is already empty and cursor at start - merge with previous line
-                            e.preventDefault();
-                            console.log(`🚨 Empty line merge - handling backspace at line start`);
-                            handleBackspaceAtLineStart(lineIndex);
                         } else if (cursorAtStart && currentContent.length > 0 && lineIndex > 0 && lineIndex < editorLines.length) {
                             // Line has content and cursor at start - merge with previous line
                             e.preventDefault();
                             console.log(`🚨 Non-empty line merge - handling backspace at line start`);
                             handleBackspaceAtLineStart(lineIndex);
+                            return;
                         } else if (cursorAtStart) {
                             console.log(`🚨 At line start but can't merge: lineIndex=${lineIndex}, editorLines.length=${editorLines.length}`);
                         }
@@ -2502,7 +2611,7 @@
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     try {
-                        const content = e.target.result;
+                        const content = normalizeImportedMarkdownDocument(e.target.result, file.name);
                         loadMarkdownContent(content);
                         console.log(`✅ Imported markdown file: ${file.name}`);
                     } catch (error) {
@@ -2569,9 +2678,9 @@
 
         // Export functions
         function exportMarkdown() {
-            // Collect all line contents as markdown
-            const content = lineContents.join('\n');
-            downloadFile('document.md', content);
+            const content = getCurrentMarkdownContent();
+            const filename = buildMarkdownFilename(getMarkdownDocumentTitle(content, 'Nouvelle page'));
+            downloadFile(filename, content);
         }
 
 
@@ -2593,6 +2702,18 @@
             await initializeWasm();
             initializeHybridEditor();
             loadMarkdownContent(DEFAULT_MARKDOWN_EXAMPLE);
+
+            window.__noteImportExportTestHooks = {
+                getCurrentDocumentName: () => getMarkdownDocumentTitle(getCurrentMarkdownContent(), 'Nouvelle page'),
+                getCurrentMarkdownContent,
+                importNoteFixture: (filename, content) => {
+                    loadMarkdownContent(normalizeImportedMarkdownDocument(content, filename));
+                },
+                buildExportSnapshot: () => ({
+                    filename: buildMarkdownFilename(getMarkdownDocumentTitle(getCurrentMarkdownContent(), 'Nouvelle page')),
+                    content: getCurrentMarkdownContent()
+                })
+            };
         });
     </script>
     
