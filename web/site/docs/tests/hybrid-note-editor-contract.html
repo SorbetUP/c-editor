@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hybrid Editor Render Contract</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #0b0b0d;
+      color: #f4f4f5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    hybrid-note-editor {
+      display: block;
+      height: 70vh;
+      margin-bottom: 16px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body data-status="loading">
+  <hybrid-note-editor id="editor"></hybrid-note-editor>
+  <pre id="result">Loading…</pre>
+
+  <script>
+    (async function () {
+      await import('../components/hybrid-note-editor.js');
+
+    const params = new URLSearchParams(window.location.search);
+    const fixtureName = params.get('fixture');
+    const editor = document.getElementById('editor');
+    const result = document.getElementById('result');
+
+    const eventLog = {
+      dirtyChanges: [],
+      saveRequests: [],
+      changes: []
+    };
+
+    function setProgress(label) {
+      result.textContent = label;
+      document.body.dataset-progress = label;
+    }
+
+    editor.addEventListener('dirty-change', (event) => {
+      eventLog.dirtyChanges.push({
+        dirty: Boolean(event.detail?.dirty),
+        timestamp: Date.now()
+      });
+    });
+
+    editor.addEventListener('save-request', (event) => {
+      eventLog.saveRequests.push({
+        document: event.detail?.document || null,
+        timestamp: Date.now()
+      });
+    });
+
+    editor.addEventListener('change', (event) => {
+      eventLog.changes.push({
+        document: event.detail?.document || null,
+        timestamp: Date.now()
+      });
+    });
+
+    function sleep(ms) {
+      return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    async function waitFor(condition, timeoutMs, label) {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeoutMs) {
+        if (condition()) {
+          return;
+        }
+        await sleep(50);
+      }
+      throw new Error(`Timeout: ${label}`);
+    }
+
+    async function getFixture() {
+      const response = await fetch('./render-contract-fixtures.json', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Fixture fetch failed: ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const fixture = (payload.fixtures || []).find((entry) => entry.name === fixtureName);
+      if (!fixture) {
+        throw new Error(`Unknown fixture: ${fixtureName}`);
+      }
+
+      return { fixture, version: payload.version };
+    }
+
+    function snapshotFrameState(frameHooks) {
+      return frameHooks.getState();
+    }
+
+    async function settle(frameHooks, delay = 140) {
+      await frameHooks.waitForSettled(delay);
+      await sleep(40);
+    }
+
+    async function runInteractionStep(step, frameWindow, frameHooks) {
+      if (step.action === 'activate_line') {
+        frameHooks.activateLine(step.line, step.cursor || 0);
+        await settle(frameHooks);
+        return;
+      }
+
+      if (step.action === 'set_line_markdown') {
+        frameHooks.setLineMarkdown(step.line, step.markdown || '');
+        await settle(frameHooks, 520);
+        return;
+      }
+
+      if (step.action === 'render_line') {
+        frameHooks.renderLine(step.line);
+        await settle(frameHooks, 180);
+        return;
+      }
+
+      if (step.action === 'render_all_lines') {
+        frameHooks.renderAllLines();
+        await settle(frameHooks, 180);
+        return;
+      }
+
+      if (step.action === 'save_request') {
+        editor.saveRequest();
+        await settle(frameHooks, 180);
+        return;
+      }
+
+      throw new Error(`Unsupported interaction step: ${step.action}`);
+    }
+
+    async function run() {
+      setProgress('fixtures-loaded');
+      const { fixture, version } = await getFixture();
+      setProgress('waiting-iframe');
+      await waitFor(() => editor.frame?.contentWindow, 8000, 'iframe available');
+
+      const frameWindow = editor.frame.contentWindow;
+      setProgress('waiting-wasm');
+      await waitFor(() => frameWindow.isWasmReady === true, 15000, 'frame wasm ready');
+      setProgress('waiting-hooks');
+      await waitFor(() => Boolean(frameWindow.__hybridEditorRenderTestHooks?.isReady?.()), 8000, 'frame test hooks ready');
+
+      const frameHooks = frameWindow.__hybridEditorRenderTestHooks;
+      setProgress('loading-document');
+      editor.loadDocument({
+        title: fixture.document_title || fixture.name,
+        content: fixture.markdown
+      });
+      await settle(frameHooks, 700);
+
+      setProgress('snapshot-after-load');
+      const afterLoad = snapshotFrameState(frameHooks);
+
+      setProgress('render-all');
+      frameHooks.renderAllLines();
+      await settle(frameHooks, 180);
+      const renderedState = snapshotFrameState(frameHooks);
+
+      setProgress('running-interactions');
+      const interactions = [];
+      for (const step of fixture.interaction_steps || []) {
+        await runInteractionStep(step, frameWindow, frameHooks);
+        interactions.push({
+          action: step.action,
+          line: step.line ?? null,
+          state: snapshotFrameState(frameHooks),
+          hostDocument: editor.getDocument(),
+          eventLog: {
+            dirtyChanges: eventLog.dirtyChanges.slice(),
+            saveRequests: eventLog.saveRequests.slice(),
+            changes: eventLog.changes.slice()
+          }
+        });
+      }
+
+      const payload = {
+        version,
+        fixture: fixture.name,
+        markdown: fixture.markdown,
+        expected_html: fixture.expected_html,
+        expected_rendered_lines: fixture.expected_rendered_lines,
+        after_load: afterLoad,
+        rendered_state: renderedState,
+        interactions,
+        engine_html: frameHooks.renderMarkdownBlock(fixture.markdown),
+        debug_logs: typeof frameWindow.__getEditorDebugLogs === 'function'
+          ? frameWindow.__getEditorDebugLogs()
+          : [],
+        host_document: editor.getDocument(),
+        event_log: eventLog
+      };
+
+      document.body.dataset.status = 'ok';
+      document.body.dataset-progress = 'done';
+      result.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    run().catch((error) => {
+      document.body.dataset.status = 'error';
+      result.textContent = JSON.stringify({
+        error: error.message,
+        stack: error.stack
+      }, null, 2);
+    });
+    })().catch((error) => {
+      document.body.dataset.status = 'error';
+      document.body.dataset-progress = 'module-import-failed';
+      result.textContent = JSON.stringify({
+        error: error.message,
+        stack: error.stack
+      }, null, 2);
+    });
+  </script>
+</body>
+</html>

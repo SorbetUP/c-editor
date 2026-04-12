@@ -25,6 +25,10 @@ backups/
 *.tmp
 *.wasm
 *.js.mem
+*.pyc
+*.pyo
+__pycache__/
+.pytest_cache/
 
 # Generated WASM outputs
 editor.js
@@ -42,8 +46,6 @@ web/site/docs/cursor_c_interface.js
 # Documentation and reports (not essential for project)
 IMPLEMENTATION_SUMMARY.md
 RELEASE_VALIDATION_REPORT.md
-FULL_VALIDATION_REPORT.md
-VALIDATION_REPORT.md
 claude.md
 CLAUDE.md
 
@@ -56,3 +58,7 @@ CLAUDE.md
 # macOS
 .DS_Store
 __.SYMDEF SORTED
+
+# Local tool state
+.claude/
+vault/

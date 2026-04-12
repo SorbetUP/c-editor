@@ -1,4 +1,7 @@
 #!/bin/bash
+
+REPORT_DIR="docs/reports"
+REPORT_FILE="${REPORT_DIR}/VALIDATION_REPORT.md"
 # validate-release.sh - Comprehensive validation script for v1.0.1-tests release
 # Usage: ./scripts/validate-release.sh [SHA]
 
@@ -243,7 +246,8 @@ echo -e "${BLUE}Timestamp: $(date -u +"%Y-%m-%d %H:%M:%S UTC")${NC}"
 echo -e "${GREEN}✅ Ready for v1.0.1-tests release tag${NC}"
 
 # Generate validation report
-cat > VALIDATION_REPORT.md << EOF
+mkdir -p "${REPORT_DIR}"
+cat > "${REPORT_FILE}" << EOF
 # Validation Report v1.0.1-tests
 
 **Commit SHA**: \`${COMMIT_SHA}\`  
@@ -272,4 +276,4 @@ $(find tests/fixtures -name "*.md" | wc -l) fixture files tested
 This commit is validated and ready for \`v1.0.1-tests\` tag.
 EOF
 
-echo -e "\n${BLUE}📋 Validation report saved to: VALIDATION_REPORT.md${NC}"
+echo -e "\n${BLUE}📋 Validation report saved to: ${REPORT_FILE}${NC}"

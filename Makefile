@@ -71,6 +71,9 @@ run: $(BUNDLE_NAME)
 	@echo "🚀 Launching $(APP_NAME)..."
 	@open $(BUNDLE_NAME)
 
+clean-repo:
+	@./scripts/clean_repo.sh
+
 # Debug info
 debug: $(BUNDLE_NAME)
 	@echo "📝 App Info:"
@@ -79,7 +82,7 @@ debug: $(BUNDLE_NAME)
 	@file $(MACOS_DIR)/$(APP_NAME)
 	@ls -la $(BUNDLE_NAME)
 
-.PHONY: all clean run debug
+.PHONY: all clean clean-repo run debug
 
 # Check dependencies
 check-deps:

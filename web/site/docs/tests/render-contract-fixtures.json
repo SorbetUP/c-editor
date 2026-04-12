@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "name": "heading_single",
+      "document_title": "Heading Single",
+      "markdown": "# Titre",
+      "expected_html": "<h1>Titre</h1>",
+      "expected_rendered_lines": [
+        "<h1>Titre</h1>"
+      ],
+      "interaction_steps": [
+        {
+          "action": "activate_line",
+          "line": 0,
+          "cursor": 0,
+          "expected_inner_html": "<span class=\"md-marker md-edit-heading md-edit-heading-1\"># </span><span class=\"md-edit-heading md-edit-heading-1\">Titre</span>",
+          "expected_classes": [
+            "editor-line",
+            "current-line",
+            "markdown-visible-edit"
+          ]
+        },
+        {
+          "action": "set_line_markdown",
+          "line": 0,
+          "markdown": "# Nouveau titre",
+          "expected_dirty": true
+        },
+        {
+          "action": "render_line",
+          "line": 0,
+          "expected_inner_html": "<h1>Nouveau titre</h1>"
+        },
+        {
+          "action": "save_request",
+          "expected_document": {
+            "title": "Nouveau titre",
+            "body": "",
+            "content": "# Nouveau titre"
+          }
+        }
+      ]
+    },
+    {
+      "name": "rich_inline",
+      "document_title": "Rich Inline",
+      "markdown": "Texte **gras** et *italique* et `code`",
+      "expected_html": "Texte <strong>gras</strong> et <em>italique</em> et <code>code</code>",
+      "expected_rendered_lines": [
+        "Texte <strong>gras</strong> et <em>italique</em> et <code>code</code>"
+      ],
+      "interaction_steps": []
+    },
+    {
+      "name": "escaped_html",
+      "document_title": "Escaped Html",
+      "markdown": "<script> & test",
+      "expected_html": "&lt;script&gt; &amp; test",
+      "expected_rendered_lines": [
+        "&lt;script&gt; &amp; test"
+      ],
+      "interaction_steps": []
+    },
+    {
+      "name": "code_fence_block",
+      "document_title": "Code Fence Block",
+      "markdown": "```c\nint x = 1;\n```",
+      "expected_html": "<pre><code class=\"language-c\">int x = 1;</code></pre>",
+      "expected_rendered_lines": [
+        "<span class=\"fence-line\">```c</span>",
+        "<span class=\"code-line\">int x = 1;</span>",
+        "<span class=\"fence-line\">```</span>"
+      ],
+      "interaction_steps": []
+    },
+    {
+      "name": "task_list_checked",
+      "document_title": "Task List Checked",
+      "markdown": "- [x] done",
+      "expected_html": "<ul class=\"task-list\"><li><input type=\"checkbox\" checked disabled /> done</li></ul>",
+      "expected_rendered_lines": [
+        "<span class=\"list-line\"><span class=\"list-marker\"><input type=\"checkbox\" checked=\"\" disabled=\"\"></span> done</span>"
+      ],
+      "interaction_steps": []
+    },
+    {
+      "name": "editable_multiline_document",
+      "document_title": "Editable Multiline Document",
+      "markdown": "# Titre\n\nTexte **gras**\n- [x] fini",
+      "expected_html": "<h1>Titre</h1><p>Texte <strong>gras</strong></p><ul class=\"task-list\"><li><input type=\"checkbox\" checked disabled /> fini</li></ul>",
+      "expected_rendered_lines": [
+        "<h1>Titre</h1>",
+        "&nbsp;",
+        "Texte <strong>gras</strong>",
+        "<span class=\"list-line\"><span class=\"list-marker\"><input type=\"checkbox\" checked=\"\" disabled=\"\"></span> fini</span>"
+      ],
+      "interaction_steps": [
+        {
+          "action": "activate_line",
+          "line": 2,
+          "cursor": 0,
+          "expected_classes": [
+            "editor-line",
+            "current-line",
+            "markdown-visible-edit"
+          ]
+        },
+        {
+          "action": "set_line_markdown",
+          "line": 2,
+          "markdown": "Texte ==vrai==",
+          "expected_dirty": true
+        },
+        {
+          "action": "render_line",
+          "line": 2,
+          "expected_inner_html": "Texte <mark>vrai</mark>",
+          "expected_other_line": {
+            "line": 3,
+            "inner_html": "<span class=\"list-line\"><span class=\"list-marker\"><input type=\"checkbox\" checked=\"\" disabled=\"\"></span> fini</span>"
+          }
+        },
+        {
+          "action": "save_request",
+          "expected_document": {
+            "title": "Titre",
+            "body": "Texte ==vrai==\n- [x] fini",
+            "content": "# Titre\n\nTexte ==vrai==\n- [x] fini"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hybrid Editor Smoke Test</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #0b0b0d;
+      color: #f3f3f4;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .layout {
+      display: grid;
+      gap: 16px;
+    }
+
+    .panel {
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 16px;
+    }
+
+    .status-pass { color: #5dd39e; }
+    .status-fail { color: #ff7b72; }
+    .status-warn { color: #f2cc60; }
+
+    hybrid-note-editor {
+      display: block;
+      height: 80vh;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <div class="panel">
+      <strong id="status">Initialisation…</strong>
+    </div>
+    <div class="panel">
+      <hybrid-note-editor id="editor"></hybrid-note-editor>
+    </div>
+    <div class="panel">
+      <h2>Logs</h2>
+      <pre id="logs"></pre>
+    </div>
+  </div>
+
+  <script type="module">
+    import '../components/hybrid-note-editor.js';
+
+    const editor = document.getElementById('editor');
+    const status = document.getElementById('status');
+    const logs = document.getElementById('logs');
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function waitFor(condition, timeoutMs, label) {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeoutMs) {
+        if (condition()) {
+          return;
+        }
+        await sleep(50);
+      }
+      throw new Error(`Timeout: ${label}`);
+    }
+
+    async function run() {
+      await waitFor(() => editor.frame?.contentWindow, 8000, 'iframe ready');
+      await waitFor(() => editor.frameReady, 8000, 'bridge ready');
+
+      const frameWindow = editor.frame.contentWindow;
+      await waitFor(() => frameWindow.isWasmReady === true, 15000, 'WASM ready');
+
+      const sample = {
+        title: 'Smoke note',
+        body: [
+          'Paragraphe de test.',
+          '',
+          '## Tableau',
+          '| Bloc | Etat |',
+          '| --- | --- |',
+          '| Rendu | OK |',
+          '',
+          '- item un',
+          '- item deux'
+        ].join('\n')
+      };
+
+      editor.loadDocument(sample);
+      await sleep(500);
+
+      if (typeof frameWindow.showLineAsMarkdownWithPosition === 'function') {
+        frameWindow.showLineAsMarkdownWithPosition(1, 0);
+        await sleep(100);
+      }
+
+      if (typeof frameWindow.renderLineAsHTML === 'function') {
+        frameWindow.renderLineAsHTML(1);
+        await sleep(150);
+      }
+
+      const debugLogs = typeof frameWindow.__getEditorDebugLogs === 'function'
+        ? frameWindow.__getEditorDebugLogs()
+        : [];
+
+      logs.textContent = debugLogs.map((entry) => `[${entry.level}] ${entry.message}`).join('\n');
+
+      const hasEngineError = debugLogs.some((entry) =>
+        entry.message.includes('C ENGINE NOT READY') ||
+        entry.message.includes('C ENGINE ERROR') ||
+        entry.message.includes('FAILED')
+      );
+
+      const renderedErrors = frameWindow.document.body.innerText.includes('❌ C ENGINE ERROR');
+      const renderedLines = frameWindow.document.querySelectorAll('.editor-line').length;
+
+      if (hasEngineError || renderedErrors || renderedLines === 0) {
+        status.textContent = 'ECHEC smoke test';
+        status.className = 'status-fail';
+        return;
+      }
+
+      status.textContent = 'OK smoke test';
+      status.className = 'status-pass';
+    }
+
+    run().catch((error) => {
+      status.textContent = `ECHEC smoke test: ${error.message}`;
+      status.className = 'status-fail';
+    });
+  </script>
+</body>
+</html>

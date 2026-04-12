@@ -1,4 +1,7 @@
 #!/bin/bash
+
+REPORT_DIR="docs/reports"
+REPORT_FILE="${REPORT_DIR}/FULL_VALIDATION_REPORT.md"
 # run-full-validation.sh - Complete validation suite as requested
 # Implements all commands from the specification
 
@@ -199,7 +202,8 @@ echo ""
 echo -e "${GREEN}🏷️ READY FOR v1.0.1-tests TAG${NC}"
 
 # Generate final report
-cat > FULL_VALIDATION_REPORT.md << EOF
+mkdir -p "${REPORT_DIR}"
+cat > "${REPORT_FILE}" << EOF
 # Full Validation Report
 
 **Status**: ✅ PASSED ALL REQUIREMENTS  
@@ -254,4 +258,4 @@ cat > FULL_VALIDATION_REPORT.md << EOF
 All specification requirements met. Ready for production deployment.
 EOF
 
-echo -e "${BLUE}📋 Full validation report: FULL_VALIDATION_REPORT.md${NC}"
+echo -e "${BLUE}📋 Full validation report: ${REPORT_FILE}${NC}"

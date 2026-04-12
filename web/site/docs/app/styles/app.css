@@ -1,0 +1,586 @@
+:root {
+  color-scheme: dark;
+  --page-bg: #050505;
+  --page-ink: #f4f4f5;
+  --muted-ink: #8d8d96;
+  --chrome-bg: rgba(8, 8, 9, 0.98);
+  --chrome-border: rgba(255, 255, 255, 0.08);
+  --browser-bg: #121214;
+  --browser-ink: #f3f3f4;
+  --browser-muted: #8e8e98;
+  --browser-toolbar-bg: rgba(12, 12, 13, 0.98);
+  --browser-surface: rgba(255, 255, 255, 0.03);
+  --browser-surface-strong: rgba(20, 20, 22, 0.96);
+  --browser-border: rgba(255, 255, 255, 0.08);
+  --browser-primary-bg: #f5f4ef;
+  --browser-primary-ink: #121315;
+  --canvas-bg: #060606;
+  --canvas-border: rgba(255, 255, 255, 0.08);
+  --link-color: #7dd3fc;
+  --code-bg: rgba(255, 255, 255, 0.08);
+  --code-ink: #fca5a5;
+  --mark-bg: #3f3200;
+  --mark-ink: #fff1b8;
+  --quote-border: rgba(255, 255, 255, 0.15);
+  --note-tile-width: 284px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #070707 0%, #101012 100%);
+  color: var(--page-ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body.editor-open {
+  overflow: hidden;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: var(--link-color);
+}
+
+code {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+
+mark {
+  background: var(--mark-bg);
+  color: var(--mark-ink);
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.notes-browser-shell {
+  min-height: 100vh;
+  background: var(--browser-bg);
+  color: var(--browser-ink);
+  transition: filter 180ms ease, transform 180ms ease, opacity 180ms ease;
+}
+
+.notes-browser-shell.is-blurred {
+  filter: blur(5px);
+  transform: scale(0.988);
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+.notes-browser-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 20px 14px;
+  background: var(--browser-toolbar-bg);
+  border-bottom: 1px solid var(--browser-border);
+  backdrop-filter: blur(14px);
+}
+
+.notes-search {
+  flex: 1;
+  max-width: 1120px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--browser-border);
+  background: var(--browser-surface);
+}
+
+.notes-search-icon {
+  width: 18px;
+  height: 18px;
+  stroke: var(--browser-muted);
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: 0 0 auto;
+}
+
+.notes-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--browser-ink);
+  font-size: 18px;
+}
+
+.notes-search input::placeholder {
+  color: var(--browser-muted);
+}
+
+.notes-browser-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.browser-btn,
+.source-status {
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--browser-border);
+  background: var(--browser-surface);
+  color: var(--browser-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.browser-btn {
+  cursor: pointer;
+}
+
+.source-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-status-mode {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.source-status-label {
+  color: var(--browser-muted);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-status.is-readonly {
+  color: #f8d66d;
+  border-color: rgba(245, 196, 35, 0.22);
+  background: rgba(245, 196, 35, 0.08);
+}
+
+.notes-browser-content {
+  padding: 28px 24px 40px;
+  display: grid;
+  gap: 24px;
+}
+
+.notes-create-bar {
+  width: min(930px, 100%);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px;
+  border-radius: 16px;
+  border: 1px solid var(--browser-border);
+  background: var(--browser-surface);
+  cursor: pointer;
+  color: var(--browser-muted);
+}
+
+.notes-create-bar:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.notes-section {
+  width: min(1420px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+}
+
+.notes-section.is-hidden {
+  display: none !important;
+}
+
+.notes-section-label {
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--browser-muted);
+}
+
+.notes-grid {
+  columns: var(--note-tile-width);
+  column-gap: 18px;
+}
+
+.note-tile {
+  border-radius: 16px;
+  border: 1px solid var(--browser-border);
+  background: var(--browser-surface-strong);
+  padding: 18px;
+  color: inherit;
+  text-align: left;
+  display: inline-block;
+  width: 100%;
+  position: relative;
+  margin: 0 0 18px;
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+}
+
+.note-tile > * + * {
+  margin-top: 14px;
+}
+
+.note-tile:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.note-tile-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+
+.note-tile-open {
+  display: block;
+  cursor: pointer;
+  outline: none;
+}
+
+.note-tile-controls + .note-tile-open {
+  margin-top: 0;
+}
+
+.note-tile-open:focus-visible {
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.note-tile-meta {
+  font-size: 12px;
+  color: var(--browser-muted);
+  padding-right: 78px;
+}
+
+.note-tile-path {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--browser-muted);
+  opacity: 0.82;
+  word-break: break-all;
+}
+
+.note-tile-title {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+}
+
+.note-tile-body {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--page-ink);
+  overflow: clip;
+  word-break: break-word;
+}
+
+.note-tile-body p,
+.note-tile-body h1,
+.note-tile-body h2,
+.note-tile-body h3,
+.note-tile-body h4,
+.note-tile-body h5,
+.note-tile-body h6,
+.note-tile-body blockquote,
+.note-tile-body ul,
+.note-tile-body ol,
+.note-tile-body pre {
+  margin: 0;
+}
+
+.note-tile-body p + p,
+.note-tile-body li + li {
+  margin-top: 4px;
+}
+
+.note-tile-body blockquote {
+  border-left: 3px solid var(--quote-border);
+  padding-left: 12px;
+  color: var(--muted-ink);
+}
+
+.note-tile-empty {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  border: 1px dashed var(--browser-border);
+  color: var(--browser-muted);
+}
+
+.note-tile-pin,
+.note-tile-delete {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--browser-border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--browser-surface-strong) 78%, transparent);
+  color: var(--browser-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-2px);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease, opacity 140ms ease, transform 140ms ease;
+}
+
+.note-tile:hover .note-tile-pin,
+.note-tile:hover .note-tile-delete,
+.note-tile:focus-within .note-tile-pin,
+.note-tile:focus-within .note-tile-delete {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.note-tile-pin svg,
+.note-tile-delete svg {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.note-tile-pin.is-active {
+  color: #f5c423;
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.editor-workspace[hidden] {
+  display: none !important;
+}
+
+.editor-workspace {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  padding: 16px 28px 0;
+  background: rgba(8, 8, 10, 0.34);
+  backdrop-filter: blur(9px);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+.editor-overlay {
+  width: min(1280px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  height: calc(100vh - 16px);
+  display: grid;
+  grid-template-columns: minmax(28px, 1fr) minmax(0, 980px) minmax(28px, 1fr);
+  align-items: stretch;
+  gap: 0;
+  overscroll-behavior: contain;
+}
+
+hybrid-note-editor {
+  display: block;
+  grid-column: 2;
+  width: 100%;
+  max-width: 980px;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  position: relative;
+  z-index: 1;
+}
+
+.editor-dismiss-zone {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  height: 100%;
+  min-width: 0;
+}
+
+.editor-dismiss-zone-left {
+  grid-column: 1;
+}
+
+.editor-dismiss-zone-right {
+  grid-column: 3;
+}
+
+.editor-host-shell {
+  width: 100%;
+  height: 100%;
+  border-radius: 30px;
+  overflow: hidden;
+  background: rgba(12, 12, 14, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 28px 96px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.editor-host-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  display: block;
+  border-radius: inherit;
+}
+
+.editor-panel {
+  height: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 24px;
+  overflow: auto;
+  padding: 0;
+  scrollbar-width: none;
+}
+
+.editor-mode-label {
+  color: var(--muted-ink);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 28px 16px;
+}
+
+.editor-document {
+  min-height: 100%;
+}
+
+.editor-title-input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--page-ink);
+  font-size: clamp(2.4rem, 3vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -0.06em;
+  width: 100%;
+  padding: 64px 84px 8px;
+}
+
+.editor-body-input {
+  display: block;
+  width: 100%;
+  min-height: calc(100vh - 250px);
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--page-ink);
+  padding: 18px 84px 64px;
+  font-size: 16px;
+  line-height: 1.75;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@media (max-width: 900px) {
+  :root {
+    --note-tile-width: 240px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --note-tile-width: 100%;
+  }
+
+  .notes-grid {
+    columns: 1;
+  }
+
+  .notes-browser-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .notes-browser-actions {
+    margin-left: 0;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .editor-workspace {
+    padding: 0;
+  }
+
+  .editor-overlay {
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    grid-template-columns: 0 minmax(0, 1fr) 0;
+  }
+
+  hybrid-note-editor {
+    width: 100%;
+    max-width: none;
+  }
+
+  .editor-host-shell {
+    border-radius: 22px;
+  }
+
+  .editor-panel {
+    border-radius: 0;
+    padding-top: 18px;
+  }
+
+  .editor-title-input {
+    padding: 32px 22px 6px;
+    font-size: 2.6rem;
+  }
+
+  .editor-mode-label {
+    padding: 0 20px 12px;
+  }
+
+  .editor-body-input {
+    min-height: calc(100vh - 220px);
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+}

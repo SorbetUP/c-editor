@@ -1,0 +1,11 @@
+{
+  "name": "ElephantNote",
+  "short_name": "ElephantNote",
+  "lang": "fr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#070707",
+  "theme_color": "#070707",
+  "description": "Bibliotheque de notes locale avec editeur Markdown optimise."
+}

@@ -1,0 +1,16 @@
+{
+  "name": "elephantnote-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --root docs",
+    "build": "vite build --root docs --outDir ../dist/pwa",
+    "preview": "vite preview --root docs",
+    "test": "node --test docs/app/**/*.test.js"
+  },
+  "devDependencies": {
+    "vite": "^5.4.19",
+    "vite-plugin-pwa": "^0.20.5"
+  }
+}
