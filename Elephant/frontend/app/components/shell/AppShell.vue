@@ -106,15 +106,26 @@
           />
         </div>
       </div>
-      <button
+      <CreateEntryMenu
         v-if="isMobileShell && !store.openedNotePath"
-        class="en-mobile-fab"
-        type="button"
-        aria-label="New note"
-        @click="store.createNote?.()"
+        mobile
+        :disabled="mobileCreateBusy"
+        @select="handleMobileCreate"
       >
-        <Plus class="en-mobile-fab-icon" />
-      </button>
+        <template #trigger="{ toggle, open, disabled }">
+          <button
+            class="en-mobile-fab"
+            type="button"
+            aria-label="Create"
+            :aria-expanded="open"
+            aria-haspopup="menu"
+            :disabled="disabled"
+            @click="toggle"
+          >
+            <Plus class="en-mobile-fab-icon" />
+          </button>
+        </template>
+      </CreateEntryMenu>
     </div>
     <template v-for="entry in shellRightZones" :key="entry.contribution.id">
       <component
@@ -160,6 +171,8 @@ import SidebarNav from '../navigation/SidebarNav.vue'
 import MainContent from './MainContent.vue'
 import SettingsPanel from '../settings/SettingsPanel.vue'
 import SearchModal from '../../search/SearchModal.vue'
+import CreateEntryMenu from '../library/CreateEntryMenu.vue'
+import { openNewDrawing } from '../library/createEntryActions'
 import '../../styles/app-shell.css'
 import '../../styles/app-shell-runtime-fixes.css'
 
@@ -172,6 +185,7 @@ const searchStore = useSearchStore()
 const navigationStore = useNavigationStore()
 const canvasStore = useCanvasStore()
 const isSettingsOpen = ref(false)
+const mobileCreateBusy = ref(false)
 const settingsInitialSection = ref('appearance')
 const activeAddonViewId = ref('')
 const theme = ref(normalizeThemeId(window.localStorage.getItem(ELEPHANTNOTE_THEME_STORAGE_KEY)))
@@ -388,6 +402,20 @@ const createLocalVault = async () => {
   if (payload?.canceled) return false
   store.applyPayload(payload)
   return true
+}
+
+const handleMobileCreate = async (key) => {
+  if (mobileCreateBusy.value) return
+  mobileCreateBusy.value = true
+  try {
+    if (key === 'note') await store.createNote?.()
+    else if (key === 'folder') await store.createFolder?.()
+    else if (key === 'drawing') openNewDrawing()
+  } catch (error) {
+    console.error(`[shell] create ${key} failed`, error)
+  } finally {
+    mobileCreateBusy.value = false
+  }
 }
 
 const refreshVisibleVaultFiles = async () => {

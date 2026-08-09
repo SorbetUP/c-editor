@@ -1,24 +1,24 @@
 <template>
   <div class="en-library-toolbar">
     <div class="en-library-toolbar-left">
-      <button
-        class="en-create-button en-create-button-primary"
-        type="button"
+      <CreateEntryMenu
         :disabled="isBusy || !store.hasVault"
-        @click="createNote"
+        @select="handleCreateSelection"
       >
-        <FilePlus2 class="en-create-icon" />
-        <span>{{ busyAction === 'note' ? 'Creating…' : 'New note' }}</span>
-      </button>
-      <button
-        class="en-create-button"
-        type="button"
-        :disabled="isBusy || !store.hasVault"
-        @click="createFolder"
-      >
-        <FolderPlus class="en-create-icon" />
-        <span>{{ busyAction === 'folder' ? 'Creating…' : 'New folder' }}</span>
-      </button>
+        <template #trigger="{ toggle, open, disabled }">
+          <button
+            class="en-create-button en-create-button-primary"
+            type="button"
+            :disabled="disabled"
+            :aria-expanded="open"
+            aria-haspopup="menu"
+            @click="toggle"
+          >
+            <Plus class="en-create-icon" />
+            <span>{{ isBusy ? 'Creating…' : 'Create' }}</span>
+          </button>
+        </template>
+      </CreateEntryMenu>
       <span
         v-if="actionError"
         class="en-library-action-error"
@@ -69,8 +69,10 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { FilePlus2, FolderPlus, Grid3x3, List } from '@lucide/vue'
+import { Grid3x3, List, Plus } from '@lucide/vue'
 import { useVaultStore } from '../../stores/vaultStore'
+import CreateEntryMenu from './CreateEntryMenu.vue'
+import { openNewDrawing } from './createEntryActions'
 
 const store = useVaultStore()
 const busyAction = ref('')
@@ -93,6 +95,13 @@ const runCreateAction = async (action, callback) => {
 
 const createNote = () => runCreateAction('note', () => store.createNote())
 const createFolder = () => runCreateAction('folder', () => store.createFolder())
+const createDrawing = () => runCreateAction('drawing', openNewDrawing)
+
+const handleCreateSelection = (key) => {
+  if (key === 'note') return createNote()
+  if (key === 'folder') return createFolder()
+  if (key === 'drawing') return createDrawing()
+}
 </script>
 
 <style scoped>

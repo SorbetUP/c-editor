@@ -1,6 +1,6 @@
 [package]
 name = "elephantnote-tauri"
-version = "0.18.9"
+version = "0.1.0"
 description = "ElephantNote Tauri shell"
 authors = ["Jocs <ransixi@gmail.com>"]
 license = "MIT"

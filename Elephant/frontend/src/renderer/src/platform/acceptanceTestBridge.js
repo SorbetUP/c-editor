@@ -261,24 +261,28 @@ export const installAcceptanceTestBridge = ({
       const text = element.textContent || ''
       const from = Math.max(0, Math.min(text.length, Number(start) || 0))
       const to = Math.max(from, Math.min(text.length, end === undefined ? text.length : Number(end) || 0))
-      const walker = target.document.createTreeWalker(element, target.NodeFilter?.SHOW_TEXT || 4)
-      const nodes = []
-      let offset = 0
-      let node
-      while ((node = walker.nextNode())) {
-        nodes.push({ node, start: offset, end: offset + node.textContent.length })
-        offset += node.textContent.length
+      const createRange = () => {
+        const walker = target.document.createTreeWalker(element, target.NodeFilter?.SHOW_TEXT || 4)
+        const nodes = []
+        let offset = 0
+        let node
+        while ((node = walker.nextNode())) {
+          nodes.push({ node, start: offset, end: offset + node.textContent.length })
+          offset += node.textContent.length
+        }
+        const locate = (position) => {
+          const entry = nodes.find((candidate) => position >= candidate.start && position <= candidate.end) || nodes[nodes.length - 1]
+          if (!entry) throw new Error(`selectText target has no text nodes: ${selector}`)
+          return { node: entry.node, offset: Math.max(0, Math.min(entry.node.textContent.length, position - entry.start)) }
+        }
+        const range = target.document.createRange()
+        const rangeStart = locate(from)
+        const rangeEnd = locate(to)
+        range.setStart(rangeStart.node, rangeStart.offset)
+        range.setEnd(rangeEnd.node, rangeEnd.offset)
+        return range
       }
-      const locate = (position) => {
-        const entry = nodes.find((candidate) => position >= candidate.start && position <= candidate.end) || nodes[nodes.length - 1]
-        if (!entry) throw new Error(`selectText target has no text nodes: ${selector}`)
-        return { node: entry.node, offset: Math.max(0, Math.min(entry.node.textContent.length, position - entry.start)) }
-      }
-      const range = target.document.createRange()
-      const rangeStart = locate(from)
-      const rangeEnd = locate(to)
-      range.setStart(rangeStart.node, rangeStart.offset)
-      range.setEnd(rangeEnd.node, rangeEnd.offset)
+      const range = createRange()
       const selection = target.getSelection?.() || target.document.defaultView?.getSelection?.()
       if (!selection) throw new Error('selectText requires Selection support')
       selection.removeAllRanges()
@@ -302,7 +306,15 @@ export const installAcceptanceTestBridge = ({
         }
         activeMuya.dispatchSelectionChange?.(activeMuya.contentState.cursor)
       }
-      const result = { selector, start: from, end: to, text: selection.toString() }
+      // Muya synchronizes its cursor through the editor adapter and may clear
+      // the browser selection while publishing that state. Keep the real DOM
+      // range selected so the following user action (for example, citation)
+      // observes the same selection that was just created.
+      selection.removeAllRanges()
+      const restoredRange = createRange()
+      selection.addRange(restoredRange)
+      const selectedText = selection.toString() || restoredRange.toString()
+      const result = { selector, start: from, end: to, text: selectedText }
       log(target, 'dom:select-text', { selector, start: from, end: to, textLength: result.text.length })
       return result
     },

@@ -325,6 +325,27 @@ const selectionBelongsToEditor = (selection, editorHost) => {
   return !!anchorElement && !!focusElement && editorHost.contains(anchorElement) && editorHost.contains(focusElement)
 }
 
+const cloneSelectionRange = (selection) => {
+  if (!selection?.rangeCount) return null
+  return selection.getRangeAt(0).cloneRange()
+}
+
+const restoreSelectionRange = (target, range) => {
+  if (!range) return false
+  const selection = target.getSelection?.()
+  if (!selection) return false
+  selection.removeAllRanges()
+  selection.addRange(range.cloneRange())
+  return true
+}
+
+const getSelectionText = (selection) => {
+  if (!selection) return ''
+  const text = selection.toString?.() || ''
+  if (text) return text
+  return selection.rangeCount ? selection.getRangeAt(0).toString() : ''
+}
+
 const createCitationButton = (copyCitation, windowObject) => {
   const button = windowObject.document.createElement('button')
   button.type = 'button'
@@ -370,6 +391,7 @@ export const installNoteCitationRuntime = ({
   const editorStore = providedEditorStore || (pinia ? useEditorStore(pinia) : null)
   let citationButton = null
   let selectionButton = null
+  let lastEditorSelectionRange = null
   let palette = null
   let contextMenu = null
   const buffer = Array.isArray(target[BUFFER_KEY]) ? target[BUFFER_KEY] : []
@@ -455,7 +477,11 @@ export const installNoteCitationRuntime = ({
 
   const copyCitation = async () => {
     const editorHost = target.document.querySelector('.en-editor-host')
-    const selection = target.getSelection?.()
+    let selection = target.getSelection?.()
+    if (!selectionBelongsToEditor(selection, editorHost) || !getSelectionText(selection)) {
+      restoreSelectionRange(target, lastEditorSelectionRange)
+      selection = target.getSelection?.()
+    }
     if (!selectionBelongsToEditor(selection, editorHost)) {
       createFeedback('Sélectionnez d’abord le texte à citer dans la note.', target, true)
       appendDebugLog(target, 'warn', '[elephantnote:citation] no editor selection to cite', {
@@ -469,7 +495,7 @@ export const installNoteCitationRuntime = ({
       notePath.split('/').pop()?.replace(/\.md$/i, '') ||
       'Source'
     const citation = buildNoteCitationMarkdown({
-      text: selection.toString(),
+      text: getSelectionText(selection),
       notePath,
       noteTitle
     })
@@ -483,7 +509,7 @@ export const installNoteCitationRuntime = ({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         path: notePath,
         title: noteTitle,
-        text: normalizeCitationText(selection.toString()),
+        text: normalizeCitationText(getSelectionText(selection)),
         markdown: citation,
         createdAt: new Date().toISOString()
       }
@@ -496,7 +522,7 @@ export const installNoteCitationRuntime = ({
       createFeedback('Citation copiée et ajoutée au tampon. Cliquez-la dans une autre note pour la coller.', target)
       appendDebugLog(target, 'info', '[elephantnote:citation] copied selected note text', {
         notePath,
-        selectedLength: normalizeCitationText(selection.toString()).length,
+        selectedLength: normalizeCitationText(getSelectionText(selection)).length,
         citationLength: citation.length,
         bufferSize: buffer.length
       })
@@ -517,6 +543,7 @@ export const installNoteCitationRuntime = ({
       selectionButton = null
       return
     }
+    lastEditorSelectionRange = cloneSelectionRange(selection)
     if (selectionButton) return
     selectionButton = target.document.createElement('button')
     selectionButton.type = 'button'
@@ -601,6 +628,7 @@ export const installNoteCitationRuntime = ({
       target.document.removeEventListener('mouseup', updateSelectionButton)
       citationButton?.remove()
       selectionButton?.remove()
+      lastEditorSelectionRange = null
       palette?.remove()
       removeContextMenu()
       target.document.querySelector('[data-elephant-citation-feedback]')?.remove()

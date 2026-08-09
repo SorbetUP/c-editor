@@ -79,7 +79,7 @@ const createNotes = (source = new Map()) => {
 }
 
 const baseApi = (notes, storage = createStorage()) => ({
-  app: { info: async () => ({ name: 'ElephantNote', version: '0.18.9', addonApiVersion: 1 }) },
+  app: { info: async () => ({ name: 'ElephantNote', version: '0.1.0', addonApiVersion: 1 }) },
   notes: notes.api,
   storage: storage.api,
   http: { request: async () => { throw new Error('network not expected') } }

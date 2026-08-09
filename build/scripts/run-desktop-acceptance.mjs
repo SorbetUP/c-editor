@@ -89,6 +89,28 @@ const expectCommandFailure = async(commandName, ...args) => {
   return body
 }
 
+const waitForDomText = async(selector, expectedText, timeoutMs = 10000) => {
+  const deadline = Date.now() + timeoutMs
+  let last = null
+  while (Date.now() <= deadline) {
+    last = await command('readDom', selector)
+    if (last.exists && last.text.includes(expectedText)) return last
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50))
+  }
+  throw new Error(`Timed out waiting for ${JSON.stringify(expectedText)} in ${selector}: ${JSON.stringify(last)}`)
+}
+
+const waitForDisplayedText = async(expectedText, timeoutMs = 10000) => {
+  const deadline = Date.now() + timeoutMs
+  let last = null
+  while (Date.now() <= deadline) {
+    last = await command('readDisplayed')
+    if (last.displayedText.includes(expectedText)) return last
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50))
+  }
+  throw new Error(`Timed out waiting for displayed text ${JSON.stringify(expectedText)}: ${JSON.stringify(last)}`)
+}
+
 const health = await fetch(`${endpoint}/health`).then((response) => response.json())
 if (health.transport !== 'tauri') throw new Error(`Acceptance transport is not Tauri: ${JSON.stringify(health)}`)
 
@@ -120,6 +142,34 @@ try {
     throw new Error(`First-run vault picker is not visible: ${JSON.stringify(emptyVaultUi)}`)
   }
   await command('selectVault', vaultRoot)
+  if (process.env.ELEPHANT_ACCEPTANCE_UI_ONLY === '1') {
+    const createToolbar = await command('waitFor', '.en-library-toolbar', 10000)
+    const createButton = await command('readDom', '.en-create-button-primary')
+    if (!createToolbar.exists || !createButton.exists || !createButton.visible || createButton.text.trim() !== 'Create') {
+      throw new Error(`Create trigger is not visible or has an unexpected label: ${JSON.stringify({ createToolbar, createButton })}`)
+    }
+    await command('click', '.en-create-button-primary')
+    const createMenu = await command('waitFor', '.en-create-menu-popover', 10000)
+    const createOptions = await command('readDom', '.en-create-menu-popover')
+    const menuItemCount = (createOptions.html.match(/role="menuitem"/g) || []).length
+    if (!createMenu.exists || createMenu.attributes.role !== 'menu' || !createOptions.text.includes('Note') || !createOptions.text.includes('Drawing') || !createOptions.text.includes('Folder') || menuItemCount !== 3) {
+      throw new Error(`Create menu is incomplete: ${JSON.stringify({ createMenu, createOptions, menuItemCount })}`)
+    }
+    await command('click', '.en-create-menu-option:nth-of-type(2)')
+    const drawingDialog = await command('waitFor', '[data-testid="excalidraw-dialog"]', 15000)
+    const drawingCanvas = await command('waitFor', '.en-excalidraw-canvas canvas', 15000)
+    if (!drawingDialog.exists || !drawingCanvas.exists) throw new Error(`Drawing option did not open the real Excalidraw canvas: ${JSON.stringify({ drawingDialog, drawingCanvas })}`)
+    await command('click', '[data-testid="excalidraw-close"]')
+    await command('waitUntilGone', '[data-testid="excalidraw-dialog"]', 10000)
+    const uiResult = { createToolbar, createButton, createMenu, createOptions, menuItemCount, drawingDialog, drawingCanvas }
+    result = { emptyVaultUi: null, uiResult }
+    writeFileSync(join(artifactRoot, 'latest.json'), JSON.stringify({ at: new Date().toISOString(), runtime: 'tauri', result }, null, 2))
+    writeFileSync(join(artifactRoot, 'latest-tauri.log'), output, 'utf8')
+    console.log(`[acceptance-runner] create menu UI scenario passed ${JSON.stringify({ menuItems: 3, drawingCanvas: drawingCanvas.exists })}`)
+    await stopChild()
+    rmSync(fixtureRoot, { recursive: true, force: true })
+    process.exit(0)
+  }
   const capabilities = await command('capabilities')
   const addonState = await command('addonState')
   if (capabilities.runtime !== 'tauri' || !capabilities.commands.includes('invokeTauri')) throw new Error(`Acceptance capabilities are incomplete: ${JSON.stringify(capabilities)}`)
@@ -237,9 +287,12 @@ try {
   }
   const liveNote = await command('openNote', 'Getting Started/Welcome.md')
   if (!liveNote.markdown.includes('Elephant')) throw new Error(`Live rendering fixture did not open the expected body: ${JSON.stringify(liveNote)}`)
-  const liveEditorSelector = '[data-testid="muya-rust-runtime-editor"]'
-  const liveEditor = await command('readDom', liveEditorSelector)
-  await command('selectText', liveEditorSelector, liveEditor.text.length, liveEditor.text.length)
+  const editorSelector = '[contenteditable="true"].editor-component'
+  const liveEditorSelector = editorSelector
+  await command('readDom', liveEditorSelector)
+  const liveTextSelector = `${editorSelector} .ag-paragraph-content`
+  const liveText = await command('readDom', liveTextSelector)
+  await command('selectText', liveTextSelector, liveText.text.length, liveText.text.length)
   await command('insertText', liveEditorSelector, ' Live Tauri body edit 9173.')
   let liveState = null
   const liveEditDeadline = Date.now() + 5000
@@ -258,16 +311,44 @@ try {
   }
   const initial = await command('openNote', 'Acceptance.md')
   if (!initial.notePath.endsWith('Acceptance.md')) throw new Error(`Wrong opened note: ${initial.notePath}`)
-  if (initial.sourceCode || !initial.rustEditorPresent || initial.codeMirrorPresent) {
-    throw new Error(`Editor is not running Rust Muya-only mode: ${JSON.stringify({ sourceCode: initial.sourceCode, rustEditorPresent: initial.rustEditorPresent, codeMirrorPresent: initial.codeMirrorPresent })}`)
+  if (initial.sourceCode || initial.rustEditorPresent || initial.codeMirrorPresent || !initial.displayedHtml.includes('ag-editor-id')) {
+    throw new Error(`Editor is not running the Muya JS production surface: ${JSON.stringify({ sourceCode: initial.sourceCode, rustEditorPresent: initial.rustEditorPresent, codeMirrorPresent: initial.codeMirrorPresent, hasMuyaDom: initial.displayedHtml.includes('ag-editor-id') })}`)
+  }
+  const renderMarkdown = [
+    '# Acceptance',
+    '',
+    '# Notes',
+    '',
+    '## Tasks',
+    '',
+    '- [ ] Review the note',
+    '',
+    '```text',
+    'literal code',
+    '```',
+    '',
+    '![drawing](../assets/excalidraw.png)',
+    '',
+    '# ddd'
+  ].join('\n')
+  await command('setMarkdown', renderMarkdown)
+  await waitForDomText(`${editorSelector} h2 .ag-plain-text`, 'Tasks')
+  await waitForDomText(`${editorSelector} pre.ag-fence-code`, 'literal code')
+  const renderedFirstHeading = await command('readDom', `${editorSelector} h1:nth-of-type(1) .ag-plain-text`)
+  const renderedSecondHeading = await command('readDom', `${editorSelector} h1:nth-of-type(2) .ag-plain-text`)
+  const renderedMarkdown = await command('readDom', editorSelector)
+  const renderedTask = await command('readDom', `${editorSelector} input[type="checkbox"]`)
+  const renderedImage = await command('readDom', `${editorSelector} .ag-inline-image[data-raw="![drawing](../assets/excalidraw.png)"]`)
+  if (renderedFirstHeading.text !== 'Notes' || renderedSecondHeading.text !== 'ddd' || !renderedTask.exists || !renderedImage.exists || renderedMarkdown.text.includes('```text') || renderedMarkdown.text.includes('![drawing]')) {
+    throw new Error(`Markdown rendered in the wrong order, as raw text, or lost semantic nodes: ${JSON.stringify({ renderedFirstHeading, renderedSecondHeading, renderedTask, renderedImage, text: renderedMarkdown.text, html: renderedMarkdown.html })}`)
   }
   const manualSaveMarkdown = '# Acceptance\n\nManual CmdOrCtrl+S save from the real Tauri command runner.'
   await command('setMarkdown', manualSaveMarkdown)
-  const editorSelector = '[data-testid="muya-rust-runtime-editor"]'
+  await waitForDomText(`${editorSelector} .ag-paragraph-content`, 'Manual CmdOrCtrl+S save from the real Tauri command runner.')
   const editorDom = await command('readDom', editorSelector)
-  if (!editorDom.exists) throw new Error(`Rust editor DOM is missing before keyboard probe: ${JSON.stringify(editorDom)}`)
-  const editorTextLength = editorDom.text.length
-  await command('selectText', editorSelector, editorTextLength, editorTextLength)
+  if (!editorDom.exists) throw new Error(`Muya editor DOM is missing before keyboard probe: ${JSON.stringify(editorDom)}`)
+  const editorText = await command('readDom', `${editorSelector} .ag-paragraph-content`)
+  await command('selectText', `${editorSelector} .ag-paragraph-content`, editorText.text.length, editorText.text.length)
   await command('insertText', editorSelector, ' Tauri keyboard probe 9173.')
   let keyboardState = null
   const keyboardDeadline = Date.now() + 5000
@@ -277,14 +358,14 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   if (!keyboardState.markdown.includes('Tauri keyboard probe 9173.')) {
-    throw new Error(`Rust editor keyboard input did not update Markdown state: ${JSON.stringify(keyboardState)}`)
+    throw new Error(`Muya editor keyboard input did not update Markdown state: ${JSON.stringify(keyboardState)}`)
   }
   await command('executeCommand', 'file.save')
   let savedFromDisk
   const saveDeadline = Date.now() + 15000
   while (Date.now() <= saveDeadline) {
     savedFromDisk = await command('readNote', 'Acceptance.md')
-    if (savedFromDisk.content === manualSaveMarkdown) break
+    if (savedFromDisk.content.includes('Tauri keyboard probe 9173.')) break
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 100))
   }
   if (!savedFromDisk?.content.includes('Tauri keyboard probe 9173.')) {
@@ -292,20 +373,23 @@ try {
   }
   const saved = await command('readState')
   if (!saved.isSaved || !saved.markdown.includes('Manual CmdOrCtrl+S save')) throw new Error('Manual Markdown save state is incorrect')
-  const displayed = await command('readDisplayed')
+  const displayed = await waitForDisplayedText('Manual CmdOrCtrl+S save from the real Tauri command runner.')
   if (!displayed.displayedText.includes('Manual CmdOrCtrl+S save')) throw new Error('Displayed Markdown does not contain manually saved content')
   await command('setMarkdown', '# Acceptance\n\nEdited by the real Tauri command runner.')
   const acceptanceSaved = await command('save')
   if (!acceptanceSaved.isSaved || !acceptanceSaved.markdown.includes('real Tauri command runner')) throw new Error('Acceptance save state is incorrect')
   await command('setMarkdown', '# Code acceptance\n\n```python\nprint("code execution acceptance")\n```')
+  await waitForDomText(`${editorSelector} .ag-code-content`, 'print("code execution acceptance")')
   const codeRunButton = await command('waitFor', '.elephant-physical-code-run', 10000)
   if (!codeRunButton.exists) throw new Error(`Code execution addon did not decorate the code block: ${JSON.stringify(codeRunButton)}`)
   await command('click', '.elephant-physical-code-run')
   const codeOutput = await command('waitFor', '.elephant-physical-code-output[data-exit-code="0"]', 15000)
   if (!codeOutput.text.includes('code execution acceptance')) throw new Error(`Code execution output is incorrect: ${JSON.stringify(codeOutput)}`)
-  await command('setMarkdown', '# Acceptance\n\nEdited by the real Tauri command runner.')
+  const citationSourceText = 'Edited by the real Tauri command runner.'
+  await command('setMarkdown', `# Acceptance\n\n${citationSourceText}`)
+  await waitForDomText(`${editorSelector} .ag-paragraph-content`, citationSourceText)
   await command('save')
-  const citationSelection = await command('selectText', '[data-testid="muya-rust-runtime-editor"]', 2, 24)
+  const citationSelection = await command('selectText', `${editorSelector} .ag-paragraph-content`, 0, citationSourceText.length)
   const citationSelectionAction = await command('waitFor', '[data-elephant-citation-selection-action]', 10000)
   await command('click', '[data-elephant-citation-selection-action]')
   const citationFeedback = await command('waitFor', '[data-elephant-citation-feedback]', 10000)
@@ -315,14 +399,16 @@ try {
   const citationBufferItem = await command('waitFor', '[data-elephant-citation-buffer-item]', 10000)
   await command('click', '[data-elephant-citation-buffer-item]')
   const citationPasted = await command('readState')
-  if (!citationPasted.markdown.includes('Edited by the real Tauri command runner') || !citationPasted.markdown.includes('](</Acceptance.md#quote=')) {
-    throw new Error(`Citation paste did not create a linked quote: ${JSON.stringify(citationPasted)}`)
+  const citationHasText = citationPasted.markdown.includes('Edited by the real Tauri command runner')
+  const citationHasLink = citationPasted.markdown.includes('](</Acceptance.md#quote=')
+  if (!citationHasText || !citationHasLink) {
+    throw new Error(`Citation paste did not create a linked quote: ${JSON.stringify({ citationHasText, citationHasLink, citationPasted })}`)
   }
   await command('contextClick', '[data-elephant-citation-buffer-item]')
   const citationContext = await command('waitFor', '[data-elephant-citation-context]', 10000)
   await command('click', '[aria-label^="Supprimer la citation"]')
   await command('waitUntilGone', '[data-elephant-citation-buffer-item]', 10000)
-  const dom = await command('readDom', '[data-testid="muya-rust-runtime-editor"]')
+  const dom = await command('readDom', editorSelector)
   if (!dom.exists || !dom.text.includes('Edited by the real Tauri command runner')) throw new Error(`Displayed editor DOM is incomplete: ${JSON.stringify({ exists: dom.exists, textLength: dom.text.length })}`)
   const sidebarInitial = await command('readDom', '.en-body')
   await command('click', '.en-rail-sidebar-toggle')
@@ -377,6 +463,16 @@ try {
   await command('waitUntilGone', '.en-settings-panel', 10000)
   await command('click', '[aria-label="Close note"]')
   await command('waitFor', '.en-library-grid', 10000)
+  const createToolbar = await command('readDom', '.en-library-toolbar')
+  if (!createToolbar.exists || !createToolbar.visible) throw new Error(`Library create toolbar is not visible: ${JSON.stringify(createToolbar)}`)
+  await command('click', '.en-create-button-primary')
+  const createMenu = await command('waitFor', '.en-create-menu-popover', 10000)
+  const createOptions = await command('readDom', '.en-create-menu-popover')
+  if (!createMenu.exists || !createOptions.text.includes('Note') || !createOptions.text.includes('Drawing') || !createOptions.text.includes('Folder') || !createOptions.html.includes('role="menuitem"')) {
+    throw new Error(`Create menu is incomplete: ${JSON.stringify({ createMenu, createOptions })}`)
+  }
+  await command('press', '.en-create-button-primary', 'Escape')
+  await command('waitUntilGone', '.en-create-menu-popover', 10000)
   const listBefore = await command('readDom', '.en-library-grid')
   await command('click', '[aria-label="List view"]')
   const listView = await command('readDom', '.en-library-grid')
@@ -467,7 +563,7 @@ try {
   const catalogSource = output.includes('[official-addon-catalog] source=bundled') ? 'bundled' : 'local-or-remote'
   if (packagedRun && catalogSource !== 'bundled') throw new Error('Packaged acceptance did not use the bundled official addon catalogue')
   if (packagedRun && output.includes('Addon service executable is unavailable')) throw new Error('Packaged acceptance reproduced the missing addon service executable regression')
-  result = { emptyVaultUi, initial, saved, created, createdSaved, disk, displayed, codeRunButton, codeOutput, citationSelection, citationSelectionAction, citationFeedback, citationBufferItem, citationPasted, citationContext, dom, chatPanel, calendarPanel, graphPanel, sidebarInitial, sidebarToggled, sidebarRestored, searchUi, searchEmptyUi, afterClose, pinned, settingsSearch, themeBefore, themeToggled, themeRestored, listBefore, listView, sortedLibrary, navigationCycles, capabilities, addonState, installedOfficialAddons, installedAddonState, enabledOfficialAddons, enabledAddonState, addonCoverage, nativeRuntimeProbes, addonResourceProbes, addonActionProbes, dashboardAction, dashboardNote, keepImport, keepNote, siteGenerated, siteStatus, siteStopped, syncStatus, platform, vaults, directory, drawings, attachments, features, searchStatus, atomicFeatures, localBackendProbes, search, folder, lifecycle, moved, attachmentWrite, attachmentList, drawing, drawingRead, drawingWritten, expectedFailure, invalidPathFailure, missingResourceFailure, logs, restartPersistence, packagedRun, catalogSource }
+  result = { emptyVaultUi, initial, saved, created, createdSaved, disk, displayed, codeRunButton, codeOutput, citationSelection, citationSelectionAction, citationFeedback, citationBufferItem, citationPasted, citationContext, dom, chatPanel, calendarPanel, graphPanel, sidebarInitial, sidebarToggled, sidebarRestored, searchUi, searchEmptyUi, afterClose, createToolbar, createMenu, createOptions, pinned, settingsSearch, themeBefore, themeToggled, themeRestored, listBefore, listView, sortedLibrary, navigationCycles, capabilities, addonState, installedOfficialAddons, installedAddonState, enabledOfficialAddons, enabledAddonState, addonCoverage, nativeRuntimeProbes, addonResourceProbes, addonActionProbes, dashboardAction, dashboardNote, keepImport, keepNote, siteGenerated, siteStatus, siteStopped, syncStatus, platform, vaults, directory, drawings, attachments, features, searchStatus, atomicFeatures, localBackendProbes, search, folder, lifecycle, moved, attachmentWrite, attachmentList, drawing, drawingRead, drawingWritten, expectedFailure, invalidPathFailure, missingResourceFailure, logs, restartPersistence, packagedRun, catalogSource }
   writeFileSync(join(artifactRoot, 'latest.json'), JSON.stringify({ at: new Date().toISOString(), runtime: 'tauri', result }, null, 2))
   writeFileSync(join(artifactRoot, 'latest-tauri.log'), output, 'utf8')
   console.log(`[acceptance-runner] artifact ${join(artifactRoot, 'latest.json')}`)

@@ -1018,7 +1018,7 @@ dependencies = [
 
 [[package]]
 name = "elephantnote-tauri"
-version = "0.18.9"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "blake3",

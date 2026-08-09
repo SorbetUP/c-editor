@@ -7,6 +7,7 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 
 const titleBar = read('Elephant/frontend/app/components/shell/TopVaultBar.vue')
 const libraryToolbar = read('Elephant/frontend/app/components/library/LibraryToolbar.vue')
+const createEntryMenu = read('Elephant/frontend/app/components/library/CreateEntryMenu.vue')
 const linuxConfig = JSON.parse(read('Elephant/backend/tauri/tauri.linux.conf.json'))
 
 describe('desktop shell controls and creation actions', () => {
@@ -25,11 +26,18 @@ describe('desktop shell controls and creation actions', () => {
     expect(titleBar).toContain('-webkit-app-region: no-drag')
   })
 
-  it('keeps note and folder creation visible in the main library toolbar', () => {
-    expect(libraryToolbar).toContain('New note')
-    expect(libraryToolbar).toContain('New folder')
-    expect(libraryToolbar).toContain('FilePlus2')
-    expect(libraryToolbar).toContain('FolderPlus')
+  it('exposes one create trigger and delegates the choices to its menu', () => {
+    expect(libraryToolbar).toContain('<CreateEntryMenu')
+    expect(libraryToolbar).toContain('<span>{{ isBusy ? \'Creating…\' : \'Create\' }}</span>')
+    expect(libraryToolbar).toContain('@click="toggle"')
+    expect(libraryToolbar).not.toContain('New note')
+    expect(libraryToolbar).not.toContain('New folder')
+    expect(libraryToolbar).not.toContain('New Excalidraw')
+    expect(createEntryMenu).toContain('role="menu"')
+    expect(createEntryMenu).toContain('role="menuitem"')
+    expect(createEntryMenu).toContain("label: 'Note'")
+    expect(createEntryMenu).toContain("label: 'Drawing'")
+    expect(createEntryMenu).toContain("label: 'Folder'")
     expect(libraryToolbar).toContain('store.createNote()')
     expect(libraryToolbar).toContain('store.createFolder()')
     expect(libraryToolbar).toContain(':disabled="isBusy || !store.hasVault"')

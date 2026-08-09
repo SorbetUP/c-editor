@@ -30,7 +30,7 @@ const values = new Map()
 const commands = new Map()
 const views = new Map()
 const api = {
-  app: { info: async () => ({ name: 'ElephantNote', version: '0.18.9', addonApiVersion: 1 }) },
+    app: { info: async () => ({ name: 'ElephantNote', version: '0.1.0', addonApiVersion: 1 }) },
   notes: {
     list: async () => [],
     read: async () => { throw new Error('notes.read not expected') },

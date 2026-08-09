@@ -164,6 +164,49 @@ describe('renderer acceptance test bridge', () => {
     expect(api.logs().map((entry) => entry.event)).toContain('dom:insert-text:contenteditable')
   })
 
+  it('preserves the selected DOM range while synchronizing the Muya cursor', () => {
+    const dom = document
+    const selection = globalThis.getSelection()
+    const target = {
+      document: dom,
+      getSelection: () => selection,
+      Event,
+      MouseEvent,
+      console,
+      __ELEPHANT_ACTIVE_MUYA__: {
+        contentState: {
+          cursor: null,
+          selectionChange: vi.fn(() => ({
+            start: { key: 'paragraph', offset: 0 },
+            end: { key: 'paragraph', offset: 6 }
+          }))
+        },
+        dispatchSelectionChange: vi.fn(() => selection.removeAllRanges())
+      },
+      __ELEPHANT_DEBUG_LOGS__: []
+    }
+    const surface = dom.createElement('div')
+    surface.setAttribute('contenteditable', 'true')
+    surface.dataset.testid = 'muya-selection-editor'
+    surface.textContent = 'Select this text'
+    dom.body.append(surface)
+    const api = installAcceptanceTestBridge({
+      target,
+      editorStore: { currentFile: null },
+      vaultStore: { activeVault: { path: '/vault' }, openedNotePath: '' }
+    })
+
+    const result = api.selectText('[data-testid="muya-selection-editor"]', 0, 6)
+
+    expect(result.text).toBe('Select')
+    expect(selection.toString()).toBe('Select')
+    expect(target.__ELEPHANT_ACTIVE_MUYA__.contentState.cursor).toMatchObject({
+      start: { key: 'paragraph', offset: 0 },
+      end: { key: 'paragraph', offset: 6 },
+      isEdit: true
+    })
+  })
+
   it('exposes observable addon state, actions, resources and persisted enablement', async() => {
     const calls = []
     const resource = { status: vi.fn(async() => ({ available: true })) }

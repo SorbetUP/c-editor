@@ -68,7 +68,7 @@ const testPlatformProof = async () => {
   const storage = createStorage()
   const notes = new Map()
   const command = await activateCommand(definition, {
-    app: { info: async () => ({ name: 'ElephantNote', version: '0.18.9', addonApiVersion: 1 }) },
+    app: { info: async () => ({ name: 'ElephantNote', version: '0.1.0', addonApiVersion: 1 }) },
     notes: {
       write: async (notePath, content) => { notes.set(notePath, content); return { ok: true, path: notePath } },
       read: async (notePath) => ({ path: notePath, content: notes.get(notePath) }),

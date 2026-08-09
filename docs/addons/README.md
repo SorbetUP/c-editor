@@ -165,7 +165,7 @@ It is loaded in the ElephantNote renderer and can use the full addon host, inclu
   "name": "Hello Notes",
   "version": "1.0.0",
   "apiVersion": 1,
-  "minAppVersion": "0.18.9",
+  "minAppVersion": "0.1.0",
   "runtime": {
     "type": "javascript-worker",
     "entry": "main.js"

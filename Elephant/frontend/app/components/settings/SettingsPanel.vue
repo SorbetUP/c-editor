@@ -30,7 +30,7 @@
             <span>{{ item.label }}</span>
             <ChevronRight class="en-settings-nav-chevron" aria-hidden="true" />
           </button>
-          <footer class="en-settings-nav-footer"><span>Local-first</span><span>v0.18.9</span></footer>
+          <footer class="en-settings-nav-footer"><span>Local-first</span><span>v0.1.0</span></footer>
         </aside>
 
         <main

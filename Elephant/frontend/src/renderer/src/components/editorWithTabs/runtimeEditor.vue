@@ -120,6 +120,7 @@ import { useEditorStore } from '@/store/editor'
 import { useProjectStore } from '@/store/project'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { dispatchMuyaChange } from './runtimeEditorChanges'
 
 import 'muya/themes/default.css'
 import CloseIcon from '@/assets/icons/close.svg'
@@ -299,6 +300,7 @@ const publishEditorRuntime = () => {
   if (disposeEditorRuntimeResource) return
   const host = globalThis.__ELEPHANT_ADDON_HOST__
   if (typeof host?.provide !== 'function') return
+  const root = editor.value?.container
   const notifyEditorRuntime = (detail = {}) => {
     const event = {
       engine: 'muya-js',
@@ -309,8 +311,8 @@ const publishEditorRuntime = () => {
   }
   const queryBlocks = ({ kind } = {}) => {
     const nodes = [...new Set([
-      ...document.querySelectorAll('[data-elephant-editor-kind]'),
-      ...document.querySelectorAll('.ag-fence-code')
+      ...(root?.querySelectorAll?.('[data-elephant-editor-kind]') || []),
+      ...(root?.querySelectorAll?.('.ag-fence-code') || [])
     ])]
     return nodes.filter((node) => {
       if (!node.dataset.elephantEditorKind && node.classList.contains('ag-fence-code')) {
@@ -331,6 +333,7 @@ const publishEditorRuntime = () => {
     apiVersion: 1,
     owner: 'elephant.core.editor',
     engine: 'muya-js',
+    root,
     queryBlocks,
     watch: (listener, options = {}) => {
       if (typeof listener !== 'function') throw new TypeError('Editor runtime listener must be a function')
@@ -1308,21 +1311,22 @@ onMounted(() => {
   bus.on('open-command-spellchecker-switch-language', openSpellcheckerLanguageCommand)
   bus.on('replace-misspelling', replaceMisspelling)
 
-   editor.value.on('change', (changes) => {
-    // There is a chance that this event is fired AFTER the tab is switched. If we purely rely on this.currentFile later on
-    // it can cause invalid updates. Hence, we need the id to identify changes as part of each tab
-    const { id } = currentFile.value
-    if (id) {
-      const nextChanges = {
-        ...changes,
-        markdown: props.fromEditorMarkdown(changes.markdown)
+  editor.value.on('change', (changes) => {
+    // There is a chance that this event is fired after the tab is switched.
+    // Keep the normalized change available to runtime consumers even when the
+    // original tab has already disappeared.
+    dispatchMuyaChange({
+      changes,
+      currentFileId: currentFile.value?.id,
+      fromEditorMarkdown: props.fromEditorMarkdown,
+      onDocumentChange: (nextChanges) => editorStore.LISTEN_FOR_CONTENT_CHANGE(nextChanges),
+      onRuntimeChange: (nextChanges) => {
+        for (const listener of [...editorRuntimeListeners]) {
+          listener({ engine: 'muya-js', reason: 'document-change', markdown: nextChanges.markdown })
+        }
       }
-       editorStore.LISTEN_FOR_CONTENT_CHANGE(Object.assign(nextChanges, { id }))
-     }
-     for (const listener of [...editorRuntimeListeners]) {
-       listener({ engine: 'muya-js', reason: 'document-change', markdown: nextChanges.markdown })
-     }
-   })
+    })
+  })
 
   editor.value.on('scroll', (scrollEvent) => {
     editorStore.updateScrollPosition(currentFile.value.id, scrollEvent.scrollTop)

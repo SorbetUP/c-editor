@@ -5,7 +5,7 @@
   "description": "Reference addon proving full app access: DOM styling, workspace contributions, editor extensions and direct application context.",
   "author": "ElephantNote",
   "apiVersion": 1,
-  "minAppVersion": "0.18.9",
+  "minAppVersion": "0.1.0",
   "runtime": {
     "type": "javascript-worker",
     "entry": "main.js"
