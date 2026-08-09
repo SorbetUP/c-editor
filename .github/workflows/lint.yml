@@ -24,10 +24,12 @@ jobs:
           set -o pipefail
           pnpm lint 2>&1 | tee eslint-output.txt
 
-      - name: Upload ESLint output
-        if: always()
+      - name: Upload ESLint failure output
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: eslint-output
+          name: eslint-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: eslint-output.txt
           if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 9

@@ -41,11 +41,6 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Cache package build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: addons/official/sync/native -> target
-
       - name: Run package-owned two-endpoint Iroh synchronization
         id: iroh-smoke
         shell: bash
@@ -80,14 +75,15 @@ jobs:
           grep -F '[Sync] baseline:saved peers=2' "$log_file"
           grep -F '[Sync] run:complete' "$log_file"
 
-      - name: Upload Iroh smoke diagnostics
-        if: always()
+      - name: Upload Iroh failure diagnostics
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: iroh-two-device-smoke-output
+          name: iroh-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: iroh-smoke-output.txt
-          if-no-files-found: error
-          retention-days: 14
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 9
 
   sync-toolbar-contracts:
     name: Active-vault toolbar states
@@ -106,11 +102,12 @@ jobs:
             tests/app/unit/specs/main/elephantnote/syncSettingsPanel.spec.js \
             2>&1 | tee iroh-toolbar-vitest.txt
 
-      - name: Upload focused UI test diagnostics
-        if: always()
+      - name: Upload focused UI failure diagnostics
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: iroh-toolbar-vitest-output
+          name: iroh-toolbar-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: iroh-toolbar-vitest.txt
-          if-no-files-found: error
-          retention-days: 14
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 9

@@ -38,10 +38,12 @@ jobs:
           set -o pipefail
           pnpm test 2>&1 | tee vitest-output.txt
 
-      - name: Upload Vitest output
-        if: always()
+      - name: Upload Vitest failure output
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: vitest-output
+          name: vitest-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: vitest-output.txt
           if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 9

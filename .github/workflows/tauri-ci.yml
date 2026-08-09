@@ -1,27 +1,14 @@
 name: Tauri CI
 
 on:
-  push:
-    branches:
-      - nsb/tauri
-      - 'assistant/**'
-  pull_request:
-    branches:
-      - nsb/tauri
-      - main
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
   rust-tauri:
-    name: Rust compile and tests
+    name: Rust compile, tests and coverage
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -51,11 +38,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,llvm-tools-preview
-
-      - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: Elephant/backend/tauri -> target
 
       - name: Rust formatting diagnostic
         continue-on-error: true

@@ -1,0 +1,89 @@
+name: Actions storage cleanup
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - .github/workflows/actions-storage-cleanup.yml
+  schedule:
+    - cron: '37 3 * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: actions-storage-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Reclaim Actions storage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete temporary artifacts and stale caches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          repo="$GITHUB_REPOSITORY"
+          # Editing this workflow or dispatching it triggers one full purge.
+          force_cleanup=false
+          if [[ "$GITHUB_EVENT_NAME" == "push" || "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            force_cleanup=true
+          fi
+
+          now_epoch=$(date -u +%s)
+          artifact_cutoff=$((now_epoch - 24 * 60 * 60))
+          deleted_artifacts=0
+          deleted_caches=0
+          reclaimed_artifact_bytes=0
+          reclaimed_cache_bytes=0
+
+          while IFS=$'\t' read -r id created_at size name; do
+            [[ -z "${id:-}" ]] && continue
+            created_epoch=$(date -u -d "$created_at" +%s)
+            if [[ "$force_cleanup" == "true" || "$created_epoch" -lt "$artifact_cutoff" ]]; then
+              echo "Deleting artifact id=$id name=$name size=$size created=$created_at"
+              gh api --method DELETE "/repos/$repo/actions/artifacts/$id"
+              deleted_artifacts=$((deleted_artifacts + 1))
+              reclaimed_artifact_bytes=$((reclaimed_artifact_bytes + size))
+            fi
+          done < <(
+            gh api --paginate "/repos/$repo/actions/artifacts?per_page=100" \
+              --jq '.artifacts[] | [.id, .created_at, .size_in_bytes, .name] | @tsv'
+          )
+
+          # Caches are not part of the 0.5 GB artifact allowance and improve CI
+          # speed. Clear them only during an explicit/forced cleanup, not daily.
+          if [[ "$force_cleanup" == "true" ]]; then
+            while IFS=$'\t' read -r id ref last_accessed size key; do
+              [[ -z "${id:-}" ]] && continue
+              echo "Deleting cache id=$id ref=$ref key=$key size=$size last_accessed=$last_accessed"
+              gh api --method DELETE "/repos/$repo/actions/caches/$id"
+              deleted_caches=$((deleted_caches + 1))
+              reclaimed_cache_bytes=$((reclaimed_cache_bytes + size))
+            done < <(
+              gh api --paginate "/repos/$repo/actions/caches?per_page=100" \
+                --jq '.actions_caches[] | [.id, .ref, .last_accessed_at, .size_in_bytes, .key] | @tsv'
+            )
+          fi
+
+          {
+            echo "## Actions storage cleanup"
+            echo
+            echo "- Forced cleanup: $force_cleanup"
+            echo "- Artifacts deleted: $deleted_artifacts"
+            echo "- Artifact bytes requested for deletion: $reclaimed_artifact_bytes"
+            echo "- Caches deleted: $deleted_caches"
+            echo "- Cache bytes requested for deletion: $reclaimed_cache_bytes"
+            echo
+            echo "Scheduled runs keep only the latest 24 hours of artifacts."
+            echo "Caches are preserved during scheduled runs to avoid slowing CI."
+          } >> "$GITHUB_STEP_SUMMARY"

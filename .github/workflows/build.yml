@@ -74,18 +74,5 @@ jobs:
         continue-on-error: true
         run: pnpm run build:win
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: marktext-${{ matrix.name }}
-          retention-days: 30
-          path: |
-            dist/*.exe
-            dist/*.zip
-            dist/*.dmg
-            dist/*.AppImage
-            dist/*.snap
-            dist/*.deb
-            dist/*.rpm
-            dist/*.tar.gz
-          if-no-files-found: ignore
+      # PR builds validate packaging only. Installers are intentionally not
+      # uploaded: tagged releases publish the durable binaries instead.
