@@ -1,0 +1,239 @@
+pre.en-code-native-shell {
+  --en-code-header-bg: color-mix(in srgb, var(--editorBgColor, #29292c) 97%, currentColor 3%);
+  --en-code-body-bg: var(--editorBgColor, #29292c);
+  position: relative !important;
+  display: grid !important;
+  grid-template-columns: minmax(112px, 180px) minmax(0, 1fr) 32px 32px;
+  grid-template-areas:
+    'language . copy run'
+    'code code code code'
+    'output output output output';
+  box-sizing: border-box !important;
+  width: 100% !important;
+  margin: 1em 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid color-mix(in srgb, currentColor 13%, transparent) !important;
+  border-radius: 9px !important;
+  background: var(--en-code-header-bg) !important;
+  color: inherit !important;
+  white-space: normal !important;
+  box-shadow: 0 1px 0 color-mix(in srgb, currentColor 3%, transparent);
+}
+
+pre.en-code-native-shell::before,
+pre.en-code-native-shell::after {
+  content: none !important;
+  display: none !important;
+}
+
+pre.en-code-native-shell > .ag-language-input {
+  position: static !important;
+  grid-area: language;
+  display: flex !important;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 11px !important;
+  overflow: hidden;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: color-mix(in srgb, currentColor 66%, transparent) !important;
+  font: 600 11.5px/1 var(--font-family, system-ui, sans-serif) !important;
+  text-overflow: ellipsis;
+  white-space: nowrap !important;
+  cursor: text;
+  outline: none;
+}
+
+pre.en-code-native-shell > .ag-language-input:focus {
+  background: color-mix(in srgb, currentColor 5%, transparent) !important;
+  color: inherit !important;
+}
+
+pre.en-code-native-shell > .ag-code-copy,
+pre.en-code-native-shell > .en-code-native-run {
+  position: static !important;
+  display: grid !important;
+  width: 32px !important;
+  min-width: 32px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  place-items: center;
+  box-sizing: border-box;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: color-mix(in srgb, currentColor 62%, transparent) !important;
+  cursor: pointer;
+}
+
+pre.en-code-native-shell > .ag-code-copy {
+  grid-area: copy;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  z-index: 2;
+}
+
+pre.en-code-native-shell > .en-code-native-run {
+  grid-area: run;
+  visibility: visible !important;
+  opacity: 1 !important;
+  z-index: 2;
+}
+
+pre.en-code-native-shell > .ag-code-copy:hover,
+pre.en-code-native-shell > .en-code-native-run:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent) !important;
+  color: inherit !important;
+}
+
+pre.en-code-native-shell > .en-code-native-run:hover {
+  color: var(--primary-color, #1687ff) !important;
+}
+
+pre.en-code-native-shell > .en-code-native-run:focus-visible,
+pre.en-code-native-shell > .ag-code-copy:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary-color, #1687ff) 55%, transparent);
+  outline-offset: -3px;
+}
+
+/* Muya's bundled PNG copy icon can disappear against dark themes. Draw the
+   familiar two-sheet glyph with currentColor so it is always visible. */
+pre.en-code-native-shell > .ag-code-copy > .icon {
+  position: relative !important;
+  display: block !important;
+  width: 14px !important;
+  height: 14px !important;
+  overflow: visible !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  color: inherit !important;
+  pointer-events: none;
+  transform: none !important;
+}
+
+pre.en-code-native-shell > .ag-code-copy > .icon > .icon-inner {
+  display: none !important;
+}
+
+pre.en-code-native-shell > .ag-code-copy > .icon::before,
+pre.en-code-native-shell > .ag-code-copy > .icon::after {
+  position: absolute;
+  box-sizing: border-box;
+  width: 9px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  content: '';
+}
+
+pre.en-code-native-shell > .ag-code-copy > .icon::before {
+  top: 1px;
+  left: 4px;
+  opacity: .72;
+}
+
+pre.en-code-native-shell > .ag-code-copy > .icon::after {
+  top: 4px;
+  left: 1px;
+}
+
+.en-code-native-run-icon {
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+}
+
+.en-code-native-run.is-running,
+.en-code-native-run.is-stopping {
+  color: #e05252 !important;
+}
+
+.en-code-native-run.is-running .en-code-native-run-icon,
+.en-code-native-run.is-stopping .en-code-native-run-icon {
+  width: 7px;
+  height: 7px;
+  margin-left: 0;
+  border: 0;
+  border-radius: 1.5px;
+  background: currentColor;
+}
+
+.en-code-native-run.is-stopping .en-code-native-run-icon {
+  opacity: .55;
+}
+
+pre.en-code-native-shell > code {
+  grid-area: code;
+  display: block !important;
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  padding: 14px 16px 16px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  border-top: 1px solid color-mix(in srgb, currentColor 7%, transparent);
+  background: var(--en-code-body-bg) !important;
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+  tab-size: 4;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+/* Prism and Muya add nested spans. Force the same non-wrapping contract on
+   every token so a continuation can never jump back to column zero. */
+pre.en-code-native-shell > code *,
+pre.en-code-native-shell > code .ag-code-content {
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
+/* Remove Muya's active-block "fence" / "Code fence" decoration. */
+pre.en-code-native-shell.ag-active.ag-fence-code > code::before,
+pre.en-code-native-shell.ag-active.ag-fence-code > code::after {
+  content: none !important;
+  display: none !important;
+}
+
+pre.en-code-native-shell > elephant-code-output {
+  grid-area: output;
+  min-width: 0;
+  background: var(--en-code-body-bg);
+}
+
+pre.en-code-native-shell > .ag-front-icon {
+  position: absolute !important;
+  left: -34px !important;
+}
+
+pre.en-code-native-shell > [class*='fence-label' i],
+pre.en-code-native-shell > [data-role='code-fence-label'] {
+  display: none !important;
+}
+
+@media (max-width: 640px) {
+  pre.en-code-native-shell {
+    grid-template-columns: minmax(96px, 1fr) 30px 30px;
+    grid-template-areas:
+      'language copy run'
+      'code code code'
+      'output output output';
+  }
+
+  pre.en-code-native-shell > code {
+    padding: 12px 13px 14px !important;
+  }
+}

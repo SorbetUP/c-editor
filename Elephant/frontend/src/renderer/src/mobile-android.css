@@ -1,0 +1,188 @@
+@media (max-width: 760px), (hover: none) and (pointer: coarse) {
+  html,
+  body,
+  #app {
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    min-height: 100dvh;
+    margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  button,
+  [role='button'],
+  input,
+  select {
+    touch-action: manipulation;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scrollbar-width: none !important;
+  }
+
+  *::-webkit-scrollbar,
+  *::-webkit-scrollbar-corner {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+    background: transparent !important;
+  }
+
+  .en-library-grid:not(.list) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+    padding: 14px !important;
+  }
+
+  .en-library-grid.list {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    padding: 10px 12px 92px !important;
+  }
+
+  .en-library-grid.list .en-note-card {
+    min-height: 76px !important;
+    contain-intrinsic-size: 76px 360px !important;
+    justify-content: center !important;
+    border-radius: 14px !important;
+    padding: 13px 72px 13px 14px !important;
+  }
+
+  .en-library-grid.list .en-note-card.is-featured {
+    min-height: 76px !important;
+  }
+
+  .en-library-grid.list .en-note-card > p,
+  .en-library-grid.list .en-note-card > .en-tags,
+  .en-library-grid.list .en-note-card > footer {
+    display: none !important;
+  }
+
+  .en-library-grid.list .en-note-card h3 {
+    max-width: 100% !important;
+    font-size: 16px !important;
+    line-height: 1.25 !important;
+    -webkit-line-clamp: 2 !important;
+  }
+
+  .en-library-grid.list .en-note-document-icon {
+    width: 20px !important;
+    height: 20px !important;
+    margin-top: 0 !important;
+  }
+
+  .en-library-grid.list .en-card-actions {
+    top: 50% !important;
+    right: 8px !important;
+    transform: translateY(-50%) !important;
+  }
+
+  .en-library-grid:not(.list) .en-note-card {
+    min-width: 0 !important;
+    min-height: 184px !important;
+    padding: 18px !important;
+    border-radius: 16px !important;
+  }
+
+  .en-library-grid:not(.list) .en-note-card.is-featured {
+    min-height: 184px !important;
+  }
+
+  .en-library-grid:not(.list) .en-note-card h3 {
+    max-width: calc(100% - 34px) !important;
+    font-size: clamp(18px, 5vw, 24px) !important;
+    line-height: 1.15 !important;
+    -webkit-line-clamp: 3 !important;
+  }
+
+  .en-library-grid:not(.list) .en-note-card > p {
+    display: -webkit-box !important;
+    margin: 18px 0 0 !important;
+    overflow: hidden !important;
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+    -webkit-line-clamp: 3 !important;
+    -webkit-box-orient: vertical !important;
+  }
+
+  .en-library-grid:not(.list) .en-card-actions {
+    top: 14px !important;
+    right: 12px !important;
+    gap: 2px !important;
+  }
+
+  .en-settings-row:has(> .en-switch),
+  .en-settings-row:has(> .en-trigger-input),
+  .en-settings-row:has(> .en-language-select) {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: 12px !important;
+    padding: 14px 16px !important;
+  }
+
+  .en-settings-row:has(> .en-switch) > .en-switch,
+  .en-settings-row:has(> .en-trigger-input) > .en-trigger-input,
+  .en-settings-row:has(> .en-language-select) > .en-language-select {
+    align-self: center !important;
+    justify-self: end !important;
+  }
+
+  .en-settings-row-copy strong {
+    font-size: 14px !important;
+    line-height: 1.25 !important;
+  }
+
+  .en-settings-row-copy span {
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+
+  .en-settings-row .en-switch {
+    width: 48px !important;
+    height: 28px !important;
+    min-width: 48px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+    border-radius: 999px !important;
+  }
+
+  .en-settings-row .en-switch > span {
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  .en-settings-row .en-switch.active > span {
+    transform: translateX(20px) !important;
+  }
+
+  .en-settings-nav > button {
+    min-width: 66px !important;
+    flex-basis: 66px !important;
+  }
+
+  .en-settings-nav > button span {
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+
+  .en-addons-tabs {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 8px !important;
+  }
+
+  .en-addons-tab-buttons,
+  .en-addons-search {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .en-library-grid:not(.list) {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}

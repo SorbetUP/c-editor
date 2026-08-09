@@ -1,0 +1,3 @@
+.en-addon-packs-settings .en-addons-feedback:not(.error) {
+  display: none !important;
+}

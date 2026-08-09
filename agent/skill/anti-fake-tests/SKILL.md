@@ -4,7 +4,7 @@ description: >
   Design and review tests so they prove real behavior instead of surface-only,
   placeholder, skipped, or misleading success. Use for every ElephantNote feature
   gate and APEX Tests/Validate phases.
-argument-hint: "<feature-or-test-change>"
+argument-hint: '<feature-or-test-change>'
 ---
 
 # Anti-Fake Tests

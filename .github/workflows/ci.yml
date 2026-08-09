@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - develop
       - nsb/tauri
       - 'assistant/**'
     tags:
@@ -23,7 +24,7 @@ jobs:
   quality:
     name: Quality gate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +44,20 @@ jobs:
             rpm \
             xz-utils
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
       - uses: ./.github/actions/setup
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
 
       - name: Generate parity backlog docs
         run: pnpm docs:parity
@@ -56,7 +70,7 @@ jobs:
           test "$lines" -ge 10000
 
       - name: Critical ElephantNote flow guard
-        run: node scripts/verify-critical-flows.mjs
+        run: node build/scripts/verify-critical-flows.mjs
 
       - name: Security guardrails
         run: pnpm security:guard
@@ -71,13 +85,18 @@ jobs:
           pnpm lint 2>&1 | tee eslint-output.txt
 
       - name: ElephantNote contract tests
-        run: pnpm exec vitest run test/unit/specs/main/elephantnote
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/main/elephantnote \
+            2>&1 | tee contract-tests-output.txt
 
       - name: Unit suite
         run: pnpm test:unit
 
       - name: Run postinstall before reference build
-        run: node scripts/postinstall.js
+        run: node build/scripts/postinstall.js
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           npm_config_user_agent: 'pnpm'
@@ -103,6 +122,7 @@ jobs:
           path: |
             security-guardrails-report.json
             eslint-output.txt
+            contract-tests-output.txt
             build-output.txt
           if-no-files-found: ignore
           retention-days: 1
@@ -111,7 +131,7 @@ jobs:
   tauri-macos-packaged-smoke:
     name: Tauri macOS packaged window smoke
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     env:
       CARGO_TERM_COLOR: always
       TAURI_MACOS_SMOKE_TIMEOUT_MS: 120000
@@ -123,7 +143,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin
+          targets: aarch64-apple-darwin,wasm32-unknown-unknown
 
       - name: Cache cargo dependencies and tools
         uses: actions/cache@v4
@@ -132,32 +152,38 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin/cargo-tauri
-          key: ${{ runner.os }}-cargo-tauri-macos-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
+            ~/.cargo/bin/wasm-bindgen
+            ~/.cargo/bin/wasm-bindgen-test-runner
+          key: ${{ runner.os }}-cargo-tauri-macos-${{ hashFiles('Elephant/backend/tauri/Cargo.lock', 'Elephant/backend/tauri/Cargo.toml', 'Elephant/crates/muya-wasm/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-tauri-macos-
-            ${{ runner.os }}-cargo-
 
       - name: Install Tauri CLI
         shell: bash
         run: |
-          set -euxo pipefail
           if ! cargo tauri --version >/dev/null 2>&1; then
-            cargo install tauri-cli --version '^2' --locked
+            cargo install tauri-cli --version '^2.10.0' --locked
           fi
-          cargo tauri --version
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
 
       - name: Cargo check macOS Apple Silicon target
-        shell: bash
-        run: cargo check --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin --all-targets --no-default-features
+        run: cargo check --manifest-path Elephant/backend/tauri/Cargo.toml --target aarch64-apple-darwin
 
       - name: Build packaged Tauri macOS app
         shell: bash
         run: |
-          set -euxo pipefail
-          pnpm tauri:llama:install
-          pnpm tauri:web:build
-          cd src-tauri
-          cargo tauri build --bundles app 2>&1 | tee ../tauri-macos-build-output.txt
+          set -o pipefail
+          cd Elephant/backend/tauri
+          cargo tauri build --target aarch64-apple-darwin --bundles app \
+            2>&1 | tee ../../../tauri-macos-build-output.txt
 
       - name: Launch packaged app and verify visible window
         shell: bash
@@ -173,6 +199,8 @@ jobs:
           path: |
             tauri-macos-build-output.txt
             tauri-macos-smoke-output.txt
+            build/tauri-macos-smoke/**/*.log
+            build/tauri-macos-smoke/**/*.txt
           if-no-files-found: ignore
           retention-days: 1
           compression-level: 9
@@ -180,34 +208,31 @@ jobs:
   tauri-rust:
     name: Tauri Rust check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
-      DEBIAN_FRONTEND: noninteractive
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Materialize official addons
+        run: node build/scripts/sync-elephant-addons.mjs
 
       - name: Install Tauri Linux dependencies
         shell: bash
         run: |
-          set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            curl \
-            file \
-            libayatana-appindicator3-dev \
-            libgtk-3-dev \
-            librsvg2-dev \
-            libssl-dev \
             libwebkit2gtk-4.1-dev \
-            patchelf \
-            wget
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
 
       - name: Cache cargo dependencies
         uses: actions/cache@v4
@@ -215,16 +240,36 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml') }}
+          key: ${{ runner.os }}-cargo-tauri-${{ hashFiles('Elephant/backend/tauri/Cargo.lock', 'Elephant/backend/tauri/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-tauri-
 
       - name: Rust formatting diagnostic
         continue-on-error: true
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+        run: cargo fmt --manifest-path Elephant/backend/tauri/Cargo.toml --all -- --check
 
       - name: Cargo check
-        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --no-default-features
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo check --manifest-path Elephant/backend/tauri/Cargo.toml --all-targets --no-default-features \
+            2>&1 | tee cargo-check-output.txt
 
       - name: Cargo tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --no-default-features
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --manifest-path Elephant/backend/tauri/Cargo.toml --lib --no-default-features \
+            2>&1 | tee cargo-tests-output.txt
+
+      - name: Upload Rust failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-rust-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            cargo-check-output.txt
+            cargo-tests-output.txt
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 9

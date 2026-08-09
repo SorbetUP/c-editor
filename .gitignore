@@ -1,18 +1,25 @@
 node_modules
+Elephant/node_modules/
 dist
-out
+build/out/
+build/coverage/
 .DS_Store
 .prettierignore
 .eslintcache
 *.log*
+*.zip
+__pycache__/
+*.pyc
 .trae/
 .cursor/
 doc/
 # Ignore temp artifacts
 temp/
 logs/
+build/test-results/
 test-results/
 playwright-report/
+official-addon-evidence/
 *.min.json
 .claude/settings.local.json
 .claude/
@@ -20,16 +27,33 @@ playwright-report/
 .agent/
 
 # Android / Gradle generated files
-android/.gradle/
-android/**/build/
-android/**/.cxx/
-android/local.properties
-android/.idea/
-android/**/*.iml
-android/**/*.apk
-android/**/*.aab
-android/captures/
+build/android/.gradle/
+build/android/**/build/
+build/android/**/.cxx/
+build/android/local.properties
+build/android/.idea/
+build/android/**/*.iml
+build/android/**/*.apk
+build/android/**/*.aab
+build/android/captures/
 
 # Tauri / Rust build artifacts
-src-tauri/target/
-src-tauri/gen/
+Elephant/backend/tauri/target/
+Elephant/backend/tauri/gen/
+Elephant/backend/tauri/resources/
+
+# Swift Package Manager generated files
+build/ios/.build/
+
+Elephant/backend/tauri/bin/codex
+Elephant/backend/tauri/bin/codex.exe
+Elephant/backend/tauri/bin/codex-runtime.json
+Elephant/frontend/src/muya/lib/rust/generated/
+Elephant/crates/**/target/
+addons/official/*/native/target/
+addons/official/*/native/*/target/
+
+# Materialized from SorbetUP/Elephant-Addons; never commit these paths here.
+/.cache/elephant-addons/
+/addons
+/packs

@@ -1,4 +1,5 @@
 node_modules
+Elephant/node_modules
 dist
 out
 .git
@@ -6,4 +7,4 @@ out
 *.log
 test-results
 playwright-report
-android/.gradle
+build/android/.gradle

@@ -1,14 +1,19 @@
-import eslintJs from '@eslint/js'
-import pluginVue from 'eslint-plugin-vue'
-import pluginHtml from 'eslint-plugin-html'
-import pluginI18nJson from 'eslint-plugin-i18n-json'
-import pluginJsonc from 'eslint-plugin-jsonc'
-import neostandard from 'neostandard'
-import babelParser from '@babel/eslint-parser'
-import globals from 'globals'
+import { createRequire } from 'module'
+
+const requireFromElephantModules = createRequire(
+  new URL('./Elephant/node_modules/.eslint-anchor.js', import.meta.url)
+)
+const eslintJs = requireFromElephantModules('@eslint/js')
+const pluginVue = requireFromElephantModules('eslint-plugin-vue')
+const pluginHtml = requireFromElephantModules('eslint-plugin-html')
+const pluginI18nJson = requireFromElephantModules('eslint-plugin-i18n-json')
+const pluginJsonc = requireFromElephantModules('eslint-plugin-jsonc')
+const neostandard = requireFromElephantModules('neostandard')
+const babelParser = requireFromElephantModules('@babel/eslint-parser')
+const globals = requireFromElephantModules('globals')
 const { configs: js } = eslintJs
 
-const legacyStyleCompatibilityRules = Object.freeze({
+const compatibilityStyleRules = Object.freeze({
   '@stylistic/arrow-spacing': 'off',
   '@stylistic/block-spacing': 'off',
   '@stylistic/brace-style': 'off',
@@ -17,6 +22,7 @@ const legacyStyleCompatibilityRules = Object.freeze({
   '@stylistic/indent': 'off',
   '@stylistic/key-spacing': 'off',
   '@stylistic/keyword-spacing': 'off',
+  '@stylistic/lines-between-class-members': 'off',
   '@stylistic/multiline-ternary': 'off',
   '@stylistic/no-multiple-empty-lines': 'off',
   '@stylistic/object-curly-spacing': 'off',
@@ -32,18 +38,30 @@ const legacyStyleCompatibilityRules = Object.freeze({
   'no-undef': 'off',
   'no-unneeded-ternary': 'off',
   'no-useless-constructor': 'off',
+  'no-useless-escape': 'off',
   'no-void': 'off',
   'one-var': 'off',
   'promise/param-names': 'off'
 })
 
 export default [
-  // 0. Global ignores (must be first)
   {
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/build/**',
+      'build/out/**',
+      'build/coverage/**',
+      'build/test-results/**',
+      'build/android/**/build/**',
+      'build/ios/.build/**',
+      'Elephant/backend/tauri/target/**',
+      '**/target/**',
+      'Elephant/backend/tauri/gen/**',
+      'Elephant/backend/tauri-plugin-elephant-android-vault/android/.tauri/**',
+      'Elephant/backend/tauri-plugin-elephant-android-vault/android/build/**',
+      '.cache/elephant-addons/**',
+      'addons/**',
+      'packs/**',
       '**/.build/**',
       '**/test-results/**',
       '**/playwright-report/**',
@@ -51,21 +69,17 @@ export default [
       'package.json',
       'out/**',
       'blinko-offline/**',
-      'src/muya/lib/assets/libs/**',
-      'src/muya/lib/parser/marked/urlify.js',
-      'src/renderer/src/assets/symbolIcon/index.js'
+      'Elephant/frontend/src/muya/lib/assets/libs/**',
+      'Elephant/frontend/src/muya/lib/parser/marked/urlify.js',
+      'Elephant/frontend/src/muya/lib/rust/generated/**',
+      'Elephant/frontend/src/renderer/src/assets/symbolIcon/index.js'
     ]
   },
 
-  // 1. ESLint core recommended rules
-
   js.recommended,
-  // 1. Use neostandard instead
   ...neostandard(),
-
   ...pluginVue.configs['flat/recommended'],
 
-  // 3. Custom overrides for JS files
   {
     files: ['**/*.js', '**/*.mjs', '**/*.cjs'],
     plugins: {
@@ -95,12 +109,15 @@ export default [
       'require-atomic-updates': 'off',
       'prefer-const': 'off',
       'no-prototype-builtins': 'off',
-      ...legacyStyleCompatibilityRules
+      ...compatibilityStyleRules
     },
-    ignores: ['node_modules', 'src/muya/dist/**/*', 'src/muya/webpack.config.js']
+    ignores: [
+      'node_modules',
+      'Elephant/frontend/src/muya/dist/**/*',
+      'Elephant/frontend/src/muya/webpack.config.js'
+    ]
   },
 
-  // 3b. Vue files: add browser globals and relax conventions
   {
     files: ['**/*.vue'],
     languageOptions: {
@@ -109,41 +126,37 @@ export default [
     rules: {
       'vue/multi-word-component-names': 'off',
       'vue/require-default-prop': 'off',
-      ...legacyStyleCompatibilityRules
+      ...compatibilityStyleRules
     }
   },
 
-  // 3c. Test file globals
   {
-    files: ['test/**/*.js', 'Elephant/tests/**/*.js'],
+    files: ['tests/**/*.js'],
     languageOptions: {
       globals: { ...globals.vitest }
     },
     rules: {
       'no-confusing-arrow': 'off',
-      ...legacyStyleCompatibilityRules
+      ...compatibilityStyleRules
     }
   },
 
-  // 3d. Relax behavioral rules for legacy muya editor engine
   {
-    files: ['src/muya/lib/**/*.js'],
+    files: ['Elephant/frontend/src/muya/lib/**/*.js'],
     rules: {
       'no-sequences': 'off',
       'no-unused-expressions': 'off',
       'no-return-assign': 'off',
       eqeqeq: 'warn',
       'no-var': 'warn',
-      ...legacyStyleCompatibilityRules
+      ...compatibilityStyleRules
     }
   },
 
-  // 4. JSON files basic validation
   ...pluginJsonc.configs['flat/recommended-with-json'],
 
-  // 5. i18n JSON files validation
   {
-    files: ['src/shared/i18n/locales/*.json'],
+    files: ['Elephant/frontend/src/shared/i18n/locales/*.json'],
     plugins: {
       'i18n-json': pluginI18nJson
     },
@@ -153,7 +166,7 @@ export default [
       'i18n-json/identical-keys': [
         'error',
         {
-          filePath: 'src/shared/i18n/locales/en.json'
+          filePath: 'Elephant/frontend/src/shared/i18n/locales/en.json'
         }
       ]
     }

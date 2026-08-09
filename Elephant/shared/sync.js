@@ -53,7 +53,7 @@ export const SYNC_ERROR_CODES = Object.freeze({
 
 export const SYNC_DEFAULT_REMOTE = 'origin'
 export const SYNC_METADATA_DIR = '.elephantnote/sync'
-export const SYNC_LEGACY_METADATA_DIR = '.elephantnote'
+export const SYNC_COMPATIBILITY_METADATA_DIR = '.elephantnote'
 export const SYNC_HISTORY_FILE = 'sync-log.json'
 export const SYNC_CONFIG_FILE = 'sync-config.json'
 export const SYNC_BACKENDS = Object.freeze({

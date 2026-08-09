@@ -3,7 +3,7 @@ name: elephantnote-ai-runtime
 description: >
   Rules for AI providers, local runtimes, model library, embeddings, OCR,
   OpenAI-compatible APIs, Ollama/LM Studio/llama.cpp, and honest capability reporting.
-argument-hint: "<ai-runtime-task>"
+argument-hint: '<ai-runtime-task>'
 ---
 
 # ElephantNote AI Runtime
@@ -21,7 +21,7 @@ Use this skill for chat providers, local model setup, external OpenAI-compatible
 
 ## Read first
 
-- `Elephant/back/app/modelRuntime.js`, `modelLibrary.js`, runtime providers, OCR runtime.
+- `Elephant/backend/js/modelRuntime.js`, `modelLibrary.js`, runtime providers, OCR runtime.
 - `Elephant/shared/ai*.js`, `aiProviders.js`, `aiSetup.js`.
 - Settings/model UI files.
 - Tests for model library, providers, runtime, OCR, RAG prompts, and local llama setup.

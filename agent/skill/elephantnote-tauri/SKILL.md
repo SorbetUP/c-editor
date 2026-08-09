@@ -3,18 +3,18 @@ name: elephantnote-tauri
 description: >
   Tauri-specific rules for Rust commands, filesystem safety, window behavior,
   frontend bridge calls, and macOS/dev build verification.
-argument-hint: "<tauri-task>"
+argument-hint: '<tauri-task>'
 ---
 
 # ElephantNote Tauri
 
-Use this skill for `src-tauri`, Tauri invokes, Rust command registration, Tauri window behavior, permissions, and Tauri dev/build failures.
+Use this skill for `Elephant/backend/tauri`, Tauri invokes, Rust command registration, Tauri window behavior, permissions, and Tauri dev/build failures.
 
 ## Read first
 
-- `src-tauri/src/**/*.rs` touched by the command.
-- `src-tauri/tauri.conf.json` and capabilities when permissions are involved.
-- Frontend caller in `Elephant/front/app/services/elephantnoteClient*` or component/store using the command.
+- `Elephant/backend/tauri/src/**/*.rs` touched by the command.
+- `Elephant/backend/tauri/tauri.conf.json` and capabilities when permissions are involved.
+- Frontend caller in `Elephant/frontend/app/services/elephantnoteClient*` or component/store using the command.
 - Existing Rust and JS tests for the command family.
 
 ## Rules

@@ -1,32 +1,113 @@
-name: Sync Docker Smoke
+name: Iroh Sync Validation
 
 on:
   push:
     branches:
       - main
+      - develop
       - nsb/tauri
       - 'assistant/**'
+      - 'feature/**'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
-  group: sync-docker-smoke-${{ github.ref }}
+  group: iroh-sync-validation-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  two-device-sync:
-    name: Two-device Docker sync
+  two-device-iroh-sync:
+    name: Two real Iroh endpoints
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show runtime versions
-        run: |
-          node --version
-          docker --version
-          git --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-      - name: Run two-device Docker sync smoke
-        run: node scripts/sync-two-docker-smoke.mjs
+      - name: Materialize official addons
+        run: node build/scripts/sync-elephant-addons.mjs
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Run package-owned two-endpoint Iroh synchronization
+        id: iroh-smoke
+        shell: bash
+        run: |
+          set -uo pipefail
+          log_file="iroh-smoke-output.txt"
+          set +e
+          cargo test \
+            --manifest-path addons/official/sync/native/Cargo.toml \
+            --test two_endpoint_sync \
+            physical_package_pairs_and_synchronizes_two_real_iroh_endpoints \
+            -- --nocapture 2>&1 | tee "$log_file"
+          test_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$test_status" -ne 0 ]; then
+            exit "$test_status"
+          fi
+          grep -Eq 'test result: ok\. 1 passed; 0 failed' "$log_file"
+
+      - name: Verify structured package synchronization diagnostics
+        shell: bash
+        run: |
+          set -euxo pipefail
+          log_file="iroh-smoke-output.txt"
+          grep -F '[Sync] run:start owner=elephant.sync transport=iroh' "$log_file"
+          grep -F '[Sync] endpoints:ready' "$log_file"
+          grep -F '[Sync] pairing:start' "$log_file"
+          grep -F '[Sync] pairing:complete' "$log_file"
+          grep -F '[Sync] session:start direction=bidirectional' "$log_file"
+          grep -F '[Sync] transfer:complete files=2' "$log_file"
+          grep -F '[Sync] verify:manifest equal=true' "$log_file"
+          grep -F '[Sync] baseline:saved peers=2' "$log_file"
+          grep -F '[Sync] run:complete' "$log_file"
+
+      - name: Upload Iroh failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iroh-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: iroh-smoke-output.txt
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 9
+
+  sync-toolbar-contracts:
+    name: Active-vault toolbar states
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Run focused synchronization UI tests
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/main/elephantnote/navigationIrohSync.spec.js \
+            tests/app/unit/specs/main/elephantnote/syncSettingsPanel.spec.js \
+            2>&1 | tee iroh-toolbar-vitest.txt
+
+      - name: Upload focused UI failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iroh-toolbar-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: iroh-toolbar-vitest.txt
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 9

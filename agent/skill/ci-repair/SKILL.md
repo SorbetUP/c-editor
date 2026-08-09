@@ -3,7 +3,7 @@ name: ci-repair
 description: >
   Fix failing CI by reading the real remote CI state, repairing the root cause,
   and keeping tests meaningful.
-argument-hint: "<ci-failure>"
+argument-hint: '<ci-failure>'
 ---
 
 # CI Repair
@@ -37,6 +37,7 @@ When repository CI is available, inspect the workflow runs for the head commit. 
 
 ```md
 CI repair:
+
 - head commit:
 - workflows checked:
 - failing step:

@@ -3,7 +3,7 @@ name: elephantnote-ui-parity
 description: >
   Rules for matching Electron/Tauri/mobile UI behavior, layout, window chrome,
   theme, scroll, graph/chat/search/editor surfaces, and screenshot verification.
-argument-hint: "<ui-task>"
+argument-hint: '<ui-task>'
 ---
 
 # ElephantNote UI Parity
@@ -21,7 +21,7 @@ Use this skill for UI behavior, visual parity, layout bugs, theme issues, graph/
 ## Read first
 
 - Component touched plus parent shell/layout components.
-- Shared CSS in `Elephant/front/app/styles/**`.
+- Shared CSS in `Elephant/frontend/app/styles/**`.
 - Store/service driving the UI state.
 - Existing render/helper tests.
 

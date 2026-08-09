@@ -3,16 +3,16 @@ name: rust-tauri-runtime
 description: >
   Rules for Rust, Cargo, Tauri command handlers, path safety, serde payloads,
   error propagation, tests, and desktop/mobile runtime boundaries.
-argument-hint: "<rust-tauri-task>"
+argument-hint: '<rust-tauri-task>'
 ---
 
-# Rust Tauri Runtime
+# Rust/Tauri Runtime
 
-Use this skill when work touches `src-tauri`, Rust commands, Cargo manifests, Tauri config, capabilities, filesystem operations, sync backends, or mobile/desktop runtime behavior.
+Use this skill when work touches `Elephant/backend/tauri`, Rust commands, Cargo manifests, Tauri config, capabilities, filesystem operations, sync backends, or mobile/desktop runtime behavior.
 
 ## Read first
 
-- `src-tauri/Cargo.toml` and the closest Rust module.
+- `Elephant/backend/tauri/Cargo.toml` and the closest Rust module.
 - Command registration in the Tauri library entrypoint.
 - Existing unit tests in the touched Rust module.
 - Tauri capabilities/config when command access changes.
@@ -32,8 +32,8 @@ Use this skill when work touches `src-tauri`, Rust commands, Cargo manifests, Ta
 Use the narrowest relevant command:
 
 ```bash
-cargo check --manifest-path src-tauri/Cargo.toml --all-targets --no-default-features
-cargo test --manifest-path src-tauri/Cargo.toml --lib --no-default-features
+cargo check --manifest-path Elephant/backend/tauri/Cargo.toml --all-targets --no-default-features
+cargo test --manifest-path Elephant/backend/tauri/Cargo.toml --lib --no-default-features
 ```
 
 Add `pnpm tauri:web:build` or packaged-app checks when renderer/runtime integration is in scope.

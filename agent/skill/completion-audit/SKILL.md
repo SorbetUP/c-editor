@@ -3,7 +3,7 @@ name: completion-audit
 description: >
   Audit delivery status before final response and classify each acceptance
   criterion as proven, partial, pending, blocked, or out of scope.
-argument-hint: "<delivery-status>"
+argument-hint: '<delivery-status>'
 ---
 
 # Completion Audit

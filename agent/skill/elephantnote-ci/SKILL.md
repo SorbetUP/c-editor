@@ -3,7 +3,7 @@ name: elephantnote-ci
 description: >
   Rules for CI repair, workflow changes, build/test gates, Tauri CI, Docker sync
   tests, and honest green status.
-argument-hint: "<ci-task>"
+argument-hint: '<ci-task>'
 ---
 
 # ElephantNote CI

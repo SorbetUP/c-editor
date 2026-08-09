@@ -1,0 +1,11 @@
+PRESERVE	assistant/wiki-organization-continuation	1784025111	fix: ignore Excalidraw repair callbacks after DOM teardown
+PRESERVE	develop	1783699911	Merge secure addon platform, optional Calendar and configurable icon rail
+PRESERVE	develop_next	1784100235	Publish Android review APK from develop_next
+PRESERVE	develop_next-integration-repair	1784159981	ci: clean stale and duplicate integration branches
+PRESERVE	develop_next-mobile-recovery	1784113599	test(search): keep lifecycle patch runtime-only
+PRESERVE	develop_next-unified-candidate2	1784121510	test(code): enforce persistent service API usage
+PRESERVE	feature/physical-addon-packages	1784034798	fix(addons): advertise only published desktop targets
+PRESERVE	main	1783991543	ci: remove temporary semantic metadata fixer
+PRESERVE	refactor/muya-rust-file-by-file	1784025603	fix(muya-rust): require Muya front matter separation
+PRESERVE-NOT-MERGED	assistant/validate-knowledge-graph-wiki
+PRESERVE-NOT-MERGED	assistant/wiki-links-graph-integration

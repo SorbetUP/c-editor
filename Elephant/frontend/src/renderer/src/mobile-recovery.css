@@ -1,0 +1,332 @@
+@media (max-width: 760px), (hover: none) and (pointer: coarse) {
+  html,
+  body,
+  #app,
+  .editor-container,
+  .editor-middle {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  .en-mobile-shell {
+    --en-sidebar-width: min(84vw, 340px) !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+  }
+
+  .en-mobile-shell .en-shell-main,
+  .en-mobile-shell .en-layout,
+  .en-mobile-shell .en-body,
+  .en-mobile-shell .en-body-main,
+  .en-mobile-shell .en-main,
+  .en-mobile-shell .en-library {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  .en-mobile-shell .en-layout {
+    position: relative !important;
+    overflow: hidden !important;
+  }
+
+  .en-mobile-shell .en-body,
+  .en-mobile-shell .en-body.en-sidebar-hidden {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .en-mobile-shell .en-body-main {
+    grid-column: 1 !important;
+    min-width: 0 !important;
+  }
+
+  .en-mobile-shell .en-sidebar {
+    position: fixed !important;
+    z-index: 210 !important;
+    top: calc(60px + env(safe-area-inset-top, 0px)) !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: min(84vw, 340px) !important;
+    max-width: calc(100vw - 48px) !important;
+    overflow-y: auto !important;
+    border-right: 1px solid var(--en-border) !important;
+    box-shadow: 16px 0 42px rgba(15, 23, 42, .22) !important;
+    background: var(--en-sidebar-bg, var(--en-surface)) !important;
+  }
+
+  .en-mobile-shell .en-mobile-scrim {
+    position: fixed !important;
+    z-index: 200 !important;
+    inset: calc(60px + env(safe-area-inset-top, 0px)) 0 0 !important;
+    width: auto !important;
+    height: auto !important;
+    border: 0 !important;
+    background: rgba(15, 23, 42, .5) !important;
+  }
+
+  .en-mobile-topbar {
+    min-height: calc(60px + env(safe-area-inset-top, 0px)) !important;
+    display: grid !important;
+    grid-template-columns: 48px minmax(0, 1fr) 48px !important;
+    align-items: end !important;
+    gap: 8px !important;
+    padding: env(safe-area-inset-top, 0px) 10px 6px !important;
+    border-bottom: 1px solid var(--en-border) !important;
+    background: color-mix(in srgb, var(--en-surface) 96%, transparent) !important;
+  }
+
+  .en-mobile-icon-button,
+  .en-mobile-search {
+    min-width: 0 !important;
+    height: 48px !important;
+    border: 0 !important;
+    border-radius: 14px !important;
+    color: var(--en-text) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .en-mobile-icon-button {
+    width: 48px !important;
+    padding: 0 !important;
+  }
+
+  .en-mobile-search {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 9px !important;
+    padding: 0 14px !important;
+    background: var(--en-soft) !important;
+    text-align: left !important;
+  }
+
+  .en-mobile-icon {
+    width: 24px !important;
+    height: 24px !important;
+    flex: 0 0 auto !important;
+  }
+
+  .en-mobile-fab {
+    position: fixed !important;
+    z-index: 90 !important;
+    right: 18px !important;
+    bottom: max(18px, env(safe-area-inset-bottom, 0px) + 12px) !important;
+    left: auto !important;
+    width: 58px !important;
+    min-width: 58px !important;
+    height: 58px !important;
+    min-height: 58px !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    color: #fff !important;
+    background: var(--en-primary) !important;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, .28) !important;
+  }
+
+  .en-mobile-fab-icon {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .en-mobile-shell .en-library-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+    padding: 14px 14px calc(92px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .en-mobile-shell .en-library-grid > * {
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* Settings are a phone page, not a compressed desktop dialog. */
+  .en-settings-backdrop {
+    padding: 0 !important;
+    place-items: stretch !important;
+    background: var(--en-bg) !important;
+    backdrop-filter: none !important;
+  }
+
+  .en-settings-panel,
+  .en-settings-panel.is-macos {
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    max-height: none !important;
+    grid-template-rows: auto auto minmax(0, 1fr) !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .en-settings-header,
+  .en-settings-panel.is-macos .en-settings-header {
+    min-height: calc(58px + env(safe-area-inset-top, 0px)) !important;
+    display: grid !important;
+    grid-template-columns: 44px minmax(0, 1fr) !important;
+    grid-template-areas: 'close title' !important;
+    align-items: end !important;
+    gap: 8px !important;
+    padding: env(safe-area-inset-top, 0px) 14px 7px !important;
+  }
+
+  .en-settings-header h2 {
+    align-self: center !important;
+    font-size: 22px !important;
+  }
+
+  .en-settings-search {
+    display: none !important;
+  }
+
+  .en-settings-grid {
+    display: contents !important;
+  }
+
+  .en-settings-nav {
+    min-height: 58px !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 4px !important;
+    padding: 6px 10px !important;
+    overflow: visible !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--en-border) !important;
+    background: var(--en-surface) !important;
+  }
+
+  .en-settings-nav > button {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 46px !important;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    place-items: center !important;
+    gap: 2px !important;
+    padding: 0 !important;
+    border-radius: 12px !important;
+  }
+
+  .en-settings-nav > button > svg {
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  .en-settings-nav > button span,
+  .en-settings-nav-chevron,
+  .en-settings-nav-footer {
+    display: none !important;
+  }
+
+  .en-settings-content {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 18px 14px calc(32px + env(safe-area-inset-bottom, 0px)) !important;
+    overflow-x: hidden !important;
+  }
+
+  .en-settings-page-title {
+    min-height: 34px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .en-settings-page-title h1 {
+    font-size: 25px !important;
+  }
+
+  .en-settings-group {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-radius: 16px !important;
+  }
+
+  .en-settings-row:not(.en-settings-row-stacked) {
+    min-height: 72px !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    gap: 14px !important;
+    padding: 14px 16px !important;
+  }
+
+  .en-settings-row-copy {
+    min-width: 0 !important;
+  }
+
+  .en-settings-row-copy strong {
+    font-size: 15px !important;
+  }
+
+  .en-settings-row-copy span {
+    font-size: 13px !important;
+  }
+
+  .en-settings-panel .en-switch,
+  .en-settings-panel :deep(.en-switch) {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    flex: 0 0 44px !important;
+    padding: 2px !important;
+  }
+
+  .en-settings-panel .en-switch > span,
+  .en-settings-panel :deep(.en-switch > span) {
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  .en-settings-panel .en-switch.active > span,
+  .en-settings-panel :deep(.en-switch.active > span) {
+    transform: translateX(18px) !important;
+  }
+
+  .en-settings-panel .en-compact-input,
+  .en-settings-panel .en-compact-select,
+  .en-settings-panel .en-range-control {
+    max-width: 48vw !important;
+  }
+
+  .en-addons-tabs {
+    position: static !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto auto !important;
+    gap: 8px !important;
+    padding: 10px !important;
+  }
+
+  .en-addons-tab-buttons,
+  .en-addons-search,
+  .en-installed-only-control {
+    grid-column: 1 / -1 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .en-addons-tab-buttons {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .en-addons-search input {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .en-addon-overview-grid,
+  .en-addon-browser {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .en-addon-browser-sidebar,
+  .en-addon-browser-detail {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+}

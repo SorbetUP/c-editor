@@ -3,7 +3,7 @@ name: connector-retry-discipline
 description: >
   Handle failed connector writes or actions by diagnosing the likely cause,
   changing strategy, and retrying with a safer smaller operation.
-argument-hint: "<failed-connector-action>"
+argument-hint: '<failed-connector-action>'
 ---
 
 # Connector Retry Discipline

@@ -1,0 +1,172 @@
+name: Rust editor production validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop_next-integration-repair
+      - develop_next-unified-candidate2
+    paths:
+      - '.github/workflows/rust-editor-production-validation.yml'
+      - 'Elephant/crates/muya-core/**'
+      - 'Elephant/crates/muya-wasm/**'
+      - 'Elephant/frontend/src/muya/lib/rust/**'
+      - 'Elephant/frontend/src/renderer/src/editor-rust/**'
+      - 'Elephant/frontend/src/renderer/src/muya/**'
+      - 'Elephant/frontend/src/renderer/src/components/editorWithTabs/**'
+      - 'build/scripts/build-muya-wasm.mjs'
+      - 'tests/app/unit/specs/muya/**'
+      - 'tests/app/unit/muya*.spec.js'
+      - 'tests/app/unit/addons/rustEditorAddonRuntime.spec.js'
+      - 'vite.tauri.config.mjs'
+      - 'package.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rust-editor-production-validation.yml'
+      - 'Elephant/crates/muya-core/**'
+      - 'Elephant/crates/muya-wasm/**'
+      - 'Elephant/frontend/src/muya/lib/rust/**'
+      - 'Elephant/frontend/src/renderer/src/editor-rust/**'
+      - 'Elephant/frontend/src/renderer/src/muya/**'
+      - 'Elephant/frontend/src/renderer/src/components/editorWithTabs/**'
+      - 'build/scripts/build-muya-wasm.mjs'
+      - 'tests/app/unit/specs/muya/**'
+      - 'tests/app/unit/muya*.spec.js'
+      - 'tests/app/unit/addons/rustEditorAddonRuntime.spec.js'
+      - 'vite.tauri.config.mjs'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-editor-production-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity-and-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.91.0'
+          targets: wasm32-unknown-unknown
+          components: rustfmt
+
+      - uses: ./.github/actions/setup
+
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --manifest-path Elephant/crates/muya-core/Cargo.toml -- --check
+          cargo fmt --manifest-path Elephant/crates/muya-wasm/Cargo.toml -- --check
+
+      - name: Test Rust core and WASM protocol
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml 2>&1 | tee rust-editor-core-tests.txt
+          cargo test --manifest-path Elephant/crates/muya-wasm/Cargo.toml 2>&1 | tee rust-editor-wasm-tests.txt
+          cargo check --manifest-path Elephant/crates/muya-wasm/Cargo.toml --target wasm32-unknown-unknown
+
+      - id: wasm-bindgen
+        name: Resolve wasm-bindgen version
+        shell: bash
+        run: |
+          version="$(cargo metadata \
+            --manifest-path Elephant/crates/muya-wasm/Cargo.toml \
+            --format-version 1 | node -e '
+              let input = ""
+              process.stdin.on("data", chunk => input += chunk)
+              process.stdin.on("end", () => {
+                const metadata = JSON.parse(input)
+                const pkg = metadata.packages.find(entry => entry.name === "wasm-bindgen")
+                if (!pkg) process.exit(1)
+                process.stdout.write(pkg.version)
+              })
+            ')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${{ steps.wasm-bindgen.outputs.version }}$"; then
+            cargo install wasm-bindgen-cli \
+              --version "${{ steps.wasm-bindgen.outputs.version }}" \
+              --locked
+          fi
+
+      - name: Build the real production WASM editor
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pnpm muya:wasm:build
+          test -s Elephant/frontend/src/muya/lib/rust/generated/muya_wasm.js
+          test -s Elephant/frontend/src/muya/lib/rust/generated/muya_wasm_bg.wasm
+
+      - name: Reject legacy production mutation ownership
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/muya/rustNoFallbackOwnership.spec.js \
+            tests/app/unit/specs/muya/rustProductionOwnership.spec.js \
+            tests/app/unit/specs/muya/rustEditorNeutralNamespace.spec.js \
+            tests/app/unit/addons/rustEditorAddonRuntime.spec.js \
+            2>&1 | tee rust-editor-ownership-tests.txt
+
+      - name: Run complete JavaScript versus Rust differential suite
+        shell: bash
+        env:
+          ELEPHANT_EXPERIMENTAL_RUST_EDITOR: '1'
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/muya/rustDifferential*.spec.js \
+            2>&1 | tee rust-editor-differential-tests.txt
+
+      - name: Validate browser and Vue production integration
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/muya/rustBridge.spec.js \
+            tests/app/unit/specs/muya/rustLogicalDocument.spec.js \
+            tests/app/unit/specs/muya/rustDomRenderer.spec.js \
+            tests/app/unit/specs/muya/rustInputController.spec.js \
+            tests/app/unit/specs/muya/rustInputQueueRegression.spec.js \
+            tests/app/unit/specs/muya/rustRuntime.spec.js \
+            tests/app/unit/specs/muya/rustWasmFactory.spec.js \
+            tests/app/unit/specs/muya/rustVueRuntime.spec.js \
+            tests/app/unit/muyaAdvancedRuntime.spec.js \
+            tests/app/unit/muyaRuntimeInputParity.spec.js \
+            tests/app/unit/muyaRuntimeVueIntegration.spec.js \
+            2>&1 | tee rust-editor-browser-tests.txt
+
+      - name: Build production renderer with real Rust editor
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pnpm tauri:web:build
+          test -s build/out/renderer/index.html
+          find build/out/renderer -type f -name '*.wasm' -print -quit | grep .
+          if grep -R --include='*.js' -n "frontend/src/muya/lib/core\|from ['\"]muya['\"]" build/out/renderer; then
+            echo 'Legacy Muya production implementation leaked into the renderer bundle.' >&2
+            exit 1
+          fi
+
+      - name: Upload Rust editor diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-editor-production-diagnostics
+          path: |
+            rust-editor-core-tests.txt
+            rust-editor-wasm-tests.txt
+            rust-editor-ownership-tests.txt
+            rust-editor-differential-tests.txt
+            rust-editor-browser-tests.txt
+          if-no-files-found: warn
+          retention-days: 14

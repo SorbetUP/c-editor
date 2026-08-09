@@ -1,0 +1,260 @@
+name: Android APK Review Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop_next-mobile-recovery
+      - develop_next-unified-candidate2
+      - develop_next-integration-repair
+      - develop
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: android-apk-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    name: Build signed arm64 release APK under 24 MiB
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event.pull_request.base.ref == 'develop_next-integration-repair' ||
+      github.event.pull_request.base.ref == 'develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      NDK_VERSION: 27.2.12479018
+      ANDROID_TARGET: aarch64
+      ANDROID_BUILD_PROFILE: release
+      ANDROID_APK_MAX_MIB: 24
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform, build tools and NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdkmanager --install \
+            'platform-tools' \
+            'platforms;android-35' \
+            'build-tools;35.0.0' \
+            "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,wasm32-unknown-unknown
+
+      - uses: ./.github/actions/setup
+
+      - name: Verify Android release recovery contracts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/main/elephantnote/androidReleaseRecovery.spec.js \
+            tests/app/unit/specs/main/elephantnote/mobileIntegrationRepair.spec.js \
+            tests/app/unit/specs/main/elephantnote/androidUsageRegressionSuite.spec.js
+
+      - name: Cache Cargo and Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/wasm-bindgen
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            Elephant/backend/tauri/target
+          key: ${{ runner.os }}-android-release-${{ hashFiles('Elephant/backend/tauri/Cargo.lock', 'Elephant/backend/tauri/Cargo.toml', 'Elephant/crates/muya-wasm/Cargo.lock', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-android-release-
+            ${{ runner.os }}-android-apk-
+
+      - name: Install Tauri CLI
+        shell: bash
+        run: |
+          if ! cargo tauri --version >/dev/null 2>&1; then
+            cargo install tauri-cli --version '^2.10.0' --locked
+          fi
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+
+      - name: Build signed review APK with mobile guards
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pnpm tauri:android:build 2>&1 | tee android-release-build.log
+
+      - name: Collect signed APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p build/android-review
+          APK=$(find Elephant/backend/tauri/gen/android/app/build/outputs/apk \
+            -type f -name '*-review-signed.apk' -print | head -n 1)
+          test -s "$APK"
+          test "$(stat -c '%s' "$APK")" -le $((24 * 1024 * 1024))
+          cp "$APK" build/android-review/Elephant-develop_next-arm64-release-review.apk
+          sha256sum build/android-review/Elephant-develop_next-arm64-release-review.apk \
+            | tee build/android-review/SHA256SUMS.txt
+          cp android-release-build.log build/android-review/android-release-build.log
+
+      - name: Upload Android review APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elephant-develop_next-Android-arm64-release-review
+          path: build/android-review/
+          if-no-files-found: error
+          retention-days: 14
+
+  startup-smoke:
+    name: Install, launch and exercise Android regressions
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      github.event.pull_request.base.ref == 'develop_next-integration-repair' ||
+      github.event.pull_request.base.ref == 'develop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      NDK_VERSION: 27.2.12479018
+      ANDROID_TARGET: x86_64
+      ANDROID_BUILD_PROFILE: debug
+      ANDROID_APK_MAX_MIB: 200
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform, build tools and NDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sdkmanager --install \
+            'platform-tools' \
+            'platforms;android-35' \
+            'build-tools;35.0.0' \
+            "ndk;${NDK_VERSION}"
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Setup Rust Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android,wasm32-unknown-unknown
+
+      - uses: ./.github/actions/setup
+
+      - name: Install screenshot analysis dependency
+        run: python3 -m pip install --disable-pip-version-check pillow
+
+      - name: Cache Cargo and Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-tauri
+            ~/.cargo/bin/wasm-bindgen
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            Elephant/backend/tauri/target
+          key: ${{ runner.os }}-android-startup-x86_64-${{ hashFiles('Elephant/backend/tauri/Cargo.lock', 'Elephant/backend/tauri/Cargo.toml', 'Elephant/crates/muya-wasm/Cargo.lock', 'pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-android-startup-x86_64-
+            ${{ runner.os }}-android-apk-
+
+      - name: Install Tauri CLI
+        shell: bash
+        run: |
+          if ! cargo tauri --version >/dev/null 2>&1; then
+            cargo install tauri-cli --version '^2.10.0' --locked
+          fi
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+
+      - name: Build x86_64 debug APK for emulator
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pnpm tauri:android:build 2>&1 | tee android-startup-build.log
+
+      - name: Enable KVM access
+        shell: bash
+        run: sudo chmod 666 /dev/kvm || true
+
+      - name: Install, launch and run app usage catalog on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            bash build/scripts/android_startup_smoke.sh
+            bash build/scripts/android_usage_regression_suite.sh
+            bash build/scripts/android_editor_chrome_regression.sh
+
+      - name: Upload Android app usage diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elephant-Android-app-usage-diagnostics
+          path: |
+            android-startup-build.log
+            android-release-build.log
+            android-startup-logcat.txt
+            android-usage-logcat.txt
+            android-usage-summary.json
+            android-usage-junit.xml
+            android-usage-results.tsv
+            android-editor-chrome-validation.txt
+            android-usage-*.log
+            android-*.png
+            android-*.xml
+            Elephant/backend/tauri/gen/android/app/build/outputs/apk/**/*-debug.apk
+          if-no-files-found: warn
+          retention-days: 14

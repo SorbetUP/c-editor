@@ -1,6 +1,10 @@
 name: E2E Test
 
 on:
+  push:
+    branches:
+      - develop
+      - 'agent/**'
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -8,39 +12,176 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   e2e:
+    name: Linux production app and official addon usage simulations
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      FORCE_COLOR: '1'
+      ELEPHANT_E2E_EXHAUSTIVE_EVIDENCE: '1'
+      ELEPHANT_E2E_REQUIRE_NATIVE_PACKAGES: '1'
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
       - name: Install System Dependencies
+        shell: bash
         run: |
+          set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             libx11-dev libxkbfile-dev libsecret-1-dev libfontconfig-dev \
             xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
-            libdrm2 libgtk-3-0 libgbm1 libasound2t64
+            libdrm2 libgtk-3-0 libgbm1 libasound2t64 unzip \
+            libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev \
+            patchelf
 
       - uses: ./.github/actions/setup
 
-      # Run the full postinstall and locale minification.
-      - name: Run postinstall
-        run: node scripts/postinstall.js
+      - name: Validate complete feature and addon scenario matrix
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node build/scripts/run-observable.mjs --label feature-matrix -- \
+            pnpm test:feature-matrix
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+          wasm-bindgen --version
+
+      - name: Install Electron test binary
+        shell: bash
+        run: |
+          set -euxo pipefail
+          electron_package="$(NODE_PATH=Elephant/node_modules node - <<'NODE'
+          const path = require('path')
+          const roots = [process.cwd(), path.join(process.cwd(), 'Elephant')]
+          let resolved = ''
+          for (const root of roots) {
+            try {
+              resolved = require.resolve('electron/package.json', { paths: [root] })
+              break
+            } catch {}
+          }
+          if (!resolved) process.exit(1)
+          process.stdout.write(resolved)
+          NODE
+          )"
+          electron_root="$(dirname "$electron_package")"
+          echo "Electron package: $electron_root" | tee electron-install.txt
+          node "$electron_root/install.js" 2>&1 | tee -a electron-install.txt
+          test -s "$electron_root/path.txt"
+          cat "$electron_root/path.txt"
+
+      - name: Install Playwright Chromium
+        shell: bash
+        run: NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/playwright install chromium
+
+      - name: Run postinstall with complete output
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          npm_config_user_agent: 'pnpm'
+          npm_config_user_agent: pnpm
           USE_ELECTRON_CLANG: '0'
+        run: |
+          set -euxo pipefail
+          node build/scripts/run-observable.mjs --label postinstall -- \
+            node build/scripts/postinstall.js
 
-      - name: Build app diagnostic
-        id: build-app
-        continue-on-error: true
-        run: pnpm build
+      - name: Build every Linux native official addon package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          : > official-addon-native-build.txt
+          built=0
+          for source in addons/official/*
+          do
+            [ -f "$source/addon.build.json" ] || continue
+            supported="$(node -e 'const fs=require("fs"); const file=process.argv[1]; const data=JSON.parse(fs.readFileSync(file,"utf8")); process.stdout.write(String((data.supportedPlatforms||[]).includes("linux-x86_64")))' "$source/addon.build.json")"
+            [ "$supported" = true ] || continue
+            slug="$(basename "$source")"
+            node build/scripts/run-observable.mjs --label "official-addon-native-$slug" -- \
+              node build/scripts/build-physical-addon.mjs "$source" \
+              2>&1 | tee -a official-addon-native-build.txt
+            built=$((built + 1))
+          done
+          echo "Built $built Linux native official addon package(s)." | tee -a official-addon-native-build.txt
+          test "$built" -gt 0
+          find build/out/addons/releases -maxdepth 3 -type f -print -exec ls -lh {} \; | tee -a official-addon-native-build.txt
 
-      - name: Run E2E Tests
-        if: steps.build-app.outcome == 'success'
-        run: xvfb-run --auto-servernum pnpm test:e2e
+      - name: Build Rust renderer for Linux usage simulations
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node build/scripts/run-observable.mjs --label e2e-renderer-build -- \
+            pnpm build \
+            2>&1 | tee e2e-build.txt
+          test -f build/out/renderer/index.html
+          ls -lh build/out/renderer/index.html
 
-      - name: Skip E2E after build diagnostic failure
-        if: steps.build-app.outcome != 'success'
-        run: echo "Skipping E2E because the web build is currently diagnostic during the Tauri migration."
+      - name: Run every core and official addon application scenario
+        shell: bash
+        run: |
+          set -euxo pipefail
+          xvfb-run --auto-servernum pnpm test:e2e 2>&1 | tee e2e-tests.txt
+
+      - name: Build and run the packaged Tauri desktop acceptance scenario
+        shell: bash
+        run: |
+          set -euxo pipefail
+          node build/scripts/run-observable.mjs --label tauri-linux-build -- \
+            pnpm build:linux 2>&1 | tee tauri-linux-build.txt
+          test -x Elephant/backend/tauri/target/release/Elephant
+          xvfb-run --auto-servernum env \
+            ELEPHANT_ACCEPTANCE_SKIP_BUILD=1 \
+            ELEPHANT_ACCEPTANCE_APP_PATH="$PWD/Elephant/backend/tauri/target/release/Elephant" \
+            pnpm test:desktop:acceptance 2>&1 | tee tauri-acceptance-tests.txt
+
+      - name: Collect explicit official addon evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p official-addon-evidence
+          while IFS= read -r evidence
+          do
+            cp "$evidence" "official-addon-evidence/$(basename "$evidence")"
+          done < <(find test-results -type f -name '*native-package-evidence.json' -print 2>/dev/null || true)
+          find official-addon-evidence -maxdepth 1 -type f -print -exec cat {} \; || true
+
+      - name: Upload complete Linux usage diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-app-and-official-addon-usage-diagnostics
+          path: |
+            electron-install.txt
+            official-addon-native-build.txt
+            e2e-build.txt
+            e2e-tests.txt
+            tauri-linux-build.txt
+            tauri-acceptance-tests.txt
+            test-results/observability/**
+            test-results/e2e-results.json
+            test-results/e2e-junit.xml
+            test-results/**
+            playwright-report/**
+            official-addon-evidence/**
+            build/out/addons/releases/**
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,96 @@
+name: Tauri desktop acceptance
+
+on:
+  push:
+    branches:
+      - develop
+      - 'agent/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packaged-acceptance:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-24.04
+            platform: linux
+          - name: windows-x86_64
+            os: windows-latest
+            platform: windows
+          - name: macos-x86_64
+            os: macos-15-intel
+            platform: macos
+          - name: macos-aarch64
+            os: macos-15
+            platform: macos
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri dependencies
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev \
+            libx11-dev libxkbfile-dev libsecret-1-dev libfontconfig-dev \
+            libgtk-3-0 libgbm1 libnss3 libasound2t64 patchelf unzip xvfb
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: ./.github/actions/setup
+
+      - name: Validate platform contracts
+        shell: bash
+        run: pnpm tauri:platform:check
+
+      - name: Build packaged Tauri desktop application
+        shell: bash
+        run: |
+          set -euxo pipefail
+          case "${{ matrix.platform }}" in
+            linux) pnpm build:linux 2>&1 | tee tauri-build.txt ;;
+            macos) pnpm build:mac 2>&1 | tee tauri-build.txt ;;
+            windows) pnpm build:win 2>&1 | tee tauri-build.txt ;;
+          esac
+
+      - name: Run packaged Tauri acceptance scenario
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ "${{ matrix.platform }}" = linux ]; then
+            xvfb-run --auto-servernum pnpm test:desktop:acceptance:packaged 2>&1 | tee tauri-acceptance.txt
+          else
+            pnpm test:desktop:acceptance:packaged 2>&1 | tee tauri-acceptance.txt
+          fi
+
+      - name: Upload Tauri acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tauri-desktop-acceptance-${{ matrix.name }}
+          path: |
+            tauri-build.txt
+            tauri-acceptance.txt
+            test-results/acceptance/**
+            dist/**
+          if-no-files-found: warn
+          retention-days: 30

@@ -13,7 +13,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
       - uses: ./.github/actions/setup
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+
+      - name: Generate Rust WASM editor bundle
+        run: pnpm muya:wasm:build
 
       - name: Run Unit Tests
         shell: bash

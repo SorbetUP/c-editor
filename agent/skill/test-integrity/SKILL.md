@@ -3,7 +3,7 @@ name: test-integrity
 description: >
   Keep tests meaningful. A test must fail for the broken behavior it claims to
   protect and must not bypass the implementation under test.
-argument-hint: "<test-change>"
+argument-hint: '<test-change>'
 ---
 
 # Test Integrity

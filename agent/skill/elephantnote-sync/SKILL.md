@@ -3,7 +3,7 @@ name: elephantnote-sync
 description: >
   Rules for real local-first sync across desktop/mobile, rclone, LAN pairing,
   conflict behavior, and two-vault verification.
-argument-hint: "<sync-task>"
+argument-hint: '<sync-task>'
 ---
 
 # ElephantNote Sync
@@ -21,9 +21,9 @@ Use this skill for sync settings, device pairing, rclone, LAN peer protocol, mob
 
 ## Read first
 
-- `Elephant/back/app/sync/**`.
+- `Elephant/backend/js/sync/**`.
 - `Elephant/shared/sync.js`.
-- `Elephant/front/app/components/settings/SyncSettingsPanel.vue`.
+- `Elephant/frontend/app/components/settings/SyncSettingsPanel.vue`.
 - Unit tests for rclone, LAN protocol, sync contract, and production flow.
 - `.github/workflows/sync-docker.yml` when CI is involved.
 

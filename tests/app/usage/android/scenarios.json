@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "description": "Every reproduced product regression becomes a permanent CI usage scenario. Manual device testing is reserved for new behavior that is not represented here yet.",
+    "requiredOnPullRequest": true,
+    "captureScreenshotPerScenario": true,
+    "captureUiTreePerScenario": true,
+    "failOnRendererException": true,
+    "continueAfterScenarioFailure": true
+  },
+  "scenarios": [
+    {
+      "id": "startup-render",
+      "runner": "startup-smoke",
+      "description": "Install the APK, launch Elephant and reject crashes, ANRs, permission interruptions and blank renderer surfaces.",
+      "regression": "Android white screen and startup camera permission",
+      "tags": ["startup", "renderer", "permissions"]
+    },
+    {
+      "id": "search-roundtrip",
+      "runner": "startup-smoke",
+      "description": "Open search, type a query and return to the workspace.",
+      "regression": "Broken mobile search lifecycle and missing search.initVault",
+      "tags": ["search", "navigation"]
+    },
+    {
+      "id": "settings-roundtrip",
+      "runner": "startup-smoke",
+      "description": "Open and close Settings through accessible controls.",
+      "regression": "Settings surface inaccessible or oversized on mobile",
+      "tags": ["settings", "navigation"]
+    },
+    {
+      "id": "drawer-open",
+      "runner": "startup-smoke",
+      "description": "Open the navigation drawer and verify that the vault tree is exposed.",
+      "regression": "Drawer compressed the note grid instead of overlaying it",
+      "tags": ["drawer", "vault"]
+    },
+    {
+      "id": "library-layout-toggle",
+      "runner": "android-regression",
+      "description": "Switch the note library between grid and list layouts, then restore the original layout.",
+      "regression": "Mobile layout controls were present but did not update the library",
+      "tags": ["library", "layout"]
+    },
+    {
+      "id": "library-sort-sheet",
+      "runner": "android-regression",
+      "description": "Open the mobile sort sheet and select title ordering.",
+      "regression": "Mobile sort control opened no usable sheet",
+      "tags": ["library", "sorting"]
+    },
+    {
+      "id": "open-existing-note",
+      "runner": "editor-chrome",
+      "description": "Expand the seeded Getting Started folder, open its Welcome note and validate the complete editor chrome.",
+      "regression": "The Android test tapped a folder instead of a note and the historical full-window editor hid normal note controls",
+      "tags": ["vault", "editor", "navigation", "accessibility"]
+    },
+    {
+      "id": "drawer-back-close",
+      "runner": "android-regression",
+      "description": "Open the navigation drawer and close it with the Android system back action.",
+      "regression": "The Android back action left the navigation overlay stuck above the workspace",
+      "tags": ["drawer", "back", "navigation"]
+    },
+    {
+      "id": "note-back-roundtrip",
+      "runner": "android-regression",
+      "description": "Open a seeded note and return to the note library with the Android back action.",
+      "regression": "Leaving the editor returned to a blank surface or terminated the application",
+      "tags": ["editor", "back", "navigation"]
+    },
+    {
+      "id": "app-background-resume",
+      "runner": "android-regression",
+      "description": "Send Elephant to the Android home screen and resume its existing process and workspace.",
+      "regression": "Resuming from the background recreated a white or unresponsive renderer",
+      "tags": ["lifecycle", "resume", "renderer"]
+    },
+    {
+      "id": "process-relaunch",
+      "runner": "android-regression",
+      "description": "Force-stop Elephant, launch it again and verify that the existing vault workspace is restored.",
+      "regression": "A cold relaunch lost the active vault or failed after the first successful launch",
+      "tags": ["lifecycle", "relaunch", "vault"]
+    },
+    {
+      "id": "search-no-results",
+      "runner": "android-regression",
+      "description": "Submit an impossible search query and verify that the search surface remains responsive and closable.",
+      "regression": "Zero-result searches froze the renderer or left the modal impossible to dismiss",
+      "tags": ["search", "empty-state", "keyboard"]
+    },
+    {
+      "id": "search-repeat-stability",
+      "runner": "android-regression",
+      "description": "Open and close mobile search repeatedly while checking process and renderer health after every cycle.",
+      "regression": "Repeated search activation accumulated broken overlays or rejected promises",
+      "tags": ["search", "stress", "navigation"]
+    },
+    {
+      "id": "settings-back-navigation",
+      "runner": "android-regression",
+      "description": "Open Settings and return to the workspace using the Android system back action.",
+      "regression": "The Android back action could not escape Settings or exposed an empty workspace",
+      "tags": ["settings", "back", "navigation"]
+    },
+    {
+      "id": "keyboard-dismissal",
+      "runner": "android-regression",
+      "description": "Open search, display the software keyboard, dismiss it and then close the search surface.",
+      "regression": "The keyboard hid controls or consumed the only action capable of closing search",
+      "tags": ["search", "keyboard", "navigation"]
+    },
+    {
+      "id": "navigation-stress",
+      "runner": "android-regression",
+      "description": "Cycle through drawer, Settings and search navigation several times without restarting Elephant.",
+      "regression": "Repeated cross-surface navigation eventually crashed or stranded the mobile shell",
+      "tags": ["stress", "drawer", "settings", "search"]
+    }
+  ]
+}

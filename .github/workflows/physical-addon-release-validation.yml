@@ -1,0 +1,133 @@
+name: Physical addon release validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop_next-unified-candidate2
+      - develop_next-unified-recovery
+    paths:
+      - .github/workflows/physical-addon-release-validation.yml
+      - build/scripts/build-physical-addon.mjs
+      - build/tools/enaddon-packager/**
+      - addons/catalog.json
+      - addons/official/**
+  pull_request:
+    paths:
+      - .github/workflows/physical-addon-release-validation.yml
+      - build/scripts/build-physical-addon.mjs
+      - build/tools/enaddon-packager/**
+      - addons/catalog.json
+      - addons/official/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: physical-addon-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-linux-x86-64:
+    name: Package ${{ matrix.addon }} for Linux x86_64
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        addon:
+          - ai-ocr
+          - code-execution
+          - codex-connection
+          - knowledge
+          - open-models
+          - sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ./.github/actions/setup
+
+      - name: Build physical addon archive
+        shell: bash
+        env:
+          ELEPHANT_ADDON_PLATFORM: linux-x86_64
+        run: |
+          set -euxo pipefail
+          node build/scripts/build-physical-addon.mjs "addons/official/${{ matrix.addon }}"
+
+      - name: Validate generated archive and metadata
+        shell: bash
+        env:
+          ADDON_SLUG: ${{ matrix.addon }}
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import json
+          import zipfile
+          import os
+
+          root = Path('.')
+          slug = os.environ['ADDON_SLUG']
+          source = root / 'addons' / 'official' / slug
+          source_manifest = json.loads((source / 'manifest.json').read_text())
+          release_root = root / 'build' / 'out' / 'addons' / 'releases' / source_manifest['id']
+          archives = sorted(release_root.glob('*.enaddon'))
+          if len(archives) != 1:
+              raise SystemExit(f'Expected one archive for {slug}, found {len(archives)}')
+          archive_path = archives[0]
+          metadata_path = Path(f'{archive_path}.json')
+          if not metadata_path.is_file():
+              raise SystemExit(f'Missing metadata for {archive_path}')
+          metadata = json.loads(metadata_path.read_text())
+          expected_catalog_path = f'addons/official/{slug}/releases/{archive_path.name}'
+          expected = {
+              'id': source_manifest['id'],
+              'version': source_manifest['version'],
+              'platform': 'linux-x86_64',
+              'file': archive_path.name,
+              'catalogPath': expected_catalog_path,
+          }
+          for key, value in expected.items():
+              if metadata.get(key) != value:
+                  raise SystemExit(f'{slug}: metadata {key}={metadata.get(key)!r}, expected {value!r}')
+          if not metadata.get('blake3') or metadata.get('bytes') != archive_path.stat().st_size:
+              raise SystemExit(f'{slug}: missing digest or invalid byte count')
+          if metadata.get('runner') not in {'process', 'service'}:
+              raise SystemExit(f'{slug}: invalid runner metadata')
+
+          with zipfile.ZipFile(archive_path) as archive:
+              corrupt = archive.testzip()
+              if corrupt:
+                  raise SystemExit(f'{slug}: corrupt ZIP member {corrupt}')
+              names = set(archive.namelist())
+              if 'manifest.json' not in names:
+                  raise SystemExit(f'{slug}: package has no manifest')
+              inner = json.loads(archive.read('manifest.json'))
+              if inner.get('id') != source_manifest['id'] or inner.get('version') != source_manifest['version']:
+                  raise SystemExit(f'{slug}: inner manifest differs from package source')
+              entry = str(PurePosixPath(inner['runtime']['entry']))
+              if entry not in names:
+                  raise SystemExit(f'{slug}: runtime entry {entry} is absent')
+              sidecar = inner.get('native', {}).get('sidecars', {}).get('linux-x86_64')
+              if not sidecar or sidecar not in names:
+                  raise SystemExit(f'{slug}: Linux sidecar is absent')
+
+          print(json.dumps({
+              'addon': source_manifest['id'],
+              'archive': str(archive_path),
+              'bytes': archive_path.stat().st_size,
+              'blake3': metadata['blake3'],
+              'catalogPath': metadata['catalogPath'],
+          }, indent=2))
+          PY
+
+      - name: Upload generated addon package
+        uses: actions/upload-artifact@v4
+        with:
+          name: elephant-${{ matrix.addon }}-linux-x86_64
+          path: build/out/addons/releases/**
+          if-no-files-found: error
+          retention-days: 14

@@ -4,17 +4,17 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "paths": {
-      "elephant-back/*": ["./Elephant/back/app/*"],
-      "elephant-front/*": ["./Elephant/front/app/*"],
+      "elephant-back/*": ["./Elephant/backend/js/*"],
+      "elephant-front/*": ["./Elephant/frontend/app/*"],
       "elephant-shared/*": ["./Elephant/shared/*"],
-      "@/elephantnote/*": ["./Elephant/front/app/*"],
+      "@/elephantnote/*": ["./Elephant/frontend/app/*"],
       "common/elephantnote/*": ["./Elephant/shared/*"],
-      "main_renderer/elephantnote/*": ["./Elephant/back/app/*"],
-      "@/*": ["./src/renderer/src/*"],
-      "common/*": ["./src/common/*"],
-      "muya/*": ["./src/muya/*"]
+      "main_renderer/elephantnote/*": ["./Elephant/backend/js/*"],
+      "@/*": ["./Elephant/frontend/src/renderer/src/*"],
+      "common/*": ["./Elephant/frontend/src/common/*"],
+      "muya/*": ["./Elephant/frontend/src/muya/*"]
     }
   },
-  "include": ["src/**/*", "Elephant/**/*"],
-  "exclude": ["node_modules", "dist", "out"]
+  "include": ["Elephant/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist", "build/out", "build/coverage", "build/test-results"]
 }

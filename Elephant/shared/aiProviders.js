@@ -15,7 +15,7 @@ export const ELEPHANTNOTE_AI_PRESETS = Object.freeze({
   },
   nodeLlamaCpp: {
     id: 'nodeLlamaCpp',
-    label: 'node-llama-cpp (legacy alias)',
+    label: 'node-llama-cpp (compatibility alias)',
     transport: 'tauri-rust',
     endpoint: 'tauri-rust://local',
     model: 'hf:bartowski/SmolLM2-135M-Instruct-GGUF:Q4_K_M'
@@ -86,10 +86,10 @@ export const resolveAiEndpoint = ({ endpoint = '', transport = 'openai-compatibl
 }
 
 export const createDefaultLocalAiConfig = () => ({
-  enabled: true,
-  showModelLibraryInSidebar: true,
-  allowHuggingFaceDownloads: true,
-  allowLocalRuntimeAutostart: true
+  enabled: false,
+  showModelLibraryInSidebar: false,
+  allowHuggingFaceDownloads: false,
+  allowLocalRuntimeAutostart: false
 })
 
 export const normalizeLocalAiConfig = (localAi = {}) => {
@@ -98,10 +98,10 @@ export const normalizeLocalAiConfig = (localAi = {}) => {
   return {
     ...defaults,
     ...input,
-    enabled: input.enabled !== false,
-    showModelLibraryInSidebar: input.showModelLibraryInSidebar !== false,
-    allowHuggingFaceDownloads: input.allowHuggingFaceDownloads !== false,
-    allowLocalRuntimeAutostart: input.allowLocalRuntimeAutostart !== false
+    enabled: input.enabled === true,
+    showModelLibraryInSidebar: input.showModelLibraryInSidebar === true,
+    allowHuggingFaceDownloads: input.allowHuggingFaceDownloads === true,
+    allowLocalRuntimeAutostart: input.allowLocalRuntimeAutostart === true
   }
 }
 
@@ -165,26 +165,32 @@ const resolveFeatureRouteRuntime = ({ config = {}, localAi, preset } = {}) => {
 }
 
 export const normalizeAiConfig = (config = {}) => {
-  const { enabled: _legacyEnabled, ...restConfig } = getObject(config)
+  const { enabled: _compatibilityEnabled, ...restConfig } = getObject(config)
   const rawLocalAi = getObject(restConfig.localAi)
   const localAi = normalizeLocalAiConfig(rawLocalAi)
-  const rawProvider = String(restConfig.preset || restConfig.provider || 'tauriRustLocal')
-  const presetId = rawProvider === 'disabled'
-    ? (localAi.enabled ? 'tauriRustLocal' : 'custom')
-    : (rawProvider === 'nodeLlamaCpp' ? 'tauriRustLocal' : rawProvider)
+  const rawProvider = String(restConfig.preset || restConfig.provider || 'custom')
+  const compatibilityPresetId = rawProvider === 'nodeLlamaCpp' ? 'tauriRustLocal' : rawProvider
+  const localPresetBlocked = LOCAL_APP_SOURCE_IDS.has(compatibilityPresetId) && localAi.enabled === false
+  const presetId = rawProvider === 'disabled' || localPresetBlocked ? 'custom' : compatibilityPresetId
   const preset = ELEPHANTNOTE_AI_PRESETS[presetId] || ELEPHANTNOTE_AI_PRESETS.custom
   const routeRuntime = resolveFeatureRouteRuntime({ config: restConfig, localAi, preset })
-  const rawTransport = String(routeRuntime?.transport || restConfig.transport || preset.transport)
-  const transport = rawTransport === 'disabled' ? (localAi.enabled ? 'tauri-rust' : 'openai-compatible') : rawTransport
-  const endpoint = normalizeAiEndpointForTransport(routeRuntime?.endpoint || restConfig.endpoint || preset.endpoint, transport)
-  const model = String(routeRuntime?.model || restConfig.model || preset.model || '')
+  const configuredTransport = String(routeRuntime?.transport || restConfig.transport || preset.transport)
+  const localTransportBlocked = !routeRuntime && localAi.enabled === false && configuredTransport === 'tauri-rust'
+  const rawTransport = localTransportBlocked ? 'disabled' : configuredTransport
+  const transport = rawTransport === 'disabled' ? 'openai-compatible' : rawTransport
+  const endpoint = localTransportBlocked
+    ? ''
+    : normalizeAiEndpointForTransport(routeRuntime?.endpoint || restConfig.endpoint || preset.endpoint, transport)
+  const model = localTransportBlocked ? '' : String(routeRuntime?.model || restConfig.model || preset.model || '')
   const apiKey = String(routeRuntime?.apiKey || restConfig.apiKey || '')
+  const provider = routeRuntime?.provider ||
+    (localPresetBlocked || localTransportBlocked || restConfig.provider === 'disabled' ? 'disabled' : restConfig.provider)
 
   return {
     ...restConfig,
     preset: preset.id,
     name: String(restConfig.name || preset.label),
-    provider: routeRuntime?.provider || (restConfig.provider === 'disabled' && localAi.enabled ? 'app-local' : restConfig.provider),
+    provider,
     transport,
     endpoint,
     model,

@@ -1,6 +1,11 @@
 const frontmatterPattern = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/
 
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const generatedUntitledTitlePattern = /^Untitled(?:[ -]\d+)?$/i
+
+const normalizeDocumentTitle = (value = '') => String(value ?? '').trim()
+const isGeneratedUntitledTitle = (value = '') =>
+  generatedUntitledTitlePattern.test(normalizeDocumentTitle(value))
 
 const normalizeTag = (tag) =>
   String(tag || '')
@@ -109,7 +114,11 @@ export const parseFrontmatter = (markdown = '') => {
 export const getDocumentTitle = (markdown = '', fallback = 'Untitled') => {
   const { fields, body } = parseFrontmatter(markdown)
   const headingTitle = body.match(/^#\s+(.+)$/m)?.[1]
-  return fields.title || headingTitle || fallback || 'Untitled'
+  const explicitTitle = normalizeDocumentTitle(fields.title || headingTitle || '')
+  if (explicitTitle) return explicitTitle
+
+  const fallbackTitle = normalizeDocumentTitle(fallback)
+  return isGeneratedUntitledTitle(fallbackTitle) ? '' : fallbackTitle
 }
 
 export const stripDisplayedTitle = (markdown = '', title = '') => {
@@ -138,12 +147,16 @@ export const getEditorMarkdownStats = (markdown = '') => {
 const composeNoteDocument = (rawFrontmatter, title, body = '') => {
   const normalizedBody = stripDisplayedTitle(body, title).trim()
   if (!normalizedBody) return rawFrontmatter
-  return `${rawFrontmatter}\n\n# ${title}\n\n${normalizedBody}`.trimEnd()
+  return [rawFrontmatter, title ? `# ${title}` : '', normalizedBody]
+    .filter(Boolean)
+    .join('\n\n')
+    .trimEnd()
 }
 
 export const ensureNoteDocument = (markdown = '', title = 'Untitled') => {
   const content = String(markdown || '')
-  const normalizedTitle = String(title || '').trim() || 'Untitled'
+  const normalizedTitle = normalizeDocumentTitle(title)
+  if (!normalizedTitle && !content.startsWith('---\n')) return content
   if (content.startsWith('---\n')) {
     return content.replace(/^type:\s*.*$/m, `type: ${serializeFrontmatterValue('note')}`)
   }
@@ -204,7 +217,7 @@ export const parseMarkdownTags = (markdown = '') => {
 }
 
 export const updateMarkdownTags = (markdown = '', nextTags = [], title = 'Untitled') => {
-  const normalizedTitle = String(title || '').trim() || 'Untitled'
+  const normalizedTitle = normalizeDocumentTitle(title)
   const tagsInput = normalizeTagInput(nextTags)
   const uniqueTags = [...new Set(tagsInput.map(normalizeTag).filter(Boolean))]
   const tagsLine = `tags: [${uniqueTags.map(serializeTag).join(', ')}]`
@@ -213,17 +226,17 @@ export const updateMarkdownTags = (markdown = '', nextTags = [], title = 'Untitl
 
   if (!frontmatterMatch) {
     const body = content.replace(/^\s+/, '')
-    return [
-      '---',
-      `title: "${normalizedTitle.replace(/"/g, '\\"')}"`,
-      'type: "note"',
-      tagsLine,
-      '---',
-      '',
-      `# ${normalizedTitle}`,
-      '',
-      body
-    ].join('\n').trimEnd()
+    const frontmatter = ['---']
+    if (normalizedTitle) {
+      frontmatter.push(`title: "${normalizedTitle.replace(/"/g, '\\"')}"`)
+    }
+    frontmatter.push('type: "note"', tagsLine, '---')
+
+    const visibleBody = []
+    if (normalizedTitle) visibleBody.push(`# ${normalizedTitle}`)
+    if (body) visibleBody.push(body)
+
+    return [...frontmatter, '', ...visibleBody].join('\n').trimEnd()
   }
 
   const frontmatterBody = frontmatterMatch[1]

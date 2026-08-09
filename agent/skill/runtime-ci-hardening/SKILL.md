@@ -4,7 +4,7 @@ description: >
   Inspect what CI jobs actually do at runtime: process behavior, network use,
   generated files, caches, and logs. Use for release, packaging, and external
   download workflows.
-argument-hint: "<runtime-ci-task>"
+argument-hint: '<runtime-ci-task>'
 ---
 
 # Runtime CI Hardening

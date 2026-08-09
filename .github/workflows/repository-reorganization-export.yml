@@ -1,0 +1,54 @@
+name: Repository reorganization export
+
+on:
+  push:
+    branches:
+      - develop_next-integration-repair
+    paths:
+      - '.github/workflows/repository-reorganization-export.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/repository-reorganization-export.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-reorganization-export-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Inventory repository and branches
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          mkdir -p repository-reorganization-export
+          git for-each-ref \
+            --sort=-committerdate \
+            --format='%(refname:short)\t%(objectname)\t%(committerdate:iso8601-strict)\t%(subject)' \
+            refs/remotes/origin \
+            > repository-reorganization-export/remote-branches.tsv
+          git ls-tree -r --name-only HEAD > repository-reorganization-export/head-files.txt
+          find addons packs -type f -print | LC_ALL=C sort > repository-reorganization-export/addon-files.txt
+          tar -czf repository-reorganization-export/addons-and-packs.tar.gz addons packs
+          sha256sum repository-reorganization-export/addons-and-packs.tar.gz \
+            > repository-reorganization-export/addons-and-packs.sha256
+
+      - name: Upload source export
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-reorganization-export
+          path: repository-reorganization-export/
+          if-no-files-found: error
+          retention-days: 7

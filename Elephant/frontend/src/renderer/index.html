@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Elephant</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:;
+    worker-src 'self' blob:;
+    child-src 'self' blob:;
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: blob: asset: http://asset.localhost https:;
+    font-src 'self' data:;
+    connect-src 'self'
+      http://localhost:*
+      http://127.0.0.1:*
+      https://huggingface.co
+      https://*.huggingface.co
+      https://cdn-lfs.huggingface.co
+      https://*.hf.co
+      https://*.xethub.hf.co
+      https://cas-bridge.xethub.hf.co
+      https://transfer.xethub.hf.co
+      https://cdn.jsdelivr.net
+      blob:
+      ipc:
+      http://ipc.localhost;
+      "
+    />
+    <style>
+      html, body, #app { width: 100%; min-height: 100%; margin: 0; }
+      body { background: #0f141d; color: #eef3fb; font-family: system-ui, -apple-system, sans-serif; }
+      #elephant-startup {
+        min-height: 100dvh;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 12px;
+        padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+        box-sizing: border-box;
+        text-align: center;
+      }
+      .elephant-startup-mark {
+        width: 88px;
+        height: 88px;
+        display: grid;
+        place-items: center;
+        border-radius: 25px;
+        background: #141a24;
+        box-shadow: 0 18px 48px rgba(0, 0, 0, .32);
+        line-height: 1;
+      }
+      .elephant-startup-mark img { width: 100%; height: 100%; display: block; border-radius: inherit; object-fit: cover; }
+      #elephant-startup strong { font-size: 28px; letter-spacing: -.02em; }
+      #elephant-startup span { color: #98a3b6; font-size: 14px; }
+      #elephant-startup[data-error='true'] .elephant-startup-mark { background: #3b171b; }
+      #elephant-startup[data-error='true'] span { max-width: 520px; color: #f4b7bd; white-space: pre-wrap; }
+    </style>
+    <script>
+      // Some renderer dependencies inspect the Node-style `process` global while
+      // their ES modules are being evaluated. This must exist before either
+      // module entry point runs; installing it from main.js is already too late.
+      globalThis.process ||= {
+        browser: true,
+        platform: 'android',
+        version: '',
+        versions: {},
+        env: {
+          NODE_ENV: 'production',
+          IS_PREACT: 'false'
+        },
+        argv: [],
+        cwd: () => '/',
+        uptime: () => 0,
+        nextTick: (callback, ...args) => queueMicrotask(() => callback(...args))
+      }
+    </script>
+  </head>
+
+  <body>
+    <div id="app">
+      <main id="elephant-startup" role="status" aria-live="polite">
+        <div class="elephant-startup-mark" aria-hidden="true">
+          <img src="./ElephantLogo.png" alt="" />
+        </div>
+        <strong>Elephant</strong>
+        <span>Démarrage…</span>
+      </main>
+    </div>
+    <script type="module" src="/src/addons/addonVueBridge.js"></script>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

@@ -4,7 +4,7 @@ description: >
   Prove that a change works with concrete commands, runtime checks, logs,
   disk state, screenshots, or user-visible workflows. Use whenever asked to
   verify, test, prove, or confirm that something works.
-argument-hint: "<thing-to-verify>"
+argument-hint: '<thing-to-verify>'
 ---
 
 # Real Verification
@@ -26,6 +26,7 @@ Use the highest relevant evidence level available:
 
 ```md
 Verification:
+
 - command/workflow:
 - result:
 - evidence:

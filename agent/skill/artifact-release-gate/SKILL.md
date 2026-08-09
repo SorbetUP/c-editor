@@ -3,7 +3,7 @@ name: artifact-release-gate
 description: >
   Verify release and build artifacts: bundle existence, installability, size,
   diagnostics, checksums, provenance, and platform-specific packaging evidence.
-argument-hint: "<artifact-or-release-task>"
+argument-hint: '<artifact-or-release-task>'
 ---
 
 # Artifact Release Gate

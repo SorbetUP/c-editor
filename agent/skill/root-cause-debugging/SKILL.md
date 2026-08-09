@@ -3,7 +3,7 @@ name: root-cause-debugging
 description: >
   Diagnose bugs from the real call path and fix the shared root cause instead
   of patching one visible symptom.
-argument-hint: "<bug-report>"
+argument-hint: '<bug-report>'
 ---
 
 # Root Cause Debugging

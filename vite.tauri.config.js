@@ -9,7 +9,15 @@ import packageJson from './package.json' with { type: 'json' }
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-const excalidrawDistDir = resolve(__dirname, 'node_modules/@excalidraw/excalidraw/dist')
+const excalidrawDistDir = resolve(__dirname, 'Elephant/node_modules/@excalidraw/excalidraw/dist')
+const npmPackageAliases = Object.fromEntries(
+  Object.keys({
+    ...(packageJson.dependencies || {}),
+    ...(packageJson.devDependencies || {})
+  })
+    .filter((name) => !['vite', 'prismjs'].includes(name))
+    .map((name) => [name, resolve(__dirname, 'Elephant/node_modules', name)])
+)
 const excalidrawAssetFolders = ['excalidraw-assets', 'excalidraw-assets-dev']
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -52,7 +60,10 @@ const excalidrawAssetsPlugin = () => ({
       if (!assetPath) return next()
       try {
         if (!existsSync(assetPath) || !statSync(assetPath).isFile()) return next()
-        response.setHeader('Content-Type', contentTypes[extname(assetPath).toLowerCase()] || 'application/octet-stream')
+        response.setHeader(
+          'Content-Type',
+          contentTypes[extname(assetPath).toLowerCase()] || 'application/octet-stream'
+        )
         response.setHeader('Cache-Control', 'no-store')
         return createReadStream(assetPath).pipe(response)
       } catch (error) {
@@ -61,7 +72,7 @@ const excalidrawAssetsPlugin = () => ({
     })
   },
   writeBundle() {
-    const targetRoot = resolve(__dirname, 'out/renderer/excalidraw-assets')
+    const targetRoot = resolve(__dirname, 'build/out/renderer/excalidraw-assets')
     mkdirSync(targetRoot, { recursive: true })
     for (const folderName of excalidrawAssetFolders) {
       const source = join(excalidrawDistDir, folderName)
@@ -73,10 +84,10 @@ const excalidrawAssetsPlugin = () => ({
 })
 
 export default defineConfig({
-  root: resolve(__dirname, 'src/renderer'),
+  root: resolve(__dirname, 'Elephant/frontend/src/renderer'),
   base: './',
   build: {
-    outDir: resolve(__dirname, 'out/renderer'),
+    outDir: resolve(__dirname, 'build/out/renderer'),
     emptyOutDir: true,
     assetsInclude: ['**/*.md']
   },
@@ -87,15 +98,19 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      path: resolve(__dirname, 'src/renderer/src/platform/nodePathShim.js'),
-      'node:path': resolve(__dirname, 'src/renderer/src/platform/nodePathShim.js'),
-      'elephant-front': resolve(__dirname, 'Elephant/front/app'),
+      ...npmPackageAliases,
+      path: resolve(__dirname, 'Elephant/frontend/src/renderer/src/platform/nodePathShim.js'),
+      'node:path': resolve(
+        __dirname,
+        'Elephant/frontend/src/renderer/src/platform/nodePathShim.js'
+      ),
+      'elephant-front': resolve(__dirname, 'Elephant/frontend/app'),
       'elephant-shared': resolve(__dirname, 'Elephant/shared'),
       'common/elephantnote': resolve(__dirname, 'Elephant/shared'),
-      '@/elephantnote': resolve(__dirname, 'Elephant/front/app'),
-      '@': resolve(__dirname, 'src/renderer/src'),
-      common: resolve(__dirname, 'src/common'),
-      muya: resolve(__dirname, 'src/muya')
+      '@/elephantnote': resolve(__dirname, 'Elephant/frontend/app'),
+      '@': resolve(__dirname, 'Elephant/frontend/src/renderer/src'),
+      common: resolve(__dirname, 'Elephant/frontend/src/common'),
+      muya: resolve(__dirname, 'Elephant/frontend/src/muya')
     },
     extensions: ['.mjs', '.js', '.json', '.vue']
   },

@@ -1,0 +1,103 @@
+name: Validate integrated addon packs
+
+on:
+  push:
+    branches:
+      - develop_next-unified-candidate2
+      - develop_next-unified-recovery
+      - develop_next-mobile-recovery
+    paths:
+      - .github/workflows/validate-integrated-addon-packs.yml
+      - addons/catalog.json
+      - addons/official/**/manifest.json
+      - packs/**
+  pull_request:
+    paths:
+      - .github/workflows/validate-integrated-addon-packs.yml
+      - addons/catalog.json
+      - addons/official/**/manifest.json
+      - packs/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-integrated-addon-packs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate pack, catalogue and manifest consistency
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          root = Path('.')
+          catalog_path = root / 'addons/catalog.json'
+          catalog = json.loads(catalog_path.read_text())
+          entries = catalog.get('addons', [])
+          official = {
+              entry['id']: entry
+              for entry in entries
+              if entry.get('official') is True and str(entry.get('id', '')).startswith('elephant.')
+          }
+          if len(official) != len(entries):
+              raise SystemExit('The integrated catalogue must contain only unique official Elephant addons.')
+
+          for addon_id, entry in official.items():
+              manifest_path = root / 'addons' / entry['manifestPath']
+              entry_path = root / 'addons' / entry['entryPath']
+              if not manifest_path.is_file() or not entry_path.is_file():
+                  raise SystemExit(f'{addon_id} references a missing physical package file')
+              manifest = json.loads(manifest_path.read_text())
+              if manifest.get('id') != addon_id:
+                  raise SystemExit(f'{addon_id} manifest id mismatch')
+              if manifest.get('version') != entry.get('version'):
+                  raise SystemExit(f'{addon_id} catalogue/manifest version mismatch')
+
+          def load_pack(name):
+              path = root / 'packs' / name
+              pack = json.loads(path.read_text())
+              if pack.get('format') != 'elephantnote-addon-pack' or pack.get('version') != 1:
+                  raise SystemExit(f'{name} uses an unsupported format')
+              if pack.get('protected') is not True:
+                  raise SystemExit(f'{name} must remain protected')
+              addons = pack.get('addons')
+              if not isinstance(addons, list) or not addons:
+                  raise SystemExit(f'{name} contains no addons')
+              ids = [item.get('id') for item in addons]
+              if len(ids) != len(set(ids)):
+                  raise SystemExit(f'{name} contains duplicate addon IDs')
+              forbidden = {'elephant.excalidraw', 'elephant.addon-packs', 'excalidraw', 'addon-packs'}
+              if forbidden & set(ids):
+                  raise SystemExit(f'{name} serializes a core feature')
+              for item in addons:
+                  addon_id = item.get('id')
+                  if item.get('source') != 'official' or item.get('enabled') is not True:
+                      raise SystemExit(f'{name}/{addon_id} must be enabled and official')
+                  if addon_id not in official:
+                      raise SystemExit(f'{name}/{addon_id} is absent from addons/catalog.json')
+                  if item.get('version') != official[addon_id].get('version'):
+                      raise SystemExit(f'{name}/{addon_id} version mismatch')
+              return set(ids)
+
+          develop_ids = load_pack('develop-parity.enaddonpack')
+          base_ids = load_pack('base.enaddonpack')
+          expected = set(official)
+          if develop_ids != expected:
+              raise SystemExit(f'Develop parity mismatch: missing={sorted(expected-develop_ids)} extra={sorted(develop_ids-expected)}')
+          if base_ids != expected - {'elephant.calendar'}:
+              raise SystemExit('Elephant Base must contain every official addon except Calendar.')
+          if develop_ids - base_ids != {'elephant.calendar'}:
+              raise SystemExit('Calendar must be the only semantic difference between protected packs.')
+
+          print(f'Validated {len(develop_ids)} Develop parity addons and {len(base_ids)} Base addons.')
+          PY

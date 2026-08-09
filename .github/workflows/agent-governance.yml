@@ -1,0 +1,44 @@
+name: Agent governance
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - 'agent/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-agent-governance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify mandatory repository rules
+        shell: bash
+        run: |
+          set -o pipefail
+          node build/scripts/verify-agent-governance.mjs 2>&1 | tee agent-governance.txt
+
+      - name: Upload governance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-governance
+          path: agent-governance.txt
+          if-no-files-found: error
+          retention-days: 30

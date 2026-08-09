@@ -1,0 +1,318 @@
+/*
+ * ElephantNote Settings visual primitives.
+ *
+ * This file is the rendered source of truth for reusable Settings chrome.
+ * Feature components keep only their domain-specific layout; controls, cards,
+ * tabs, badges, fields, icon tiles, empty states and switches are normalized here.
+ */
+
+.en-settings-panel {
+  --en-ui-control-height: 34px;
+  --en-ui-control-height-compact: 29px;
+  --en-ui-control-radius: 9px;
+  --en-ui-card-radius: 14px;
+  --en-ui-toolbar-radius: 12px;
+  --en-ui-icon-radius: 8px;
+  --en-ui-pill-radius: 999px;
+  --en-ui-row-min-height: 66px;
+  --en-ui-space-1: 4px;
+  --en-ui-space-2: 7px;
+  --en-ui-space-3: 10px;
+  --en-ui-space-4: 12px;
+  --en-ui-space-5: 16px;
+  --en-ui-space-6: 18px;
+  --en-ui-font-label: 12.5px;
+  --en-ui-font-description: 10.5px;
+  --en-ui-font-meta: 9.5px;
+  --en-ui-card-border: 1px solid var(--en-border, #c5cfdd);
+  --en-ui-card-shadow: 0 1px 2px rgba(2, 6, 23, 0.03);
+  --en-ui-control-bg: var(--en-surface, #fff);
+  --en-ui-subtle-bg: var(--en-bg, #f7f9fc);
+  --en-ui-hover-bg: color-mix(in srgb, var(--en-soft, #e9eff7) 58%, transparent);
+}
+
+/* Cards and grouped surfaces */
+.en-settings-panel :where(.en-settings-group),
+.en-settings-panel :deep(:where(.en-ai-card, .en-sync-card, .en-addons-card)) {
+  overflow: hidden !important;
+  border: var(--en-ui-card-border) !important;
+  border-radius: var(--en-ui-card-radius) !important;
+  background: var(--en-surface, #fff) !important;
+  box-shadow: var(--en-ui-card-shadow) !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-card-header, .en-sync-card-header)) {
+  min-height: 52px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: var(--en-ui-space-4) !important;
+  padding: 10px var(--en-ui-space-5) !important;
+  border-bottom: 1px solid var(--en-border, #c5cfdd) !important;
+  background: color-mix(in srgb, var(--en-surface, #fff) 94%, var(--en-soft, #e9eff7)) !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-card-header h4, .en-sync-card-header h4)) {
+  margin: 0 !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+  letter-spacing: -0.01em !important;
+}
+
+/* Sticky sub-navigation toolbars */
+.en-settings-panel :deep(:where(.en-ai-toolbar, .en-sync-toolbar)) {
+  position: sticky !important;
+  top: -28px !important;
+  z-index: 3 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: var(--en-ui-space-4) !important;
+  padding: 5px !important;
+  border: var(--en-ui-card-border) !important;
+  border-radius: var(--en-ui-toolbar-radius) !important;
+  background: color-mix(in srgb, var(--en-surface, #fff) 94%, transparent) !important;
+  backdrop-filter: blur(14px) saturate(130%) !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-tabs, .en-sync-tabs)) {
+  display: flex !important;
+  align-items: center !important;
+  gap: var(--en-ui-space-1) !important;
+  min-width: 0 !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-tabs, .en-sync-tabs) > button) {
+  min-height: 32px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 0 10px !important;
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--en-muted, #667085) !important;
+  box-shadow: none !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-tabs, .en-sync-tabs) > button.active) {
+  border-color: var(--en-border, #c5cfdd) !important;
+  background: var(--en-surface, #fff) !important;
+  color: var(--en-text, #101828) !important;
+  box-shadow: 0 1px 4px rgba(2, 6, 23, 0.08) !important;
+}
+
+/* Buttons */
+.en-settings-panel :where(.en-primary-button, .en-danger-button),
+.en-settings-panel :where(.en-settings-inline-actions button),
+.en-settings-panel :deep(:where(
+  .en-ai-settings button,
+  .en-sync-panel button,
+  .en-addons-panel .en-primary-button,
+  .en-addons-panel .en-secondary-button,
+  .en-addons-panel .en-danger-link
+)) {
+  box-sizing: border-box !important;
+  min-height: var(--en-ui-control-height) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: var(--en-ui-space-2) !important;
+  padding: 0 11px !important;
+  border: 1px solid var(--en-border, #c5cfdd) !important;
+  border-radius: var(--en-ui-control-radius) !important;
+  background: var(--en-ui-control-bg) !important;
+  color: var(--en-text, #101828) !important;
+  font: inherit !important;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, opacity 140ms ease !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-settings button, .en-sync-panel button).compact) {
+  min-height: var(--en-ui-control-height-compact) !important;
+  padding: 0 8px !important;
+  font-size: var(--en-ui-font-description) !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-settings button, .en-sync-panel button).icon-only) {
+  width: var(--en-ui-control-height-compact) !important;
+  min-width: var(--en-ui-control-height-compact) !important;
+  padding: 0 !important;
+}
+
+.en-settings-panel :where(.en-primary-button),
+.en-settings-panel :deep(:where(
+  .en-ai-settings button.primary,
+  .en-sync-panel button.primary,
+  .en-addons-panel .en-primary-button
+)) {
+  border-color: var(--en-primary, #2563eb) !important;
+  background: var(--en-primary, #2563eb) !important;
+  color: #fff !important;
+}
+
+.en-settings-panel :deep(:where(
+  .en-ai-settings button.secondary,
+  .en-sync-panel button.secondary,
+  .en-addons-panel .en-secondary-button
+)) {
+  background: var(--en-ui-subtle-bg) !important;
+}
+
+.en-settings-panel :where(.en-danger-button),
+.en-settings-panel :deep(:where(
+  .en-ai-settings button.danger,
+  .en-sync-panel button.danger,
+  .en-addons-panel .en-danger-link
+)) {
+  border-color: color-mix(in srgb, var(--en-danger, #dc2626) 35%, var(--en-border, #c5cfdd)) !important;
+  color: var(--en-danger, #dc2626) !important;
+}
+
+.en-settings-panel :where(.en-primary-button, .en-danger-button, .en-settings-inline-actions button):hover:not(:disabled),
+.en-settings-panel :deep(:where(
+  .en-ai-settings button,
+  .en-sync-panel button,
+  .en-addons-panel .en-primary-button,
+  .en-addons-panel .en-secondary-button,
+  .en-addons-panel .en-danger-link
+):hover:not(:disabled)) {
+  border-color: var(--en-primary, #2563eb) !important;
+}
+
+.en-settings-panel :where(.en-primary-button, .en-danger-button, .en-settings-inline-actions button):disabled,
+.en-settings-panel :deep(:where(
+  .en-ai-settings button,
+  .en-sync-panel button,
+  .en-addons-panel .en-primary-button,
+  .en-addons-panel .en-secondary-button,
+  .en-addons-panel .en-danger-link
+):disabled) {
+  opacity: 0.48 !important;
+  cursor: not-allowed !important;
+}
+
+/* Switches: one geometry and one state machine for every Settings feature. */
+.en-settings-panel .en-switch,
+.en-settings-panel :deep(:where(.en-ai-switch, .en-addons-panel .en-switch)) {
+  position: relative !important;
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  flex: 0 0 42px !important;
+  padding: 2px !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  border-radius: var(--en-ui-pill-radius) !important;
+  background: var(--en-border-strong, #aebacd) !important;
+  cursor: pointer;
+  transition: background 140ms ease !important;
+}
+
+.en-settings-panel .en-switch > span,
+.en-settings-panel :deep(:where(.en-ai-switch, .en-addons-panel .en-switch) > span) {
+  position: absolute !important;
+  top: 2px !important;
+  left: 2px !important;
+  display: block !important;
+  width: 20px !important;
+  height: 20px !important;
+  margin: 0 !important;
+  border-radius: 50% !important;
+  background: #fff !important;
+  box-shadow: 0 1px 4px rgba(2, 6, 23, 0.24) !important;
+  transform: translateX(0) !important;
+  transition: transform 170ms ease !important;
+}
+
+.en-settings-panel .en-switch.active,
+.en-settings-panel :deep(:where(.en-ai-switch.active, .en-addons-panel .en-switch.active)) {
+  background: var(--en-primary, #2563eb) !important;
+}
+
+.en-settings-panel .en-switch.active > span,
+.en-settings-panel :deep(:where(.en-ai-switch.active, .en-addons-panel .en-switch.active) > span) {
+  transform: translateX(18px) !important;
+}
+
+.en-settings-panel :deep(.en-ai-switch.small) {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 20px !important;
+  min-height: 20px !important;
+  flex-basis: 34px !important;
+}
+
+.en-settings-panel :deep(.en-ai-switch.small > span) {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+.en-settings-panel :deep(.en-ai-switch.small.active > span) {
+  transform: translateX(14px) !important;
+}
+
+/* Fields */
+.en-settings-panel :where(.en-compact-select, .en-compact-input, .en-form-grid input, .en-form-grid select),
+.en-settings-panel :deep(:where(
+  .en-ai-settings input,
+  .en-ai-settings select,
+  .en-ai-settings textarea,
+  .en-sync-panel input,
+  .en-sync-panel select,
+  .en-sync-panel textarea
+)) {
+  box-sizing: border-box !important;
+  border: 1px solid var(--en-border, #c5cfdd) !important;
+  border-radius: var(--en-ui-control-radius) !important;
+  background: var(--en-ui-subtle-bg) !important;
+  color: var(--en-text, #101828) !important;
+  font: inherit !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-settings input, .en-ai-settings select, .en-sync-panel input, .en-sync-panel select)) {
+  height: 37px !important;
+  padding: 0 10px !important;
+}
+
+.en-settings-panel :deep(:where(.en-ai-settings textarea, .en-sync-panel textarea)) {
+  padding: 9px 10px !important;
+  line-height: 1.5 !important;
+}
+
+.en-settings-panel :where(input, select, textarea):focus-visible,
+.en-settings-panel :deep(:where(input, select, textarea):focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--en-primary, #2563eb) 46%, transparent) !important;
+  outline-offset: 1px !important;
+}
+
+/* Badges and status pills */
+.en-settings-panel :where(.en-status-badge),
+.en-settings-panel :deep(:where(.en-ai-badge, .en-provider-state, .en-sync-status, .en-verified-badge, .en-preserved-badge, .en-ai-save-status)) {
+  min-height: 25px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 0 7px !important;
+  border: 1px solid var(--en-border, #c5cfdd) !important;
+  border-radius: var(--en-ui-pill-radius) !important;
+  background: transparent !important;
+  color: var(--en-muted, #667085) !important;
+  font-size: var(--en-ui-font-meta) !important;
+  white-space: nowrap !important;
+}
+
+.en-settings-panel :where(.en-status-badge.active),
+.en-settings-panel :deep(:where(.en-ai-badge.active, .en-provider-state.active, .en-sync-status.active, .en-verified-badge)) {
+  border-color: color-mix(in srgb, #16a34a 28%, var(--en-border, #c5cfdd)) !important;
+  color: #15803d !important;
+}
+
+.en-settings-panel :deep(.en-preserved-badge) {
+  border-color: color-mix(in srgb, #d97706 28%, var(--en-border, #c5cfdd)) !important;
+  color: #b45309 !important;
+}

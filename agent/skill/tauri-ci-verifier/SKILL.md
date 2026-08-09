@@ -3,7 +3,7 @@ name: tauri-ci-verifier
 description: >
   Verify Tauri builds, Rust commands, packaged app launch, bridge contracts,
   capabilities, icons, and cross-platform runtime behavior.
-argument-hint: "<tauri-ci-task>"
+argument-hint: '<tauri-ci-task>'
 ---
 
 # Tauri CI Verifier
@@ -13,7 +13,7 @@ Use this skill when a task touches Tauri, Rust commands, packaging, app launch, 
 ## Required checks
 
 - Run the Tauri web build when renderer/runtime code changes.
-- Run `cargo check` and Rust tests for `src-tauri` when Rust commands or config change.
+- Run `cargo check` and Rust tests for `Elephant/backend/tauri` when Rust commands or config change.
 - Use the packaged macOS smoke command when the task is about whether the built app opens a visible window.
 - Verify bridge serialization with a JS contract test when frontend calls Rust commands.
 - Verify real disk state when the task touches vault files, assets, dashboard files, or sync state.

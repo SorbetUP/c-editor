@@ -1,0 +1,171 @@
+@media (max-width: 760px), (hover: none) and (pointer: coarse) {
+  :root {
+    --en-mobile-tap-target: 46px;
+    --en-mobile-page-gutter: 14px;
+    --en-mobile-card-radius: 18px;
+  }
+
+  button,
+  [role='button'],
+  input,
+  select,
+  textarea {
+    touch-action: manipulation;
+  }
+
+  button,
+  [role='button'] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .en-mobile-topbar {
+    background: color-mix(in srgb, var(--en-bg) 94%, transparent) !important;
+    box-shadow: 0 1px 0 var(--en-border), 0 8px 24px color-mix(in srgb, #020617 10%, transparent) !important;
+    backdrop-filter: blur(18px) saturate(145%) !important;
+  }
+
+  .en-mobile-icon-button,
+  .en-mobile-search {
+    border: 1px solid color-mix(in srgb, var(--en-border) 86%, transparent) !important;
+    background: color-mix(in srgb, var(--en-surface) 74%, var(--en-bg)) !important;
+    box-shadow: 0 1px 2px color-mix(in srgb, #020617 10%, transparent) !important;
+  }
+
+  .en-mobile-shell .en-sidebar {
+    width: min(88vw, 360px) !important;
+    max-width: calc(100vw - 20px) !important;
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
+    background: color-mix(in srgb, var(--en-sidebar-bg, var(--en-surface)) 96%, var(--en-bg)) !important;
+    box-shadow: 24px 0 70px rgba(2, 6, 23, 0.42) !important;
+  }
+
+  .en-mobile-shell .en-mobile-scrim {
+    background: rgba(2, 6, 23, 0.58) !important;
+    backdrop-filter: blur(4px) !important;
+  }
+
+  .en-mobile-fab {
+    border-radius: 18px !important;
+    box-shadow: 0 14px 34px color-mix(in srgb, var(--en-primary) 36%, rgba(2, 6, 23, 0.34)) !important;
+  }
+
+  .en-library-toolbar {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 8 !important;
+    min-height: 62px !important;
+    padding: 9px var(--en-mobile-page-gutter) 8px !important;
+    border-bottom: 1px solid color-mix(in srgb, var(--en-border) 74%, transparent) !important;
+    background: color-mix(in srgb, var(--en-bg) 94%, transparent) !important;
+    backdrop-filter: blur(16px) saturate(140%) !important;
+  }
+
+  .en-library-actions {
+    min-width: 0 !important;
+    gap: 8px !important;
+  }
+
+  .en-library-actions .en-select,
+  .en-library-actions .en-view-toggle {
+    min-width: 0 !important;
+    height: var(--en-mobile-tap-target) !important;
+    border-radius: 13px !important;
+    background: color-mix(in srgb, var(--en-surface) 72%, var(--en-bg)) !important;
+  }
+
+  .en-library-actions .en-select {
+    flex: 1 1 auto !important;
+    font-size: 13px !important;
+  }
+
+  .en-mobile-shell .en-library-grid {
+    gap: 10px !important;
+    padding: 12px var(--en-mobile-page-gutter) calc(88px + env(safe-area-inset-bottom, 0px)) !important;
+    scroll-padding-bottom: 100px !important;
+  }
+
+  .en-mobile-shell .en-note-card,
+  .en-mobile-shell .en-note-card.is-featured {
+    min-height: 150px !important;
+    height: auto !important;
+    border-radius: var(--en-mobile-card-radius) !important;
+    padding: 15px !important;
+    background: color-mix(in srgb, var(--en-surface) 52%, var(--en-bg)) !important;
+    box-shadow: 0 5px 18px color-mix(in srgb, #020617 8%, transparent) !important;
+  }
+
+  .en-mobile-shell .en-note-card h3 {
+    max-width: calc(100% - 44px) !important;
+    margin: 0 !important;
+    font-size: clamp(17px, 4.8vw, 22px) !important;
+    line-height: 1.16 !important;
+    overflow-wrap: anywhere !important;
+  }
+
+  .en-mobile-shell .en-note-card p {
+    margin: 10px 0 0 !important;
+    font-size: 13px !important;
+    line-height: 1.42 !important;
+    display: -webkit-box !important;
+    -webkit-box-orient: vertical !important;
+    -webkit-line-clamp: 4 !important;
+    overflow: hidden !important;
+  }
+
+  .en-mobile-shell .en-card-actions {
+    top: 8px !important;
+    right: 8px !important;
+  }
+
+  .en-mobile-shell .en-card-pin-button,
+  .en-mobile-shell .en-card-menu {
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 12px !important;
+  }
+
+  /* Addon-owned sections can exceed the four core settings tabs. Keep a
+     single native-feeling horizontal rail instead of squeezing or wrapping. */
+  .en-settings-nav {
+    grid-template-columns: none !important;
+    grid-auto-flow: column !important;
+    grid-auto-columns: minmax(56px, 72px) !important;
+    justify-content: start !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    overscroll-behavior-inline: contain !important;
+    scrollbar-width: none !important;
+  }
+
+  .en-settings-nav::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .en-settings-nav > button {
+    min-width: 56px !important;
+    width: auto !important;
+  }
+
+  .en-settings-panel .en-language-select {
+    width: min(52vw, 240px) !important;
+    max-width: min(52vw, 240px) !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .en-theme-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .en-theme-card {
+    min-width: 0 !important;
+  }
+
+  .en-theme-card-preview {
+    width: 72px !important;
+    min-width: 72px !important;
+  }
+
+  .elephant-sync-settings {
+    padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}

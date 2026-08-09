@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 2,
+  "policy": {
+    "description": "Linux usage simulations run the production renderer in Electron under Xvfb. Every fixed desktop regression is retained as an executable workflow with visual evidence for distinct UI states and JSON evidence for non-visual state transitions.",
+    "requiredOnPullRequest": true,
+    "captureDistinctVisualStates": true,
+    "rejectPixelIdenticalScreenshots": true,
+    "captureStateEvidence": true,
+    "failOnPageError": true,
+    "failOnConsoleError": true
+  },
+  "scenarios": [
+    {
+      "id": "startup-render",
+      "description": "Launch the production renderer with a seeded vault and verify that the Linux workspace is visible and non-empty.",
+      "regression": "Linux packaged or Electron startup displayed an empty or incomplete application shell",
+      "tags": ["startup", "renderer", "vault"]
+    },
+    {
+      "id": "vault-chooser-first-run",
+      "description": "Launch without a registered vault, expose the first-run chooser and complete a deterministic folder-selection workflow.",
+      "regression": "The first-run vault chooser was skipped, inert or unable to transition into the selected workspace",
+      "tags": ["vault", "onboarding", "selection"]
+    },
+    {
+      "id": "library-layout-roundtrip",
+      "description": "Switch the Linux note library from grid to list and restore the grid without losing cards.",
+      "regression": "The desktop layout buttons changed state without changing the note library",
+      "tags": ["library", "layout"]
+    },
+    {
+      "id": "library-title-sort",
+      "description": "Sort seeded Linux notes by title and verify that the visible card ordering actually changes.",
+      "regression": "The title sort control remained decorative or sorted notes inconsistently",
+      "tags": ["library", "sorting"]
+    },
+    {
+      "id": "sidebar-hide-show",
+      "description": "Hide and restore the Linux sidebar through the icon rail while retaining the workspace.",
+      "regression": "Toggling the sidebar left the content area collapsed or impossible to restore",
+      "tags": ["sidebar", "layout"]
+    },
+    {
+      "id": "search-roundtrip",
+      "description": "Open desktop search, query a seeded note, inspect results and return to the library.",
+      "regression": "Desktop search failed to query the active vault or trapped keyboard focus",
+      "tags": ["search", "navigation"]
+    },
+    {
+      "id": "search-no-results",
+      "description": "Submit an impossible Linux search query and verify the explicit empty state and close behavior.",
+      "regression": "A zero-result query left search busy forever or rendered an empty panel",
+      "tags": ["search", "empty-state"]
+    },
+    {
+      "id": "settings-roundtrip",
+      "description": "Open Linux Settings, search for an editor preference and close the dialog.",
+      "regression": "Settings could open but could not be searched or dismissed on Linux",
+      "tags": ["settings", "navigation"]
+    },
+    {
+      "id": "theme-mode-roundtrip",
+      "description": "Toggle the Linux application between dark and light color modes and restore the original mode.",
+      "regression": "Theme controls updated preferences without applying visible runtime styles",
+      "tags": ["settings", "theme", "appearance"]
+    },
+    {
+      "id": "open-existing-note",
+      "description": "Open a seeded note through the complete note editor chrome and the production Rust editing surface.",
+      "regression": "The global Rust editor overlay hid the title bar, tags, close controls and normal note editor layout",
+      "tags": ["editor", "rust", "chrome", "navigation"]
+    },
+    {
+      "id": "editor-write-autosave-preview",
+      "description": "Write through the production Rust editor, verify rendered content and autosave, then verify the library preview refreshes.",
+      "regression": "Editor changes rendered locally but were not persisted or reflected by the outer note library",
+      "tags": ["editor", "rust", "autosave", "preview"]
+    },
+    {
+      "id": "note-close-roundtrip",
+      "description": "Open a seeded note, return to the library and open a different note without restarting the application.",
+      "regression": "Closing or leaving one document stranded the Linux renderer before the next note",
+      "tags": ["editor", "navigation", "lifecycle"]
+    },
+    {
+      "id": "pin-unpin-note",
+      "description": "Pin and unpin a seeded note from its card controls while checking visual state transitions.",
+      "regression": "Pin controls were hidden, inert or persisted the wrong state",
+      "tags": ["library", "pinning"]
+    },
+    {
+      "id": "addon-install-enable-action",
+      "description": "Install a deterministic addon through Settings, enable it, run its command and verify its real note mutation in the editor and library.",
+      "regression": "Addon catalogue installation appeared successful without activation, command execution or visible application effects",
+      "tags": ["addons", "installation", "commands", "editor"]
+    },
+    {
+      "id": "reload-preserves-vault",
+      "description": "Reload the Linux renderer and verify through state evidence that the active vault and seeded note cards return.",
+      "regression": "A renderer reload lost the active vault or reopened to the onboarding screen",
+      "tags": ["lifecycle", "reload", "vault"]
+    },
+    {
+      "id": "navigation-stress",
+      "description": "Cycle repeatedly through search, Settings, sidebar visibility and note opening in one Linux session.",
+      "regression": "Repeated navigation accumulated overlays, page errors or an unusable application shell",
+      "tags": ["stress", "search", "settings", "sidebar", "editor"]
+    }
+  ]
+}

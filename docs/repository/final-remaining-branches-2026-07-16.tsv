@@ -1,0 +1,4 @@
+origin/develop	8a4d643f950ab49082767e1bc719667d6eb43d14	2026-07-10T18:11:51+02:00	Merge secure addon platform, optional Calendar and configurable icon rail
+origin/develop_next	e2bcf622e8649c0ceb85b6c7d5966ccdd21ebf90	2026-07-15T09:23:55+02:00	Publish Android review APK from develop_next
+origin/develop_next-integration-repair	68e897ac3c25ff5f716dfc1fc082050c53b58f42	2026-07-16T02:05:30+02:00	ci: consolidate remaining branches and obsolete pull requests
+origin/main	ffbe486eee191609e9215d867c14cc60bda07de7	2026-07-14T03:12:23+02:00	ci: remove temporary semantic metadata fixer

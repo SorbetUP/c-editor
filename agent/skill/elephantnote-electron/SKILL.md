@@ -3,7 +3,7 @@ name: elephantnote-electron
 description: >
   Electron-specific rules for legacy IPC, preload contracts, backend services,
   and parity with the Tauri runtime.
-argument-hint: "<electron-task>"
+argument-hint: '<electron-task>'
 ---
 
 # ElephantNote Electron
@@ -12,9 +12,9 @@ Use this skill for `Elephant/back`, Electron preload/main processes, legacy IPC,
 
 ## Read first
 
-- Backend service file in `Elephant/back/app/**`.
+- Backend service file in `Elephant/backend/js/**`.
 - IPC registration and preload/API contract.
-- Frontend caller in `Elephant/front/app/services/**`.
+- Frontend caller in `Elephant/frontend/app/services/**`.
 - Shared contract in `Elephant/shared/**` when present.
 - Matching Tauri command when the behavior exists in both runtimes.
 

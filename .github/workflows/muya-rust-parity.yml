@@ -1,0 +1,37 @@
+name: Muya Rust Parity
+
+on:
+  push:
+    branches:
+      - 'refactor/muya-rust-file-by-file'
+  pull_request:
+    paths:
+      - 'Elephant/crates/muya-core/**'
+      - 'Elephant/backend/tauri/src/muya_engine/**'
+      - 'Elephant/backend/tauri/src/markdown/mod.rs'
+      - 'Elephant/backend/tauri/Cargo.toml'
+      - '.github/workflows/muya-rust-parity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.91.0'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/crates/muya-core
+            Elephant/backend/tauri
+      - name: Test standalone Muya core
+        run: cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml
+      - name: Test legacy parity staging modules
+        run: cargo test --manifest-path Elephant/backend/tauri/Cargo.toml muya_engine::
+      - name: Check Tauri integration
+        run: cargo check --manifest-path Elephant/backend/tauri/Cargo.toml --all-targets --no-default-features

@@ -3,7 +3,7 @@ name: elephantnote-mobile
 description: >
   Rules for Android/mobile behavior, mobile parity, local vault assets, share flows,
   and sync with desktop.
-argument-hint: "<mobile-task>"
+argument-hint: '<mobile-task>'
 ---
 
 # ElephantNote Mobile
@@ -19,7 +19,7 @@ Use this skill for Android/mobile code, mobile vault behavior, share/import flow
 
 ## Read first
 
-- Mobile app files under `android/**`.
+- Mobile app files under `build/build/android/**`.
 - Shared contracts in `Elephant/shared/**`.
 - Sync and vault skills when the task touches files or sync.
 - Desktop implementation for the same feature.

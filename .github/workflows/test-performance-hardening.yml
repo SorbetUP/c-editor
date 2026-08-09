@@ -1,0 +1,100 @@
+name: Test and performance hardening
+
+on:
+  push:
+    branches:
+      - develop_next-unified-candidate2
+      - develop_next-unified-recovery
+      - develop_next-mobile-recovery
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  critical-contracts:
+    name: Critical contracts and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: ./.github/actions/setup
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+
+      - name: Reject fake or disabled test additions
+        run: node build/scripts/verify-test-integrity.mjs
+        env:
+          TEST_INTEGRITY_BASE: ${{ github.event.pull_request.base.sha || 'origin/develop_next' }}
+
+      - name: Run critical utility contracts with coverage
+        id: critical-coverage
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            --config vitest.critical.config.js --coverage \
+            2>&1 | tee critical-coverage-output.txt
+          status=${PIPESTATUS[0]}
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          echo "Critical coverage command exited with status ${status}."
+          exit 0
+
+      - name: Inspect focused coverage report
+        id: coverage-report
+        if: always()
+        shell: bash
+        run: |
+          if [ -d build/coverage-critical ] && find build/coverage-critical -type f -print -quit | grep -q .; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "Focused coverage report generated:"
+            find build/coverage-critical -maxdepth 2 -type f -print | sort
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Focused coverage report unavailable::Vitest failed before producing build/coverage-critical. The preserved terminal output remains the source of truth for this run."
+          fi
+
+      - name: Build production renderer
+        run: pnpm tauri:web:build
+
+      - name: Upload focused coverage and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: critical-coverage
+          path: |
+            build/coverage-critical/
+            critical-coverage-output.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce critical coverage result
+        if: always()
+        shell: bash
+        env:
+          CRITICAL_COVERAGE_STATUS: ${{ steps.critical-coverage.outputs.status }}
+        run: |
+          if [ "${CRITICAL_COVERAGE_STATUS:-1}" -ne 0 ]; then
+            echo "::error title=Critical contracts or coverage failed::See critical-coverage-output.txt in the uploaded critical-coverage artifact."
+            exit "${CRITICAL_COVERAGE_STATUS:-1}"
+          fi

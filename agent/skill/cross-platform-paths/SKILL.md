@@ -4,7 +4,7 @@ description: >
   Verify path handling across macOS, Linux, Windows, Android, Docker, Electron,
   and Tauri. Use for vault, assets, dashboard, sync, import/export, and model
   library filesystem behavior.
-argument-hint: "<path-or-filesystem-task>"
+argument-hint: '<path-or-filesystem-task>'
 ---
 
 # Cross-Platform Paths

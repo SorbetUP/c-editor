@@ -1,0 +1,34 @@
+{
+  "$schema": "../../../docs/addons/manifest.schema.json",
+  "id": "com.elephantnote.examples.finance-notes",
+  "name": "Finance Notes Example",
+  "version": "0.1.0",
+  "description": "Fetches a current market quote and writes a sourced Markdown note.",
+  "author": "ElephantNote",
+  "apiVersion": 1,
+  "minAppVersion": "0.1.0",
+  "runtime": {
+    "type": "javascript-worker",
+    "entry": "main.js"
+  },
+  "permissions": {
+    "commands": true,
+    "storage": true,
+    "notes": {
+      "read": [],
+      "write": ["Finance/**"]
+    },
+    "network": {
+      "hosts": ["query1.finance.yahoo.com"]
+    }
+  },
+  "activationEvents": ["onStartup"],
+  "contributes": {
+    "commands": [
+      {
+        "id": "com.elephantnote.examples.finance-notes.refresh",
+        "title": "Refresh finance note"
+      }
+    ]
+  }
+}

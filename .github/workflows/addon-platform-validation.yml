@@ -1,0 +1,269 @@
+name: Addon Platform Validation
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-addons:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Materialize official addons
+        run: node build/scripts/sync-elephant-addons.mjs
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Validate integrated official addon catalogue
+        shell: bash
+        run: |
+          set -o pipefail
+          node build/scripts/validate-addon-catalog.mjs addons \
+            2>&1 | tee addon-catalog-tests.txt
+
+      - name: Validate integrated addon packs
+        shell: bash
+        run: |
+          set -o pipefail
+          node build/scripts/validate-integrated-addon-packs.mjs \
+            2>&1 | tee addon-pack-tests.txt
+
+      - name: Package full app access reference addon
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/addons
+          node build/scripts/package-addon.mjs \
+            examples/addons/trusted-workspace-lab \
+            build/addons/trusted-workspace-lab.enaddon \
+            2>&1 | tee trusted-addon-package.txt
+          unzip -t build/addons/trusted-workspace-lab.enaddon
+
+      - name: Package every integrated physical addon
+        shell: bash
+        run: |
+          set -o pipefail
+          : > physical-addon-packages.txt
+          for source in addons/official/*
+          do
+            [ -d "$source" ] || continue
+            slug="$(basename "$source")"
+            if [ -f "$source/addon.build.json" ]; then
+              node build/scripts/build-physical-addon.mjs "$source" \
+                2>&1 | tee -a physical-addon-packages.txt
+            else
+              node build/scripts/package-addon.mjs \
+                "$source" \
+                "build/addons/$slug.enaddon" \
+                2>&1 | tee -a physical-addon-packages.txt
+              unzip -t "build/addons/$slug.enaddon"
+            fi
+          done
+          find build/out/addons/releases -name '*.enaddon' -print -exec unzip -t {} \; 2>/dev/null || true
+
+      - name: Package Android and iOS Code execution variants
+        shell: bash
+        run: |
+          set -o pipefail
+          node --check addons/official/code-execution/main.mobile.js
+          : > mobile-addon-packages.txt
+          for platform in android-aarch64 android-x86_64 ios-aarch64 ios-x86_64
+          do
+            node build/scripts/build-mobile-addon-package.mjs \
+              addons/official/code-execution \
+              "$platform" \
+              2>&1 | tee -a mobile-addon-packages.txt
+          done
+          find build/out/addons/releases/elephant.code-execution \
+            \( -name '*-android-*.enaddon' -o -name '*-ios-*.enaddon' \) \
+            -print | sort | while read -r archive
+          do
+            unzip -t "$archive"
+          done
+
+      - uses: ./.github/actions/setup
+
+      - name: Install exact wasm-bindgen CLI
+        shell: bash
+        run: |
+          VERSION=$(cargo metadata --manifest-path Elephant/crates/muya-wasm/Cargo.toml --format-version 1 \
+            | python3 -c "import json,sys; data=json.load(sys.stdin); print(next(p['version'] for p in data['packages'] if p['name']=='wasm-bindgen'))")
+          if ! wasm-bindgen --version 2>/dev/null | grep -q "${VERSION}$"; then
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+
+      - name: Run focused addon and settings tests
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules \
+            Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/addons/addonProfiles.spec.js \
+            tests/app/unit/addons/coreFeatures.spec.js \
+            tests/app/unit/addons/hostAddonCommandScope.spec.js \
+            tests/app/unit/addons/isolatedAddonWorkerSource.spec.js \
+            tests/app/unit/addons/isolatedAddonReplacement.spec.js \
+            tests/app/unit/addons/runtimeSecurityContracts.spec.js \
+            tests/app/unit/addons/builtinAddons.spec.js \
+            tests/app/unit/addons/aiTabsAndRailBorder.spec.js \
+            tests/app/unit/addons/physicalAddonIsolation.spec.js \
+            tests/app/unit/addons/coreBridgePhysicalAbsence.spec.js \
+            tests/app/unit/addons/nativeMobileCompatibility.spec.js \
+            tests/app/unit/addons/searchPackageOwnership.spec.js \
+            tests/app/unit/addons/googleKeepPackageOwnership.spec.js \
+            tests/app/unit/addons/calendarPackageOwnership.spec.js \
+            tests/app/unit/addons/packageResourceContracts.spec.js \
+            tests/app/unit/addons/trustedOfficialActivation.spec.js \
+            tests/app/unit/addons/baseOfficialAddonRuntime.spec.js \
+            tests/app/unit/specs/main/elephantnote/settingsRedesign.spec.js \
+            2>&1 | tee addon-tests.txt
+
+      - name: Build Tauri web bundle and verify physical absence
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm tauri:web:build 2>&1 | tee addon-build.txt
+          markers=(
+            elephant-ai-settings
+            elephant-ocr-addon-settings
+            ElephantDashboardAddon
+            ElephantChatAddon
+            ElephantSearchAddon
+            ElephantWikiAddon
+            ElephantGraphAddon
+            ElephantOpenModelsAddon
+            ElephantCodexAddon
+            ElephantSyncAddon
+            ElephantCalendarAddon
+            ElephantSitesAddon
+            ElephantCodeExecutionAddon
+            ElephantGoogleKeepImportAddon
+            ElephantRecentlyEditedAddon
+          )
+          for marker in "${markers[@]}"
+          do
+            if grep -R -n -F "$marker" build/out/renderer; then
+              echo "Physical addon implementation leaked into the core renderer bundle: $marker" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload functional validation and installable packages
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-platform-validation
+          path: |
+            addon-catalog-tests.txt
+            addon-pack-tests.txt
+            addon-tests.txt
+            trusted-addon-package.txt
+            physical-addon-packages.txt
+            mobile-addon-packages.txt
+            addon-build.txt
+            pnpm-install.log
+            pnpm-install-frozen.log
+            pnpm-install-unfrozen.log
+            build/addons/*.enaddon
+            build/out/addons/releases/**/*.enaddon
+            build/out/addons/releases/**/*.json
+          if-no-files-found: ignore
+
+  validate-addon-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri dependencies
+        timeout-minutes: 12
+        shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -euxo pipefail
+          timeout 600 sudo apt-get -o Acquire::Retries=3 update
+          timeout 600 sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Materialize official addons
+        run: node build/scripts/sync-elephant-addons.mjs
+
+      - name: Compile and test Rust addon security modules
+        shell: bash
+        run: |
+          set -o pipefail
+          : > addon-rust-tests.txt
+          for test_filter in \
+            addon_catalog::tests \
+            addon_dependencies::tests \
+            addon_registry_view::tests \
+            addon_sidecars::tests \
+            addon_services::tests \
+            addon_runtime_access::tests \
+            addon_assets::tests \
+            addon_note_access::tests \
+            addon_http_access::tests \
+            official_addon_catalog::tests
+          do
+            cargo test \
+              --manifest-path Elephant/backend/tauri/Cargo.toml \
+              --no-default-features \
+              "$test_filter" \
+              --lib \
+              2>&1 | tee -a addon-rust-tests.txt
+          done
+
+      - name: Compile and package physical native addons
+        shell: bash
+        run: |
+          set -o pipefail
+          : > physical-addon-tests.txt
+          : > physical-addon-build.txt
+          for source in addons/official/*
+          do
+            [ -f "$source/addon.build.json" ] || continue
+            cargo test \
+              --manifest-path "$source/native/Cargo.toml" \
+              2>&1 | tee -a physical-addon-tests.txt
+            node build/scripts/build-physical-addon.mjs "$source" \
+              2>&1 | tee -a physical-addon-build.txt
+          done
+          find build/out/addons/releases -name '*.enaddon' -print -exec unzip -t {} \;
+
+      - name: Upload Rust and physical package validation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: addon-platform-rust-validation
+          path: |
+            addon-rust-tests.txt
+            physical-addon-tests.txt
+            physical-addon-build.txt
+            build/out/addons/releases/**/*.enaddon
+            build/out/addons/releases/**/*.json
+          if-no-files-found: ignore

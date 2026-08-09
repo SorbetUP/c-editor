@@ -3,7 +3,7 @@ name: elephantnote-editor-assets
 description: >
   Rules for Markdown editing, image insertion, Excalidraw sidecars, asset paths,
   Muya/editor state, and disk round-trips.
-argument-hint: "<editor-assets-task>"
+argument-hint: '<editor-assets-task>'
 ---
 
 # ElephantNote Editor Assets
@@ -21,8 +21,8 @@ Use this skill for Markdown editor behavior, images, pasted/uploaded files, Exca
 
 ## Read first
 
-- `Elephant/front/app/components/editor/**`.
-- `Elephant/front/app/services/excalidraw.js`.
+- `Elephant/frontend/app/components/editor/**`.
+- `Elephant/frontend/app/services/excalidraw.js`.
 - `Elephant/shared/excalidrawAssets.js`, `imageSource.js`, `markdownDocument.js`.
 - Vault/file commands in Electron or Tauri for actual disk writes.
 - Existing tests around `excalidraw`, `imageSource`, `noteEditorHostImageLinks`, and markdown documents.

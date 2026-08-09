@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="static/icon.png" alt="ElephantNote icon" width="96" height="96">
+  <img src="Elephant/assets/static/icon.png" alt="ElephantNote icon" width="96" height="96">
 </p>
 
 <h1 align="center">ElephantNote</h1>
@@ -96,7 +96,7 @@ pnpm web:docker:run
 ```bash
 pnpm test:unit
 pnpm test
-pnpm coverage
+pnpm build/coverage
 pnpm test:e2e
 pnpm security:guard
 pnpm tauri:check
@@ -109,22 +109,34 @@ pnpm prod:check
 
 ## Status
 
-This branch moves quickly. The backend is Rust-only (Tauri); the legacy Electron main process and `Elephant/back/app/` JS backend were retired. Tauri, sync, addon support, local AI, graph features, and search features are being integrated and tested progressively. Do not assume every experimental feature is production-ready.
+This branch moves quickly. The backend is Rust-only (Tauri); the Electron main process has been retired and `Elephant/backend/js/` now exists only as a compatibility layer for parity tests. Tauri, sync, addon support, local AI, graph features, and search features are being integrated and tested progressively. Do not assume every experimental feature is production-ready.
 
 ## Project structure
 
 ```text
 .
-├── build_dev.sh
-├── build_dev_apk.sh
-├── scripts/
-├── src-tauri/
-├── test/
-├── static/
-├── web/
+├── Elephant/           # App source: frontend, backend, shared code, and static assets
+│   ├── frontend/
+│   │   ├── src/        # Current Vue/Muya renderer source
+│   │   └── app/        # Elephant UI modules still imported by the app/tests
+│   ├── backend/
+│   │   ├── tauri/      # Rust/Tauri backend
+│   │   └── js/  # Retired JS backend modules kept for parity tests
+│   ├── shared/
+│   └── assets/static/
+├── build/              # Build scripts, platform prototypes, and generated local outputs
+│   ├── android/
+│   ├── ios/
+│   └── scripts/
+├── tests/              # Unit, e2e, fixtures, and compatibility parity tests
+└── agent/              # Agent playbooks, docs, parity notes, feature intake, patches, security data
 ├── package.json
 └── README.md
 ```
+
+Generated outputs such as `build/out/`, `build/coverage/`, `build/test-results/`,
+`build/ios/.build/`, `build/android/**/build/`, and `Elephant/backend/tauri/target/`
+are local build/test artifacts and should not be committed.
 
 ## License
 

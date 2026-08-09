@@ -1,0 +1,28 @@
+/* Runtime geometry must win over the obsolete fixed-width Tauri parity rules. */
+.en-shell {
+  --en-sidebar-width: var(--en-sidebar-runtime-width, 232px) !important;
+}
+
+.en-rail {
+  width: 48px !important;
+  flex-basis: 48px !important;
+}
+
+.en-topstrip {
+  background: linear-gradient(
+    to right,
+    var(--en-sidebar-bg, var(--en-bg)) 0,
+    var(--en-sidebar-bg, var(--en-bg)) calc(48px + var(--en-sidebar-width) + 1px),
+    var(--en-bg) calc(48px + var(--en-sidebar-width) + 1px),
+    var(--en-bg) 100%
+  ) !important;
+}
+
+.en-topstrip::after {
+  left: calc(48px + var(--en-sidebar-width)) !important;
+  width: 1px !important;
+}
+
+.en-topstrip-sidebar-hidden {
+  background: var(--en-bg) !important;
+}

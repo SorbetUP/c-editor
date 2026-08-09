@@ -1,0 +1,60 @@
+[package]
+name = "elephantnote-tauri"
+version = "0.1.0"
+description = "ElephantNote Tauri shell"
+authors = ["Jocs <ransixi@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/marktext/marktext"
+edition = "2021"
+rust-version = "1.91"
+autobins = false
+
+[[bin]]
+name = "Elephant"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib_min.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+blake3 = "1.8"
+chardetng = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+encoding_rs = "0.8"
+futures-util = "0.3"
+fuzzy-matcher = "0.3"
+notify = "6"
+pulldown-cmark = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled", "bundled-full"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-elephant-android-vault = { path = "../tauri-plugin-elephant-android-vault" }
+tauri-plugin-fs = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-window-state = "2"
+tokio = { version = "1.49", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+url = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+keyring = "3"
+
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+elephantnote-knowledge-core = { git = "https://github.com/SorbetUP/Elephant-Addons", rev = "8458c1cc9ed074148697e6edc5ffc0f05bbf05ab", package = "elephantnote-knowledge-core" }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "z"
+strip = "symbols"

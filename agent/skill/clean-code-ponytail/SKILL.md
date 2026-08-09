@@ -3,7 +3,7 @@ name: clean-code-ponytail
 description: >
   Adapter skill for clean-code requests. Delegates clean code, maintainability,
   over-engineering, and minimal-diff decisions to Ponytail.
-argument-hint: "<code-or-diff>"
+argument-hint: '<code-or-diff>'
 ---
 
 # Clean Code = Ponytail
@@ -25,6 +25,7 @@ Load and apply `agent/skill/ponytail/SKILL.md`. Clean code in this repo means:
 
 ```md
 Ponytail clean-code review:
+
 - delete:
 - reuse:
 - simplify:

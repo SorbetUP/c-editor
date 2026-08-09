@@ -1,0 +1,13 @@
+origin/develop_next-integration-repair	ab952b86d91c3560e13f405a7cf9c20561b943b0	2026-07-16T01:59:41+02:00	ci: clean stale and duplicate integration branches
+origin/develop_next-unified-candidate2	1a511de6dc8c1f203c64e69c9b5d23ee35a0d155	2026-07-15T15:18:30+02:00	test(code): enforce persistent service API usage
+origin/develop_next-mobile-recovery	1a847708f7d541932b9b26be914ddfaca4bad6b9	2026-07-15T13:06:39+02:00	test(search): keep lifecycle patch runtime-only
+origin/develop_next	e2bcf622e8649c0ceb85b6c7d5966ccdd21ebf90	2026-07-15T09:23:55+02:00	Publish Android review APK from develop_next
+origin/feature/physical-addon-packages	638eeefbc383079fe4ef422bc6bb271e1e0f7540	2026-07-14T15:13:18+02:00	fix(addons): advertise only published desktop targets
+origin/refactor/muya-rust-file-by-file	4429e21757260998891340e5d2933e0049e14b6d	2026-07-14T12:40:03+02:00	fix(muya-rust): require Muya front matter separation
+origin/assistant/wiki-organization-continuation	b69fb37b8b44b8fb9819547993b69a1b76a7162e	2026-07-14T12:31:51+02:00	fix: ignore Excalidraw repair callbacks after DOM teardown
+origin/assistant/wiki-links-graph-integration	b34b29efb13cdce74b89218206de629d15abe9c0	2026-07-14T01:15:00Z	[skip ci] Record Wiki links graph validation
+origin/main	ffbe486eee191609e9215d867c14cc60bda07de7	2026-07-14T03:12:23+02:00	ci: remove temporary semantic metadata fixer
+origin/assistant/validate-knowledge-graph-wiki	f2aee77dd4e86ef830bf6c7ab091bc9038206a71	2026-07-13T02:25:10+02:00	fix(licenses): support the configured pnpm modules directory
+origin/feature/trusted-addon-runtime	fff77240bd7ba3f02f917f2844b3fc1255fd20d5	2026-07-13T01:46:45+02:00	test(ai): cover addon-owned models and route cleanup
+origin/feature/rust-knowledge-core	1e77f085713d26fba1c4517c2cd5a25df5e65bdc	2026-07-13T00:56:27+02:00	docs(knowledge): record graph and wiki runtime guarantees
+origin/develop	8a4d643f950ab49082767e1bc719667d6eb43d14	2026-07-10T18:11:51+02:00	Merge secure addon platform, optional Calendar and configurable icon rail

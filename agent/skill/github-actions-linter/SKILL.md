@@ -4,7 +4,7 @@ description: >
   Verify GitHub Actions workflow syntax, contexts, shell snippets, triggers,
   permissions, and reusable action usage before CI YAML changes are trusted.
   Use with actionlint/yamllint-style checks and APEX validation.
-argument-hint: "<workflow-change>"
+argument-hint: '<workflow-change>'
 ---
 
 # GitHub Actions Linter
@@ -34,7 +34,7 @@ When `actionlint` is not installed, perform the same review manually and report 
 ## ElephantNote workflow rules
 
 - The main CI must run `scripts/verify-critical-flows.mjs` before general tests.
-- Tauri workflows must keep a blocking cargo check for `src-tauri`.
+- Tauri workflows must keep a blocking cargo check for `Elephant/backend/tauri`.
 - macOS packaged-window checks must not be replaced by a JS-only smoke test.
 - Sync Docker smoke checks must remain explicit when sync behavior changes.
 

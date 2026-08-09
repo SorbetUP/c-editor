@@ -1,0 +1,86 @@
+name: Rust Editor Ownership
+
+on:
+  push:
+    branches:
+      - develop_next
+    paths:
+      - 'Elephant/frontend/src/muya/**'
+      - 'Elephant/frontend/app/**'
+      - 'Elephant/frontend/src/renderer/src/**'
+      - 'Elephant/crates/muya-core/**'
+      - 'Elephant/crates/muya-wasm/**'
+      - '.github/workflows/muya-js-modularity.yml'
+  pull_request:
+    paths:
+      - 'Elephant/frontend/src/muya/**'
+      - 'Elephant/frontend/app/**'
+      - 'Elephant/frontend/src/renderer/src/**'
+      - 'Elephant/crates/muya-core/**'
+      - 'Elephant/crates/muya-wasm/**'
+      - '.github/workflows/muya-js-modularity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ownership:
+    name: Validate Rust editor ownership
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test the Rust editor core
+        run: cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml
+
+      - name: Reject production imports of the legacy Muya JavaScript package
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          roots = [
+              Path('Elephant/frontend/app'),
+              Path('Elephant/frontend/src/renderer/src'),
+              Path('addons/official'),
+          ]
+          extensions = {'.js', '.mjs', '.ts', '.vue'}
+          module_pattern = re.compile(
+              r"(?:from\s+|import\s*\(|import\s+)[\"'](?P<module>[^\"']+)[\"']"
+          )
+          violations = []
+          for root in roots:
+              for path in root.rglob('*'):
+                  if path.suffix not in extensions:
+                      continue
+                  if path.name.endswith(('.spec.js', '.test.js')):
+                      continue
+                  relative = path.as_posix()
+                  text = path.read_text(errors='ignore')
+                  for match in module_pattern.finditer(text):
+                      module = match.group('module')
+                      if module == 'muya' or module.startswith('muya/'):
+                          violations.append(f'{relative}: legacy package import {module!r}')
+                      if 'frontend/src/muya' in module:
+                          violations.append(f'{relative}: direct legacy source import {module!r}')
+          if violations:
+              raise SystemExit(
+                  'Production code still imports the legacy Muya JavaScript package:\n' +
+                  '\n'.join(sorted(set(violations)))
+              )
+          PY
+
+      - name: Verify the production editor resource is Rust-owned
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "engine: 'rust'" Elephant/frontend/src/renderer/src/muya/editorRuntimeResource.js
+          grep -F "host.provide('editor.runtime', editorRuntimeBinding.resource)" Elephant/frontend/src/renderer/src/components/editorWithTabs/runtimeEditor.vue
+          grep -F "muya-rust-wasm-bundle" Elephant/frontend/src/renderer/src/editor-rust/wasmFactory.js
+          grep -F "import { RustMuyaRuntimeEditor } from '@/muya'" Elephant/frontend/src/renderer/src/components/editorWithTabs/runtimeEditor.vue
+          ! grep -RIn "host?.get('muya')" Elephant/frontend/src/renderer/src/addons addons/official
+          ! grep -RInE "new[[:space:]]+Muya\b|createMuya\(" Elephant/frontend/app Elephant/frontend/src/renderer/src/components addons/official

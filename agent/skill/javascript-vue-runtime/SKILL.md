@@ -3,10 +3,10 @@ name: javascript-vue-runtime
 description: >
   Rules for JavaScript, Vue, Vite, Vitest, Playwright, frontend runtime bridges,
   state stores, async UI flows, and browser/Electron/Tauri renderer behavior.
-argument-hint: "<js-vue-task>"
+argument-hint: '<js-vue-task>'
 ---
 
-# JavaScript Vue Runtime
+# JavaScript/Vue Runtime
 
 Use this skill when work touches JavaScript, Vue components, Vite config, Vitest tests, Playwright flows, renderer bridges, stores, or browser-like runtime behavior.
 

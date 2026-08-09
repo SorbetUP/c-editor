@@ -1,0 +1,17 @@
+[addon-catalog] ok id=elephant.dashboard version=1.0.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.ai version=2.2.0 runtime=trusted modules=2 official=true
+[addon-catalog] ok id=elephant.ai-chat version=1.1.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.ai-search version=1.3.0 runtime=trusted modules=2 official=true
+[addon-catalog] ok id=elephant.ai-ocr version=1.0.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.wiki version=1.4.0 runtime=trusted modules=3 official=true
+[addon-catalog] ok id=elephant.graph version=1.3.0 runtime=trusted modules=2 official=true
+[addon-catalog] ok id=elephant.knowledge version=1.2.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.open-models version=2.0.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.codex-connection version=2.0.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.sync version=1.2.0 runtime=trusted modules=3 official=true
+[addon-catalog] ok id=elephant.calendar version=1.3.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.sites version=1.3.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.code-execution version=2.2.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.google-keep-import version=1.2.0 runtime=trusted modules=1 official=true
+[addon-catalog] ok id=elephant.recently-edited version=1.1.0 runtime=trusted modules=1 official=true
+[addon-catalog] valid addons=16 official=16 trusted=16 commands=0 views=0

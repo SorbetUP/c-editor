@@ -3,7 +3,7 @@ name: elephantnote-debugging
 description: >
   Rules for debugging loading loops, async races, bridge failures, missing logs,
   stale editor state, and hard-to-reproduce runtime bugs.
-argument-hint: "<debug-task>"
+argument-hint: '<debug-task>'
 ---
 
 # ElephantNote Debugging

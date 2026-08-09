@@ -5,7 +5,7 @@ description: >
   test tools, CI surfaces, and missing local skills before an APEX run. Use this
   in APEX Init and Analyze so the model loads or proposes the right skills for
   the actual repo instead of working generically.
-argument-hint: "<repo-task>"
+argument-hint: '<repo-task>'
 ---
 
 # Repository Skill Router
@@ -22,7 +22,7 @@ Inspect lightweight evidence first:
 
 - manifests: `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `pom.xml`, `build.gradle`, `composer.json`, `Gemfile`, `deno.json`, `bun.lockb`, `pnpm-lock.yaml`;
 - CI files: `.github/workflows/**`, `.github/actions/**`;
-- runtime folders: `src-tauri`, `android`, `ios`, `electron`, `web`, `server`, `tests`, `test`, `e2e`;
+- runtime folders: `Elephant/backend/tauri`, `android`, `ios`, `electron`, `web`, `server`, `tests`, `test`, `e2e`;
 - config files: `vite.config.*`, `vitest.config.*`, `playwright.config.*`, `tsconfig*.json`, `eslint.config.*`, `rustfmt.toml`, `clippy.toml`;
 - docs and agent files: `README.md`, `agent/AGENTS.md`, `agent/skill/**`.
 

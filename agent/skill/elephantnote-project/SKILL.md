@@ -3,7 +3,7 @@ name: elephantnote-project
 description: >
   Default project rules for ElephantNote. Use for every task in this repository
   before choosing more specific skills.
-argument-hint: "<task>"
+argument-hint: '<task>'
 ---
 
 # ElephantNote Project

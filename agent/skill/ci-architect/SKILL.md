@@ -4,7 +4,7 @@ description: >
   Design GitHub Actions CI topology for ElephantNote: job boundaries, matrix shape,
   dependency caching, runtime gates, artifact policy, and PR/release separation.
   Use during the APEX Analyze and Plan phases before editing workflow YAML.
-argument-hint: "<ci-design-task>"
+argument-hint: '<ci-design-task>'
 ---
 
 # CI Architect
@@ -21,7 +21,7 @@ For ElephantNote, prefer these layers unless the change is intentionally narrowe
 
 1. **Workflow hygiene**: workflow syntax/lint/static security checks.
 2. **Quality gate**: critical-flow guard, security guardrails, lint, unit/contract tests.
-3. **Tauri Rust**: `cargo check` and Rust unit tests for `src-tauri`.
+3. **Tauri Rust**: `cargo check` and Rust unit tests for `Elephant/backend/tauri`.
 4. **Tauri web build**: `pnpm tauri:web:build`.
 5. **Packaged runtime**: macOS packaged app/window smoke when the task concerns Tauri launch confidence.
 6. **Sync/runtime smoke**: Docker pair or local runtime checks when the task touches sync, filesystem, or IPC.

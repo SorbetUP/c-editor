@@ -3,7 +3,7 @@ name: truthful-delivery
 description: >
   Keep delivery reports factual. Every claim must be backed by code, tests,
   CI, logs, runtime evidence, or an explicit not-proven status.
-argument-hint: "<delivery-claim>"
+argument-hint: '<delivery-claim>'
 ---
 
 # Truthful Delivery

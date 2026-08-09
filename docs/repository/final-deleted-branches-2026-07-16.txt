@@ -1,0 +1,9 @@
+DELETE	develop_next-unified-candidate2
+DELETE	develop_next-mobile-recovery
+DELETE	feature/physical-addon-packages
+DELETE	refactor/muya-rust-file-by-file
+DELETE	assistant/wiki-organization-continuation
+DELETE	assistant/wiki-links-graph-integration
+DELETE	assistant/validate-knowledge-graph-wiki
+DELETE	feature/trusted-addon-runtime
+DELETE	feature/rust-knowledge-core

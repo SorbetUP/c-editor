@@ -1,0 +1,15 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/ElephantNote/ElephantNote[39m
+
+ [32m✓[39m tests/app/unit/addons/wikiPackageOwnership.spec.js [2m([22m[2m4 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m tests/app/unit/addons/searchPackageOwnership.spec.js [2m([22m[2m5 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/app/unit/addons/knowledgePhysicalAddon.spec.js [2m([22m[2m3 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/app/unit/addons/addonsCatalogueUi.spec.js [2m([22m[2m4 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/app/unit/addons/packageResourceContracts.spec.js [2m([22m[2m3 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/app/unit/addons/officialAddonCatalogBridge.spec.js [2m([22m[2m1 test[22m[2m)[22m[32m 11[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m      Tests [22m [1m[32m20 passed[39m[22m[90m (20)[39m
+[2m   Start at [22m 00:32:24
+[2m   Duration [22m 2.94s[2m (transform 169ms, setup 124ms, import 319ms, tests 53ms, environment 6.50s)[22m
+

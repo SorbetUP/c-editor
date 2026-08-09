@@ -1,0 +1,239 @@
+name: Muya WASM Adapter
+
+on:
+  pull_request:
+    paths:
+      - '.gitignore'
+      - 'Elephant/crates/muya-core/**'
+      - 'Elephant/crates/muya-wasm/**'
+      - 'Elephant/frontend/src/muya/lib/rust/**'
+      - 'Elephant/frontend/src/muya/lib/core/setup.js'
+      - 'Elephant/frontend/src/muya/lib/core/lifecycle.js'
+      - 'Elephant/frontend/src/muya/lib/config/options.js'
+      - 'Elephant/frontend/src/renderer/src/muya/**'
+      - 'Elephant/frontend/src/renderer/src/pages/app.vue'
+      - 'build/scripts/build-muya-wasm.mjs'
+      - 'package.json'
+      - 'vite.tauri.config.mjs'
+      - 'vitest.config.js'
+      - 'tests/app/unit/specs/muya/rustBridge.spec.js'
+      - 'tests/app/unit/specs/muya/rustLogicalDocument.spec.js'
+      - 'tests/app/unit/specs/muya/rustDomRenderer.spec.js'
+      - 'tests/app/unit/specs/muya/rustInputController.spec.js'
+      - 'tests/app/unit/specs/muya/rustRuntime.spec.js'
+      - 'tests/app/unit/specs/muya/rustWasmFactory.spec.js'
+      - 'tests/app/unit/specs/muya/rustVueRuntime.spec.js'
+      - 'tests/app/unit/specs/muya/rustDifferential*.js'
+      - '.github/workflows/muya-wasm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: muya-wasm-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.91.0'
+          targets: wasm32-unknown-unknown
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/crates/muya-core
+            Elephant/crates/muya-wasm
+
+      - name: Check active core formatting
+        shell: bash
+        run: |
+          (
+            cd Elephant/crates/muya-core
+            rustfmt \
+              src/edit/paragraph.rs \
+              src/edit/mark_compat.rs \
+              src/syntax/inline/emphasis.rs \
+              tests/muya_mark_protocol.rs
+          )
+          git diff -- \
+            Elephant/crates/muya-core/src/edit/paragraph.rs \
+            Elephant/crates/muya-core/src/edit/mark_compat.rs \
+            Elephant/crates/muya-core/src/syntax/inline/emphasis.rs \
+            Elephant/crates/muya-core/tests/muya_mark_protocol.rs \
+            > muya-core-rustfmt.patch
+          test ! -s muya-core-rustfmt.patch
+
+      - name: Upload core formatting diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: muya-core-rustfmt
+          path: muya-core-rustfmt.patch
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Test core and protocol on host
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml \
+            2>&1 | tee muya-core-tests.txt
+
+      - name: Upload core test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: muya-core-tests
+          path: muya-core-tests.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Check adapter formatting
+        run: cargo fmt --manifest-path Elephant/crates/muya-wasm/Cargo.toml -- --check
+
+      - name: Test adapter protocol on host
+        run: cargo test --manifest-path Elephant/crates/muya-wasm/Cargo.toml
+
+      - name: Check WebAssembly target
+        run: cargo check --manifest-path Elephant/crates/muya-wasm/Cargo.toml --target wasm32-unknown-unknown
+
+  browser-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - name: Lint Rust bridge modules
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/eslint \
+            Elephant/frontend/src/muya/lib/rust \
+            Elephant/frontend/src/muya/lib/core/setup.js \
+            Elephant/frontend/src/muya/lib/core/lifecycle.js \
+            Elephant/frontend/src/muya/lib/config/options.js \
+            Elephant/frontend/src/renderer/src/muya \
+            Elephant/frontend/src/renderer/src/pages/app.vue \
+            build/scripts/build-muya-wasm.mjs \
+            vite.tauri.config.mjs \
+            vitest.config.js \
+            tests/app/unit/specs/muya/rustBridge.spec.js \
+            tests/app/unit/specs/muya/rustLogicalDocument.spec.js \
+            tests/app/unit/specs/muya/rustDomRenderer.spec.js \
+            tests/app/unit/specs/muya/rustInputController.spec.js \
+            tests/app/unit/specs/muya/rustRuntime.spec.js \
+            tests/app/unit/specs/muya/rustWasmFactory.spec.js \
+            tests/app/unit/specs/muya/rustVueRuntime.spec.js \
+            tests/app/unit/specs/muya/rustDifferential*.js \
+            2>&1 | tee muya-rust-eslint.txt
+
+      - name: Test Rust browser bridge
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/muya/rustBridge.spec.js \
+            tests/app/unit/specs/muya/rustLogicalDocument.spec.js \
+            tests/app/unit/specs/muya/rustDomRenderer.spec.js \
+            tests/app/unit/specs/muya/rustInputController.spec.js \
+            tests/app/unit/specs/muya/rustRuntime.spec.js \
+            tests/app/unit/specs/muya/rustWasmFactory.spec.js \
+            tests/app/unit/specs/muya/rustVueRuntime.spec.js \
+            2>&1 | tee muya-rust-vitest.txt
+
+      - name: Upload browser bridge diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: muya-rust-browser-diagnostics
+          path: |
+            muya-rust-eslint.txt
+            muya-rust-vitest.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  bundled-web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.91.0'
+          targets: wasm32-unknown-unknown
+
+      - id: wasm-bindgen
+        name: Resolve wasm-bindgen version
+        shell: bash
+        run: |
+          version="$(cargo metadata \
+            --manifest-path Elephant/crates/muya-wasm/Cargo.toml \
+            --format-version 1 | node -e '
+              let input = ""
+              process.stdin.on("data", chunk => input += chunk)
+              process.stdin.on("end", () => {
+                const metadata = JSON.parse(input)
+                const pkg = metadata.packages.find(entry => entry.name === "wasm-bindgen")
+                if (!pkg) process.exit(1)
+                process.stdout.write(pkg.version)
+              })
+            ')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Cache wasm-bindgen CLI
+        uses: actions/cache@v4
+        with:
+          path: build/tools/wasm-bindgen
+          key: wasm-bindgen-cli-${{ runner.os }}-${{ steps.wasm-bindgen.outputs.version }}
+
+      - name: Install wasm-bindgen CLI
+        shell: bash
+        run: |
+          if [ ! -x build/tools/wasm-bindgen/bin/wasm-bindgen ]; then
+            cargo install wasm-bindgen-cli \
+              --version "${{ steps.wasm-bindgen.outputs.version }}" \
+              --locked \
+              --root build/tools/wasm-bindgen
+          fi
+
+      - name: Build bundled Rust editor frontend
+        shell: bash
+        run: |
+          export PATH="$PWD/build/tools/wasm-bindgen/bin:$PATH"
+          pnpm tauri:web:build:rust-editor
+          test -f Elephant/frontend/src/muya/lib/rust/generated/muya_wasm.js
+          test -f Elephant/frontend/src/muya/lib/rust/generated/muya_wasm_bg.wasm
+          find build/out/renderer -name '*.wasm' -print -quit | grep .
+
+      - name: Run real JavaScript versus Rust editing traces
+        shell: bash
+        run: |
+          set -o pipefail
+          ELEPHANT_EXPERIMENTAL_RUST_EDITOR=1 \
+          NODE_PATH=Elephant/node_modules \
+          Elephant/node_modules/.bin/vitest run \
+            tests/app/unit/specs/muya/rustDifferential*.spec.js \
+            2>&1 | tee muya-rust-differential.txt
+
+      - name: Upload differential trace diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: muya-rust-differential
+          path: muya-rust-differential.txt
+          if-no-files-found: ignore
+          retention-days: 7

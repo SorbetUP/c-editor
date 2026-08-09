@@ -6,7 +6,7 @@ description: >
   a clear, deliberate workflow instead of jumping straight to code. For clean
   code, maintainability, over-engineering, boilerplate, and unnecessary
   abstraction checks, apply the local Ponytail skill rules.
-argument-hint: "[-a] [-x] [-t] [-v] [-s] [-e] [-k] [-m] [-pr] <task-description>"
+argument-hint: '[-a] [-x] [-t] [-v] [-s] [-e] [-k] [-m] [-pr] <task-description>'
 ---
 
 # APEX
@@ -33,17 +33,17 @@ Use `templates/run-report.md` when `-s` or a long run needs persistent notes.
 
 Lowercase turns a flag on; uppercase in a user request turns it off.
 
-| Flag | Meaning |
-|---|---|
-| `-a` | Auto-approve low-risk choices; still stop for data loss, security, or unclear acceptance criteria. |
-| `-x` | Run adversarial examine after validation. |
-| `-t` | Add or update tests for the behavior. |
-| `-v` | Verify the user-visible/runtime behavior, not just unit tests. |
-| `-s` | Save/report step outputs using the run-report template. |
-| `-e` | Economy mode: no parallel/subagent expansion; keep context narrow. |
-| `-k` | Break larger work into dependency tasks. |
-| `-m` | Use task decomposition for independent work streams. |
-| `-pr` | Prepare PR-style final summary after validation. |
+| Flag  | Meaning                                                                                            |
+| ----- | -------------------------------------------------------------------------------------------------- |
+| `-a`  | Auto-approve low-risk choices; still stop for data loss, security, or unclear acceptance criteria. |
+| `-x`  | Run adversarial examine after validation.                                                          |
+| `-t`  | Add or update tests for the behavior.                                                              |
+| `-v`  | Verify the user-visible/runtime behavior, not just unit tests.                                     |
+| `-s`  | Save/report step outputs using the run-report template.                                            |
+| `-e`  | Economy mode: no parallel/subagent expansion; keep context narrow.                                 |
+| `-k`  | Break larger work into dependency tasks.                                                           |
+| `-m`  | Use task decomposition for independent work streams.                                               |
+| `-pr` | Prepare PR-style final summary after validation.                                                   |
 
 ## Clean code rule
 
@@ -53,20 +53,20 @@ When this workflow asks for clean code, maintainability, or over-engineering rev
 
 At Init and Analyze, load `../repo-skill-router/SKILL.md` for non-trivial repo work. Detect the stack from manifests, configs, folders, workflows, and existing skills. If the current task depends on a major present language/framework/runtime and no focused skill exists, add or propose a small local skill for that surface before broad implementation.
 
-For ElephantNote, route JavaScript/Vue/Vite/Vitest/Playwright and renderer bridge work to `../javascript-vue-runtime/SKILL.md`; route Rust/Cargo/Tauri command and `src-tauri` work to `../rust-tauri-runtime/SKILL.md`; route Tauri packaging/window confidence to `../tauri-ci-verifier/SKILL.md`.
+For ElephantNote, route JavaScript/Vue/Vite/Vitest/Playwright and renderer bridge work to `../javascript-vue-runtime/SKILL.md`; route Rust/Cargo/Tauri command and `Elephant/backend/tauri` work to `../rust-tauri-runtime/SKILL.md`; route Tauri packaging/window confidence to `../tauri-ci-verifier/SKILL.md`.
 
 ## CI and verification routing
 
 When the task touches CI, tests, Tauri, filesystem behavior, packaging, or release confidence, load the narrow skill that matches the APEX phase:
 
-| APEX phase | Load these skills when relevant |
-|---|---|
-| Init | `../repo-skill-router/SKILL.md` |
-| Analyze | `../repo-skill-router/SKILL.md`, `../ci-architect/SKILL.md`, `../github-actions-linter/SKILL.md`, `../cross-platform-paths/SKILL.md` |
-| Plan | `../ci-architect/SKILL.md`, `../anti-fake-tests/SKILL.md`, `../tauri-ci-verifier/SKILL.md` |
-| Execute | `../github-actions-linter/SKILL.md`, `../runtime-ci-hardening/SKILL.md`, `../supply-chain-verifier/SKILL.md` |
-| Validate | `../anti-fake-tests/SKILL.md`, `../tauri-ci-verifier/SKILL.md`, `../ci-stability/SKILL.md` |
-| eXamine | `../github-actions-security/SKILL.md`, `../artifact-release-gate/SKILL.md`, `../real-verification/SKILL.md` |
+| APEX phase | Load these skills when relevant                                                                                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Init       | `../repo-skill-router/SKILL.md`                                                                                                      |
+| Analyze    | `../repo-skill-router/SKILL.md`, `../ci-architect/SKILL.md`, `../github-actions-linter/SKILL.md`, `../cross-platform-paths/SKILL.md` |
+| Plan       | `../ci-architect/SKILL.md`, `../anti-fake-tests/SKILL.md`, `../tauri-ci-verifier/SKILL.md`                                           |
+| Execute    | `../github-actions-linter/SKILL.md`, `../runtime-ci-hardening/SKILL.md`, `../supply-chain-verifier/SKILL.md`                         |
+| Validate   | `../anti-fake-tests/SKILL.md`, `../tauri-ci-verifier/SKILL.md`, `../ci-stability/SKILL.md`                                           |
+| eXamine    | `../github-actions-security/SKILL.md`, `../artifact-release-gate/SKILL.md`, `../real-verification/SKILL.md`                          |
 
 For ElephantNote, a green CI is not enough by itself: the selected gate must prove the user-visible or runtime contract touched by the change.
 

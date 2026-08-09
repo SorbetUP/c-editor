@@ -3,7 +3,7 @@ name: ci-stability
 description: >
   Stabilize intermittent CI checks by replacing timing guesses with observable
   readiness checks, isolated test data, and clear cleanup.
-argument-hint: "<unstable-check>"
+argument-hint: '<unstable-check>'
 ---
 
 # CI Stability

@@ -3,7 +3,7 @@ name: elephantnote-search-wiki-graph
 description: >
   Rules for exact search, semantic search, smart search, knowledge chunks,
   concept routing, graph views, clustering, and auto-wiki behavior.
-argument-hint: "<search-wiki-graph-task>"
+argument-hint: '<search-wiki-graph-task>'
 ---
 
 # ElephantNote Search / Wiki / Graph
@@ -21,7 +21,7 @@ Use this skill for exact search, semantic search, smart search, embeddings, know
 
 ## Read first
 
-- `Elephant/back/app/search/**` and `Elephant/back/app/wiki/**`.
+- `Elephant/backend/js/search/**` and `Elephant/backend/js/wiki/**`.
 - `Elephant/shared/knowledge/**`.
 - Graph/wiki/search frontend components and stores.
 - Tests for `searchLibrary`, `ElephantSearchService`, graph helpers, wiki helpers, and concept routing.

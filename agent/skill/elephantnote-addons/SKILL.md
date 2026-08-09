@@ -3,7 +3,7 @@ name: elephantnote-addons
 description: >
   Rules for ElephantNote addons/plugins: real execution model, explicit capabilities,
   UI integration, tests, and no demo-only plugin behavior.
-argument-hint: "<addons-task>"
+argument-hint: '<addons-task>'
 ---
 
 # ElephantNote Addons

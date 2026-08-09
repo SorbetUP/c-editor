@@ -1,0 +1,66 @@
+name: Mobile Knowledge validation
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    paths:
+      - '.github/workflows/mobile-knowledge-validation.yml'
+      - 'Elephant/backend/tauri/Cargo.toml'
+      - 'Elephant/backend/tauri/Cargo.lock'
+      - 'Elephant/backend/tauri/src/addon_services.rs'
+      - 'Elephant/backend/tauri/src/embedded_addon_services.rs'
+      - 'Elephant/backend/tauri/src/lib_min.rs'
+      - 'addons/official/knowledge/**'
+      - 'addons/catalog.json'
+      - 'packs/*.enaddonpack'
+      - 'tests/app/unit/addons/knowledgePhysicalAddon.spec.js'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-core-and-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Materialize official addons
+        run: node build/scripts/sync-elephant-addons.mjs
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.91.0'
+          components: rustfmt
+
+      - name: Check changed Rust formatting
+        run: |
+          rustfmt --edition 2021 --check \
+            Elephant/backend/tauri/src/addon_services.rs \
+            Elephant/backend/tauri/src/embedded_addon_services.rs \
+            addons/official/knowledge/native/src/main.rs \
+            addons/official/knowledge/native/knowledge-core/src/lib.rs \
+            addons/official/knowledge/native/knowledge-core/src/service.rs \
+            addons/official/knowledge/native/knowledge-core/src/wiki_discovery.rs
+
+      - name: Verify committed Tauri lockfile
+        run: |
+          cargo generate-lockfile --manifest-path Elephant/backend/tauri/Cargo.toml
+          git diff --exit-code -- Elephant/backend/tauri/Cargo.lock
+
+      - name: Test reusable Knowledge service
+        run: cargo test --manifest-path addons/official/knowledge/native/knowledge-core/Cargo.toml
+
+      - name: Check desktop sidecar adapter
+        run: cargo check --manifest-path addons/official/knowledge/native/Cargo.toml --all-targets
+
+      # Full Tauri integration is validated by the cross-platform PR Build.
+      # The Android target, bundled SQLite and APK are validated by android-apk.yml.

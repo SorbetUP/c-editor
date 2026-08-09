@@ -4,7 +4,7 @@ description: >
   Harden GitHub Actions workflows against secret leaks, privilege escalation,
   unsafe PR execution, and supply-chain attacks. Use for CI security review and
   APEX eXamine when workflow files change.
-argument-hint: "<workflow-security-task>"
+argument-hint: '<workflow-security-task>'
 ---
 
 # GitHub Actions Security

@@ -24,4 +24,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
       - name: Validate dependency licenses
-        run: pnpm run validate-licenses
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm run validate-licenses 2>&1 | tee license-validation.txt
+      - name: Upload license validation output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-validation-output
+          path: license-validation.txt
+          if-no-files-found: ignore

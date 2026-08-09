@@ -3,7 +3,7 @@ name: supply-chain-verifier
 description: >
   Review dependency, lockfile, license, audit, CodeQL, Dependabot, binary,
   and generated-artifact changes for ElephantNote.
-argument-hint: "<dependency-or-release-task>"
+argument-hint: '<dependency-or-release-task>'
 ---
 
 # Supply Chain Verifier

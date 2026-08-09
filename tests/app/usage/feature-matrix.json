@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "policy": {
+    "minimumScenariosPerFeature": 3,
+    "requiredScenarioKinds": [
+      "happy-path",
+      "persistence",
+      "failure-recovery"
+    ],
+    "failOnMissingFeature": true,
+    "failOnUnknownOfficialAddon": true,
+    "failOnConsoleError": true,
+    "failOnPageError": true,
+    "failOnUnhandledCommand": true,
+    "retainRawLogs": true,
+    "retainStructuredLogs": true,
+    "redactCredentialValuesOnly": true
+  },
+  "coreFeatures": [
+    {
+      "id": "core.startup-and-vaults",
+      "name": "Startup and vault lifecycle",
+      "scenarios": [
+        { "id": "startup-render", "kind": "happy-path" },
+        { "id": "vault-chooser-first-run", "kind": "failure-recovery" },
+        { "id": "reload-preserves-vault", "kind": "persistence" }
+      ]
+    },
+    {
+      "id": "core.library",
+      "name": "Library layout, ordering and repeated navigation",
+      "scenarios": [
+        { "id": "library-layout-roundtrip", "kind": "happy-path" },
+        { "id": "library-title-sort", "kind": "persistence" },
+        { "id": "navigation-stress", "kind": "failure-recovery" }
+      ]
+    },
+    {
+      "id": "core.sidebar",
+      "name": "Sidebar visibility and recovery",
+      "scenarios": [
+        { "id": "sidebar-hide-show", "kind": "happy-path" },
+        { "id": "reload-preserves-vault", "kind": "persistence" },
+        { "id": "navigation-stress", "kind": "failure-recovery" }
+      ]
+    },
+    {
+      "id": "core.search",
+      "name": "Search results, empty state and repeated navigation",
+      "scenarios": [
+        { "id": "search-roundtrip", "kind": "happy-path" },
+        { "id": "reload-preserves-vault", "kind": "persistence" },
+        { "id": "search-no-results", "kind": "failure-recovery" }
+      ]
+    },
+    {
+      "id": "core.settings-and-theme",
+      "name": "Settings search, theme application and dialog recovery",
+      "scenarios": [
+        { "id": "settings-roundtrip", "kind": "happy-path" },
+        { "id": "theme-mode-roundtrip", "kind": "persistence" },
+        { "id": "navigation-stress", "kind": "failure-recovery" }
+      ]
+    },
+    {
+      "id": "core.editor",
+      "name": "Rust editor opening, editing, Enter handling, autosave and close",
+      "scenarios": [
+        { "id": "open-existing-note", "kind": "happy-path" },
+        { "id": "editor-write-autosave-preview", "kind": "persistence" },
+        { "id": "note-close-roundtrip", "kind": "failure-recovery" }
+      ]
+    },
+    {
+      "id": "core.note-state",
+      "name": "Note state, pinning and library preview synchronization",
+      "scenarios": [
+        { "id": "pin-unpin-note", "kind": "happy-path" },
+        { "id": "editor-write-autosave-preview", "kind": "persistence" },
+        { "id": "note-close-roundtrip", "kind": "failure-recovery" }
+      ]
+    },
+    {
+      "id": "core.addon-platform",
+      "name": "Addon installation, activation, persistence and visible failure handling",
+      "scenarios": [
+        { "id": "addon-install-enable-action", "kind": "happy-path" },
+        { "id": "official-addon-reload-restores-state", "kind": "persistence" },
+        { "id": "official-addon-failure-is-visible", "kind": "failure-recovery" }
+      ]
+    }
+  ],
+  "officialAddons": [
+    { "id": "elephant.dashboard", "runtime": "renderer" },
+    { "id": "elephant.ai", "runtime": "renderer" },
+    { "id": "elephant.ai-chat", "runtime": "renderer" },
+    { "id": "elephant.ai-search", "runtime": "renderer" },
+    { "id": "elephant.ai-ocr", "runtime": "service" },
+    { "id": "elephant.wiki", "runtime": "renderer" },
+    { "id": "elephant.graph", "runtime": "renderer" },
+    { "id": "elephant.knowledge", "runtime": "renderer" },
+    { "id": "elephant.open-models", "runtime": "service" },
+    { "id": "elephant.codex-connection", "runtime": "service" },
+    { "id": "elephant.sync", "runtime": "service" },
+    { "id": "elephant.calendar", "runtime": "renderer" },
+    { "id": "elephant.sites", "runtime": "renderer" },
+    { "id": "elephant.code-execution", "runtime": "service" },
+    { "id": "elephant.google-keep-import", "runtime": "renderer" },
+    { "id": "elephant.recently-edited", "runtime": "renderer" }
+  ],
+  "officialAddonScenarios": [
+    { "id": "official-addon-install-enable-contribute", "kind": "happy-path" },
+    { "id": "official-addon-reload-restores-state", "kind": "persistence" },
+    { "id": "official-addon-failure-is-visible", "kind": "failure-recovery" },
+    { "id": "official-addon-disable-uninstall-cleans-up", "kind": "failure-recovery" }
+  ]
+}

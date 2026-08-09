@@ -4,7 +4,7 @@ description: >
   Prevent placeholder or surface-only features. A feature is real only when the
   user-visible path is connected to real state, persistence, runtime behavior,
   errors, and tests.
-argument-hint: "<feature-or-fix>"
+argument-hint: '<feature-or-fix>'
 ---
 
 # Real Implementation

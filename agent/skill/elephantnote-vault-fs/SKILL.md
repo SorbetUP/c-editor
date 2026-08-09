@@ -3,7 +3,7 @@ name: elephantnote-vault-fs
 description: >
   Rules for vault tree operations, hidden folders, file safety, create/rename/move/delete,
   drag-and-drop, and disk/UI consistency.
-argument-hint: "<vault-filesystem-task>"
+argument-hint: '<vault-filesystem-task>'
 ---
 
 # ElephantNote Vault Filesystem
@@ -21,7 +21,7 @@ Use this skill for the vault explorer, folder tree, note/folder creation, rename
 
 ## Read first
 
-- Vault backend: `Elephant/back/app/vaults.js` and Tauri vault commands.
+- Vault backend: `Elephant/backend/js/vaults.js` and Tauri vault commands.
 - Frontend stores/components: `vaultStore`, `navigationStore`, `SidebarTreeEntry`, drag/drop utilities.
 - Shared path/workspace helpers in `Elephant/shared/**`.
 - Existing file-safety and vault tests.
