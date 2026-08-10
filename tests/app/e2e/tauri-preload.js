@@ -393,6 +393,18 @@ const invoke = async (command, payload = {}) => {
       if (!fs.existsSync(fullPath)) writeMarkdown(relativePath, '')
       return { path: relativePath, fullPath, title: params.title || path.basename(filename, '.md') }
     }
+    case 'tauri_folders_create': {
+      const requestedPath = normalizeSlashes(params.relativePath || params.relative_path || 'New Folder')
+      const fullPath = uniquePath(resolveVaultPath(requestedPath))
+      fs.mkdirSync(fullPath, { recursive: true })
+      const root = vaultRoot()
+      const relativePath = normalizeSlashes(path.relative(root, fullPath))
+      const parentPath = normalizeSlashes(path.dirname(relativePath)).replace(/^\.$/, '')
+      return {
+        folder: entryForPath(root, fullPath),
+        entries: listDirectory(parentPath)
+      }
+    }
     case 'tauri_calendar_list':
       return []
     case 'tauri_sources_list':
