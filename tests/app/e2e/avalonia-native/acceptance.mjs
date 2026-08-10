@@ -481,6 +481,59 @@ const terminateBackgroundBundle = (bundleDirectory) => {
   spawnSync('pkill', ['-TERM', '-f', executable], { encoding: 'utf8' })
 }
 
+const requireNativeState = (state, label) => {
+  if (!state || state.error) throw new Error(`${label} failed: ${state?.error || 'no state returned'}`)
+  return state
+}
+
+const runNativeControlAcceptance = async (appWindow, fixture, editToken) => {
+  const client = await connectNativeAcceptance(fixture.socketPath)
+  report.evidence.controlMode = 'native-ui-thread-command-channel'
+  log('acceptance.channel.connected', { socket: fixture.socketPath })
+  try {
+    const initial = requireNativeState(await client.command('state'), 'Initial native state')
+    if (!initial.muyaReady) throw new Error('Muya was not ready on the native UI thread.')
+    if (appWindow) captureNativeWindow(appWindow, 'initial')
+
+    const opened = requireNativeState(
+      await client.command('open-note', { path: noteName }),
+      'Native note open')
+    if (opened.openedNotePath !== noteName) throw new Error(`Native note path mismatch: ${opened.openedNotePath}`)
+    log('note.opened.native-command', { note: noteName })
+
+    const edited = requireNativeState(
+      await client.command('append-text', { text: editToken }),
+      'Native Muya edit')
+    if (!edited.muyaReady || edited.contentLength <= initial.contentLength) {
+      throw new Error('Native Muya edit did not change the document snapshot.')
+    }
+    log('keyboard.edit.native-command', { token: editToken })
+
+    requireNativeState(await client.command('save-note'), 'Native note save')
+    log('keyboard.save.native-command', { command: 'save-note' })
+    await waitForFileContent(fixture.notePath, editToken, 'saved Markdown content')
+    report.evidence.savedContent = readFileSync(fixture.notePath, 'utf8')
+    log('filesystem.save.verified', { notePath: fixture.notePath })
+
+    const backed = requireNativeState(await client.command('back-to-notes'), 'Native return to notes')
+    if (backed.openedNotePath !== '') throw new Error('Native back action did not close the note.')
+    log('note.closed.native-command', { action: 'back-to-notes' })
+
+    const reopened = requireNativeState(
+      await client.command('open-note', { path: noteName }),
+      'Native note reopen')
+    if (reopened.openedNotePath !== noteName || !reopened.muyaReady) {
+      throw new Error('Native reopen did not restore the Muya document.')
+    }
+    await waitForFileContent(fixture.notePath, editToken, 'persisted Markdown content after reopen')
+    report.evidence.reopenedContent = readFileSync(fixture.notePath, 'utf8')
+    log('note.reopened.native-command', { contentVerifiedFromFilesystem: true })
+    if (appWindow) captureNativeWindow(appWindow, 'reopened')
+  } finally {
+    client.close()
+  }
+}
+
 const run = async () => {
   if (process.platform !== 'darwin') {
     finish('NOT_RUN', `GUI_UNAVAILABLE: native Avalonia window automation is implemented for macOS only (platform=${process.platform})`)
