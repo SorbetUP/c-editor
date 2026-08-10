@@ -12,6 +12,7 @@ import { closeSync, cpSync, existsSync, mkdirSync, mkdtempSync, openSync, readFi
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
+import { createConnection } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 
 const scriptDirectory = dirname(new URL(import.meta.url).pathname)
@@ -76,6 +77,60 @@ const runAppleScript = (script) => {
   }
 }
 
+class NativeAcceptanceClient {
+  constructor(socket) {
+    this.socket = socket
+    this.buffer = ''
+    this.pending = []
+    socket.setEncoding('utf8')
+    socket.on('data', (chunk) => {
+      this.buffer += chunk
+      let newline
+      while ((newline = this.buffer.indexOf('\n')) >= 0) {
+        const line = this.buffer.slice(0, newline)
+        this.buffer = this.buffer.slice(newline + 1)
+        const request = this.pending.shift()
+        if (!request) continue
+        try { request.resolve(JSON.parse(line)) }
+        catch (error) { request.reject(error) }
+      }
+    })
+    socket.on('error', (error) => {
+      while (this.pending.length) this.pending.shift().reject(error)
+    })
+  }
+
+  command(command, payload = {}) {
+    return new Promise((resolve, reject) => {
+      this.pending.push({
+        resolve: (response) => {
+          if (!response.ok) reject(new Error(response.error || `Native acceptance command failed: ${command}`))
+          else resolve(response.result)
+        },
+        reject
+      })
+      this.socket.write(`${JSON.stringify({ command, payload })}\n`)
+    })
+  }
+
+  close() { this.socket.end() }
+}
+
+const connectNativeAcceptance = async (socketPath) => waitFor(() => new Promise((resolve) => {
+  const socket = createConnection(socketPath)
+  let connected = false
+  socket.once('connect', () => {
+    connected = true
+    resolve(new NativeAcceptanceClient(socket))
+  })
+  socket.once('error', () => {
+    if (!connected) {
+      socket.destroy()
+      resolve(false)
+    }
+  })
+}), 'native acceptance control channel')
+
 const waitFor = async (predicate, label, maxWait = timeoutMs) => {
   const started = Date.now()
   let lastError = null
@@ -96,6 +151,7 @@ const commandExists = (command) => spawnSync('sh', ['-c', `command -v ${command}
 const prepareFixture = () => {
   const configDirectory = join(artifactRoot, 'config')
   const vaultDirectory = join(artifactRoot, 'vault')
+  const socketPath = join(artifactRoot, 'acceptance.sock')
   mkdirSync(configDirectory, { recursive: true })
   mkdirSync(vaultDirectory, { recursive: true })
   writeFileSync(join(vaultDirectory, noteName), initialMarkdown)
@@ -110,8 +166,9 @@ const prepareFixture = () => {
   report.evidence.fixtureVault = vaultDirectory
   report.evidence.note = join(vaultDirectory, noteName)
   report.evidence.config = configDirectory
+  report.evidence.controlSocket = socketPath
   log('fixture.prepared', { vaultDirectory, note: noteName })
-  return { configDirectory, vaultDirectory, notePath: join(vaultDirectory, noteName) }
+  return { configDirectory, vaultDirectory, notePath: join(vaultDirectory, noteName), socketPath }
 }
 
 const findRuntime = () => {
@@ -136,11 +193,12 @@ const findRuntime = () => {
   throw new Error(`No Avalonia runtime found. Build the app or set AVALONIA_ACCEPTANCE_EXECUTABLE. Expected ${publishedExecutable}`)
 }
 
-const prepareBackgroundBundle = (configDirectory, stdoutPath, stderrPath) => {
+const prepareBackgroundBundle = (configDirectory, socketPath, stdoutPath, stderrPath) => {
   const bundleDirectory = join(artifactRoot, 'ElephantNote.Avalonia.app')
   const contentsDirectory = join(bundleDirectory, 'Contents')
   const executableDirectory = join(contentsDirectory, 'MacOS')
   const plistPath = configDirectory.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+  const plistSocket = socketPath.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   mkdirSync(executableDirectory, { recursive: true })
   cpSync(resolve(publishedExecutable, '..'), executableDirectory, { recursive: true, force: true })
   writeFileSync(join(contentsDirectory, 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
@@ -157,17 +215,18 @@ const prepareBackgroundBundle = (configDirectory, stdoutPath, stderrPath) => {
     <key>ELEPHANTNOTE_BACKGROUND</key><string>1</string>
     <key>ELEPHANTNOTE_ACCESSIBILITY_AUTOMATION</key><string>1</string>
     <key>ELEPHANTNOTE_CONFIG_DIR</key><string>${plistPath}</string>
+    <key>ELEPHANTNOTE_ACCEPTANCE_SOCKET</key><string>${plistSocket}</string>
   </dict>
 </dict></plist>
 `)
   return bundleDirectory
 }
 
-const launchRuntime = (runtime, configDirectory) => {
+const launchRuntime = (runtime, configDirectory, socketPath) => {
   const stdoutPath = join(artifactRoot, 'avalonia.stdout.log')
   const stderrPath = join(artifactRoot, 'avalonia.stderr.log')
   if (runtime.kind === 'macos-background-bundle') {
-    const bundleDirectory = prepareBackgroundBundle(configDirectory, stdoutPath, stderrPath)
+    const bundleDirectory = prepareBackgroundBundle(configDirectory, socketPath, stdoutPath, stderrPath)
     writeFileSync(stdoutPath, '')
     writeFileSync(stderrPath, '')
     const openResult = spawnSync('open', ['-g', '-n', bundleDirectory], {
@@ -176,6 +235,7 @@ const launchRuntime = (runtime, configDirectory) => {
         ...process.env,
         ELEPHANTNOTE_CONFIG_DIR: configDirectory,
         ELEPHANTNOTE_BACKGROUND: '1',
+        ELEPHANTNOTE_ACCEPTANCE_SOCKET: socketPath,
         AVALONIA_TELEMETRY_OPTOUT: '1',
         DOTNET_CLI_TELEMETRY_OPTOUT: '1'
       }
@@ -197,7 +257,8 @@ const launchRuntime = (runtime, configDirectory) => {
       ...process.env,
       AVALONIA_TELEMETRY_OPTOUT: '1',
       DOTNET_CLI_TELEMETRY_OPTOUT: '1',
-      ELEPHANTNOTE_CONFIG_DIR: configDirectory
+      ELEPHANTNOTE_CONFIG_DIR: configDirectory,
+      ELEPHANTNOTE_ACCEPTANCE_SOCKET: socketPath
     },
     stdio: ['ignore', stdout, stderr]
   })

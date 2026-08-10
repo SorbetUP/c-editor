@@ -63,11 +63,15 @@ test.describe('production UI regression paths', () => {
     try {
       const { page, fixture } = context
       const create = page.getByRole('button', { name: 'Create', exact: true })
-      const foldersBefore = await page.locator('.en-note-card.is-folder').count()
+      const foldersBefore = fs.readdirSync(fixture.vaultRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+        .length
 
       await create.click()
       await page.getByRole('menu', { name: 'Create' }).getByRole('menuitem', { name: /Folder/ }).click()
-      await expect.poll(() => page.locator('.en-note-card.is-folder').count()).toBe(foldersBefore + 1)
+      await expect.poll(() => fs.readdirSync(fixture.vaultRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+        .length).toBe(foldersBefore + 1)
 
       await create.click()
       await page.getByRole('menu', { name: 'Create' }).getByRole('menuitem', { name: /Note/ }).click()
