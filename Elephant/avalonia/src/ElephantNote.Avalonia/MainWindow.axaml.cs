@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -9,6 +10,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using ElephantNote.Avalonia.Domain;
 using ElephantNote.Avalonia.Muya;
 using ElephantNote.Avalonia.Services;
@@ -31,6 +33,7 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
     private string _theme = "light";
     private bool _autoSave;
     private bool _muyaEditorAvailable;
+    private NativeAcceptanceServer? _acceptanceServer;
     private string _statusText = "Ready";
     private string _errorText = "";
     private static bool IsBackgroundLaunch =>
@@ -123,12 +126,120 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
         RequestedThemeVariant = _theme == "dark" ? ThemeVariant.Dark : ThemeVariant.Light;
         ApplyThemeResources();
         Opened += OnOpened;
-        Closed += async (_, _) => await _muyaHost.DisposeAsync();
+        Closed += async (_, _) =>
+        {
+            if (_acceptanceServer is not null) await _acceptanceServer.DisposeAsync();
+            await _muyaHost.DisposeAsync();
+        };
     }
 
     private async void OnOpened(object? sender, EventArgs e)
     {
         await RunActionAsync("app.load", LoadAsync);
+        var socketPath = Environment.GetEnvironmentVariable("ELEPHANTNOTE_ACCEPTANCE_SOCKET");
+        if (string.IsNullOrWhiteSpace(socketPath)) return;
+
+        var requestId = AppLog.Start("acceptance.server", $"socket={socketPath}");
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            _acceptanceServer = NativeAcceptanceServer.Start(socketPath, HandleAcceptanceCommandAsync);
+            AppLog.Complete("acceptance.server", requestId, timer, "ready=true");
+        }
+        catch (Exception error)
+        {
+            AppLog.Fail("acceptance.server", requestId, timer, error);
+            ErrorText = $"Native acceptance channel could not start: {error.Message}";
+        }
+    }
+
+    private Task<object?> HandleAcceptanceCommandAsync(JsonElement request)
+    {
+        var completion = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try { completion.SetResult(await ExecuteAcceptanceCommandAsync(request)); }
+            catch (Exception error) { completion.SetException(error); }
+        });
+        return completion.Task;
+    }
+
+    private async Task<object?> ExecuteAcceptanceCommandAsync(JsonElement request)
+    {
+        var command = request.TryGetProperty("command", out var rawCommand)
+            ? rawCommand.GetString()
+            : null;
+        var payload = request.TryGetProperty("payload", out var rawPayload) ? rawPayload : default;
+        return command switch
+        {
+            "state" => AcceptanceSnapshot(),
+            "open-note" => await AcceptanceOpenNoteAsync(RequirePayloadString(payload, "path")),
+            "append-text" => await AcceptanceAppendTextAsync(RequirePayloadString(payload, "text")),
+            "set-content" => await AcceptanceSetContentAsync(RequirePayloadString(payload, "content")),
+            "save-note" => await AcceptanceSaveNoteAsync(),
+            "back-to-notes" => await AcceptanceBackToNotesAsync(),
+            "focus-editor" => new { focused = await _muyaHost.FocusAsync(), muyaReady = _muyaEditorAvailable },
+            _ => throw new InvalidDataException($"Unknown native acceptance command '{command}'.")
+        };
+    }
+
+    private async Task<object> AcceptanceOpenNoteAsync(string relativePath)
+    {
+        if (Path.IsPathRooted(relativePath) || !relativePath.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("Acceptance notes must be relative Markdown paths.");
+        var entry = new VaultEntry(
+            relativePath.Replace('\\', '/'),
+            Path.GetFileNameWithoutExtension(relativePath),
+            "",
+            false,
+            DateTime.UtcNow);
+        await OpenEntryAsync(entry);
+        return AcceptanceSnapshot();
+    }
+
+    private async Task<object> AcceptanceAppendTextAsync(string text)
+    {
+        if (!_muyaEditorAvailable) throw new InvalidOperationException("Muya is not ready for acceptance editing.");
+        await _muyaHost.SetMarkdownAsync(($"{_muyaHost.Content ?? NoteContent}{text}"));
+        return AcceptanceSnapshot();
+    }
+
+    private async Task<object> AcceptanceSetContentAsync(string content)
+    {
+        if (!_muyaEditorAvailable) throw new InvalidOperationException("Muya is not ready for acceptance editing.");
+        await _muyaHost.SetMarkdownAsync(content);
+        return AcceptanceSnapshot();
+    }
+
+    private async Task<object> AcceptanceSaveNoteAsync()
+    {
+        await SaveCurrentNoteAsync();
+        return AcceptanceSnapshot();
+    }
+
+    private async Task<object> AcceptanceBackToNotesAsync()
+    {
+        await ReturnToNotesAsync();
+        return AcceptanceSnapshot();
+    }
+
+    private object AcceptanceSnapshot() => new
+    {
+        activeSurface = _activeSurface,
+        openedNotePath = _openedNotePath,
+        muyaReady = _muyaEditorAvailable,
+        contentLength = (_muyaHost.Content ?? NoteContent).Length,
+        status = StatusText,
+        error = HasError ? ErrorText : null
+    };
+
+    private static string RequirePayloadString(JsonElement payload, string propertyName)
+    {
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.String)
+            throw new InvalidDataException($"Acceptance payload requires string '{propertyName}'.");
+        return value.GetString() ?? throw new InvalidDataException($"Acceptance payload '{propertyName}' is null.");
     }
 
     private async Task LoadAsync()
@@ -295,15 +406,17 @@ public sealed partial class MainWindow : Window, INotifyPropertyChanged
 
     private async void SaveNoteClick(object? sender, RoutedEventArgs e)
     {
-        await RunActionAsync("note.save", async () =>
-        {
-            if (_activeVault is null || string.IsNullOrWhiteSpace(_openedNotePath)) return;
-            var content = _muyaEditorAvailable ? _muyaHost.Content ?? NoteContent : NoteContent;
-            NoteContent = content;
-            await _repository.SaveNoteAsync(_activeVault, _openedNotePath, content);
-            StatusText = $"Saved {OpenedNotePath}";
-            await RefreshEntriesAsync();
-        });
+        await RunActionAsync("note.save", SaveCurrentNoteAsync);
+    }
+
+    private async Task SaveCurrentNoteAsync()
+    {
+        if (_activeVault is null || string.IsNullOrWhiteSpace(_openedNotePath)) return;
+        var content = _muyaEditorAvailable ? _muyaHost.Content ?? NoteContent : NoteContent;
+        NoteContent = content;
+        await _repository.SaveNoteAsync(_activeVault, _openedNotePath, content);
+        StatusText = $"Saved {OpenedNotePath}";
+        await RefreshEntriesAsync();
     }
 
     private async void MuyaSaveRequested(object? sender, MuyaSaveRequestedEventArgs args)
