@@ -1,4 +1,4 @@
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { open } from '@tauri-apps/plugin-dialog'
 import log from '@/platform/runtimeLogShim'
@@ -12,6 +12,7 @@ const isHiddenAddonId = (id) => INTERNAL_ADDON_IDS.has(id) || OBSOLETE_ADDON_IDS
 const isOfficialId = (id = '') => String(id).startsWith('elephant.')
 const isOfficialManifest = (manifest = {}) => manifest.official === true || manifest.source === 'official' || isOfficialId(manifest.id)
 const isOfficialCatalogEntry = (entry = {}) => entry.official === true || entry.source === 'official' || isOfficialId(entry.id)
+const CATALOG_TIMEOUT_MS = 8000
 
 const persistExternalAddonState = async (addonId, enabled) => {
   const invoke = globalThis?.__TAURI__?.core?.invoke
@@ -121,10 +122,23 @@ export const useAddonsSettings = () => {
   }
 
   const refreshCatalog = async () => {
+    let timeoutId
     try {
-      await addonsStore.loadAddonCatalog()
+      await Promise.race([
+        addonsStore.loadAddonCatalog(),
+        new Promise((_, reject) => {
+          timeoutId = globalThis.setTimeout(() => reject(new Error(
+            'Addon catalogue unavailable or offline. Installed addons remain available.'
+          )), CATALOG_TIMEOUT_MS)
+        })
+      ])
     } catch (error) {
-      showMessage(error instanceof Error ? error.message : String(error), true)
+      const text = error instanceof Error ? error.message : String(error)
+      addonsStore.catalogError = text
+      showMessage(text, true)
+      log.warn('[settings:addons] catalogue:unavailable', { error: text })
+    } finally {
+      if (timeoutId) globalThis.clearTimeout(timeoutId)
     }
   }
 
@@ -287,10 +301,9 @@ export const useAddonsSettings = () => {
   onMounted(async () => {
     await removeObsoleteAddons()
     if (!communityConsentLoaded.value) await addonsStore.loadCommunityAddonsConsent()
-    await Promise.allSettled([
-      refreshCatalog(),
-      communityAddonsEnabled.value ? addonsStore.loadTrustedState() : Promise.resolve()
-    ])
+    await nextTick()
+    void refreshCatalog()
+    if (communityAddonsEnabled.value) void addonsStore.loadTrustedState()
     log.info('[settings:addons] mounted', {
       registered: items.value.map((addon) => addon.manifest.id),
       available: availableAddons.value.map((addon) => addon.id),

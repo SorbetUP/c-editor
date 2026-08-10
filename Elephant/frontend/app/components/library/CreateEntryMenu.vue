@@ -27,8 +27,18 @@
         role="menuitem"
         @click="select(entry.key)"
       >
+        <img
+          v-if="entry.key === 'drawing'"
+          class="en-create-menu-icon en-excalidraw-logo"
+          data-testid="excalidraw-logo"
+          data-excalidraw-asset="shared-muya-icon"
+          :src="excalidrawLogo"
+          alt=""
+          aria-hidden="true"
+        >
         <component
           :is="entry.icon"
+          v-else
           class="en-create-menu-icon"
           aria-hidden="true"
         />
@@ -44,6 +54,7 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { FilePlus2, FolderPlus, PenLine } from '@lucide/vue'
+import excalidrawLogo from '../../../src/muya/lib/assets/icons/excalidraw.svg?url'
 
 const props = defineProps({
   disabled: { type: Boolean, default: false },
@@ -166,9 +177,14 @@ onBeforeUnmount(() => {
 
 .en-create-menu-mobile {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
   z-index: 1200;
+}
+
+.en-excalidraw-logo {
+  border-radius: 6px;
+  object-fit: contain;
 }
 
 .en-create-menu-mobile .en-create-menu-popover {

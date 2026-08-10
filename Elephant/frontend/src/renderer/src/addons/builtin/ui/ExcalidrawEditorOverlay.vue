@@ -7,6 +7,7 @@
     :initial-blob="initialBlob"
     :save-mode="saveMode"
     :insert-on-save="insertOnSave"
+    :ask-name-on-close="askNameOnClose"
     @close="close"
     @save="save"
   />
@@ -17,6 +18,7 @@ import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import bus from '@/bus'
 import { useEditorStore } from '@/store/editor'
+import { elephantnoteClient } from 'elephant-front/services/elephantnoteClient'
 import ExcalidrawDialog from 'elephant-front/components/editor/ExcalidrawDialog.vue'
 import { useVaultStore } from 'elephant-front/stores/vaultStore'
 import { getExcalidrawPreviewPath, getExcalidrawScenePath } from 'elephant-front/services/excalidraw'
@@ -39,6 +41,9 @@ const initialBlob = ref(null)
 const targetPath = ref('')
 const scenePath = ref('')
 const insertOnSave = ref(false)
+const askNameOnClose = ref(false)
+const createNoteOnSave = ref(false)
+const noteDirectoryPath = ref('')
 const fileName = ref('excalidraw.png')
 const title = ref('Excalidraw')
 const saveMode = ref('png')
@@ -88,11 +93,20 @@ const log = (level, message, details = {}) => {
 const normalizeSlashPath = (pathname = '') => String(pathname || '').replace(/\\/g, '/')
 const stripQueryAndHash = (value = '') => String(value || '').split(/[?#]/)[0]
 const decodeSource = (value = '') => {
-  try {
-    return decodeURI(stripQueryAndHash(value))
-  } catch {
-    return stripQueryAndHash(value)
+  let decoded = stripQueryAndHash(value)
+  // Some older renderer passes persisted the same Markdown URL more than
+  // once. Decode only at this boundary and keep the loop bounded so malformed
+  // user content cannot turn path resolution into an unbounded operation.
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    try {
+      const next = decodeURI(decoded)
+      if (next === decoded) break
+      decoded = next
+    } catch {
+      break
+    }
   }
+  return decoded
 }
 
 const resolveDrawingPath = (source = '') => {
@@ -248,7 +262,7 @@ const targetAssetPath = async (preferredName = '') => {
   return destination
 }
 
-const open = async ({ markdown, fileName: requestedName, title: requestedTitle, saveMode: requestedMode, insertOnSave: shouldInsert } = {}) => {
+const open = async ({ markdown, fileName: requestedName, title: requestedTitle, saveMode: requestedMode, insertOnSave: shouldInsert, askNameOnClose: shouldAskName, createNoteOnSave: shouldCreateNote } = {}) => {
   try {
     const nextName = assetName(requestedName || `excalidraw-${Date.now()}.png`)
     const nextTarget = await targetAssetPath(nextName)
@@ -258,12 +272,18 @@ const open = async ({ markdown, fileName: requestedName, title: requestedTitle, 
     fileName.value = nextName
     saveMode.value = requestedMode || 'png'
     insertOnSave.value = Boolean(shouldInsert)
+    askNameOnClose.value = Boolean(shouldAskName)
+    createNoteOnSave.value = Boolean(shouldCreateNote)
+    noteDirectoryPath.value = vaultStore.currentPath || ''
     initialBlob.value = markdown instanceof Blob ? markdown : null
     isOpen.value = true
     log('info', 'editor opened', {
       targetPath: nextTarget,
       scenePath: scenePath.value,
       insertOnSave: insertOnSave.value,
+      askNameOnClose: askNameOnClose.value,
+      createNoteOnSave: createNoteOnSave.value,
+      noteDirectoryPath: noteDirectoryPath.value,
       initialBlobSize: initialBlob.value?.size || 0
     })
   } catch (error) {
@@ -288,7 +308,7 @@ const openFromImage = async (src) => {
     if (!previewPath) throw new Error(`Excalidraw preview is unavailable: ${rawPreviewPath}`)
     const nextScenePath = getExcalidrawScenePath(previewPath)
     const sceneExists = await pathExists(nextScenePath)
-    const previewExists = sceneExists ? true : await pathExists(previewPath)
+    const previewExists = await pathExists(previewPath)
     const blob = sceneExists
       ? await readBlob(nextScenePath, 'application/vnd.excalidraw+json')
       : previewExists ? await readBlob(previewPath) : null
@@ -356,13 +376,74 @@ const appendPreviewToNote = (previewPath, resolvedName) => {
   return true
 }
 
-const save = async ({ imageBlob, blob, sceneBlob, fileName: requestedName } = {}) => {
+const drawingNoteTitle = (value = '') => sanitizeAssetName(
+  String(value || '').replace(/\.png$/i, '').replace(/\.excalidraw$/i, ''),
+  'Drawing'
+)
+
+const drawingAssetName = (value = '') => {
+  const normalized = assetName(value)
+  return /^excalidraw-/i.test(normalized) ? normalized : `excalidraw-${normalized}`
+}
+
+const createDrawingNote = async (previewPath, resolvedName) => {
+  const title = drawingNoteTitle(resolvedName)
+  const relativePath = noteDirectoryPath.value || ''
+  const result = await elephantnoteClient.notes.create({
+    relativePath,
+    filename: `${title}.md`,
+    title
+  })
+  const notePath = result?.note?.path
+  if (!notePath) throw new Error('The drawing note backend did not return a note path.')
+
+  const vaultRoot = vaultStore.activeVault?.path || ''
+  const noteDirectory = vaultRoot ? window.path.join(vaultRoot, relativePath) : ''
+  const imageSource = toMarkdownImageSource(previewPath, noteDirectory)
+  const noteImageSource = imageSource.startsWith(`${ELEPHANTNOTE_ASSETS_DIR}/`)
+    ? `./${imageSource}`
+    : imageSource
+  const escapedTitle = title.replace(/"/g, '\\"')
+  const markdown = [
+    '---',
+    `title: "${escapedTitle}"`,
+    'type: "drawing"',
+    'tags: []',
+    '---',
+    '',
+    `# ${title}`,
+    '',
+    `![Excalidraw: ${title}](${noteImageSource})`,
+    ''
+  ].join('\n')
+  await elephantnoteClient.notes.write({ relativePath: notePath, markdown })
+
+  const entries = await elephantnoteClient.directory.list({
+    relativePath,
+    includePreview: true
+  })
+  if (vaultStore.currentPath === relativePath) {
+    vaultStore.entries = Array.isArray(entries) ? entries : vaultStore.entries
+    if (!relativePath) vaultStore.rootEntries = vaultStore.entries
+  }
+  log('info', 'drawing note created', {
+    notePath,
+    relativePath,
+    previewPath,
+    title,
+    entryCount: Array.isArray(entries) ? entries.length : 0
+  })
+  return notePath
+}
+
+const save = async ({ imageBlob, blob, sceneBlob, fileName: requestedName, onError } = {}) => {
   const writableImage = imageBlob || blob
   if (!writableImage) throw new Error('Excalidraw did not provide an image payload.')
   const resolvedName = assetName(requestedName || fileName.value)
-  const destination = targetPath.value && window.path.basename(targetPath.value) === resolvedName
+  const assetNameForSave = createNoteOnSave.value ? drawingAssetName(resolvedName) : resolvedName
+  const destination = targetPath.value && window.path.basename(targetPath.value) === assetNameForSave
     ? targetPath.value
-    : await targetAssetPath(resolvedName)
+    : await targetAssetPath(assetNameForSave)
   const destinationScene = getExcalidrawScenePath(destination)
 
   log('info', 'save:start', {
@@ -381,10 +462,14 @@ const save = async ({ imageBlob, blob, sceneBlob, fileName: requestedName } = {}
     scenePath.value = destinationScene
     fileName.value = resolvedName
     const inserted = insertOnSave.value ? appendPreviewToNote(destination, resolvedName) : false
+    const notePath = createNoteOnSave.value
+      ? await createDrawingNote(destination, resolvedName)
+      : ''
     log('info', 'save:success', {
       destination,
       destinationScene,
       inserted,
+      notePath: notePath || null,
       imageSize: writableImage?.size || 0,
       sceneSize: sceneBlob?.size || 0
     })
@@ -397,6 +482,10 @@ const save = async ({ imageBlob, blob, sceneBlob, fileName: requestedName } = {}
       destinationScene,
       error: errorDetails(error)
     })
+    if (typeof onError === 'function') {
+      onError(error)
+      return
+    }
     throw error
   }
 }

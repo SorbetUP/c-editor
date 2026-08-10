@@ -64,6 +64,9 @@ const english = {
     drawingPlaceholder: 'drawing',
     save: 'Save drawing',
     cancel: 'Cancel drawing',
+    namePromptTitle: 'Name your drawing',
+    namePromptDescription: 'Choose a name to save this drawing as a note in the current folder.',
+    namePromptRequired: 'Enter a name before saving.',
     saving: 'Saving drawing…',
     failedTitle: 'Excalidraw failed to open.',
     failedSave: 'The drawing could not be saved.',
@@ -82,7 +85,7 @@ const french = {
   navigation: { appearance: 'Apparence', editor: 'Éditeur', vaults: 'Coffres', sync: 'Synchronisation', ai: 'IA', sites: 'Sites', import: 'Importer' },
   settings: { searchPlaceholder: 'Rechercher dans tous les paramètres', searchEmptyTitle: 'Aucun paramètre trouvé', searchEmptyDescription: 'Essayez un autre mot, une fonctionnalité ou un contrôle.', results: '{count} résultat | {count} résultats', language: 'Langue', languageDescription: 'Utilisez toute langue ISO prise en charge par Elephant ou par un pack de traduction installé.', systemLanguage: 'Langue du système', colorMode: 'Mode de couleur', colorModeDescription: 'Utiliser la variante claire ou sombre du thème sélectionné.', light: 'Clair', dark: 'Sombre', theme: 'Thème', themeDescription: 'Choisissez la famille visuelle utilisée dans Elephant.', sidebarWidth: 'Largeur de la barre latérale', sidebarWidthDescription: 'Redimensionner la navigation principale.' },
   note: { untitled: 'Sans titre', titleLabel: 'Titre de la note', addTag: 'Ajouter une étiquette', pin: 'Épingler la note', unpin: 'Désépingler la note', close: 'Fermer la note', graph: 'Graphe', openGraph: 'Ouvrir le graphe', toggleTheme: 'Changer de thème', focusMode: 'Mode concentration', findInNotes: 'Rechercher dans les notes' },
-  excalidraw: { title: 'Excalidraw', drawingName: 'Nom du dessin', drawingPlaceholder: 'dessin', save: 'Enregistrer le dessin', cancel: 'Annuler le dessin', saving: 'Enregistrement du dessin…', failedTitle: 'Impossible d’ouvrir Excalidraw.', failedSave: 'Le dessin n’a pas pu être enregistré.', failedInitialize: 'La zone de dessin n’a pas pu être initialisée.', localBadge: 'Enregistré dans ce coffre', hint: 'Dessinez librement. La scène modifiable et l’aperçu PNG sont enregistrés ensemble.' },
+  excalidraw: { title: 'Excalidraw', drawingName: 'Nom du dessin', drawingPlaceholder: 'dessin', save: 'Enregistrer le dessin', cancel: 'Annuler le dessin', namePromptTitle: 'Nommez votre dessin', namePromptDescription: 'Choisissez un nom pour enregistrer ce dessin comme note dans le dossier courant.', namePromptRequired: 'Saisissez un nom avant d’enregistrer.', saving: 'Enregistrement du dessin…', failedTitle: 'Impossible d’ouvrir Excalidraw.', failedSave: 'Le dessin n’a pas pu être enregistré.', failedInitialize: 'La zone de dessin n’a pas pu être initialisée.', localBadge: 'Enregistré dans ce coffre', hint: 'Dessinez librement. La scène modifiable et l’aperçu PNG sont enregistrés ensemble.' },
   search: { open: 'Rechercher dans les notes', shortcutHint: 'Rechercher dans les notes avec {shortcut}' }
 }
 

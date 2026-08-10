@@ -17,7 +17,8 @@ export const serializeDraggedEntry = (entry) => JSON.stringify({
   kind: getEntryKind(entry),
   type: getEntryKind(entry),
   path: entry?.path || '',
-  title: entry?.title || entry?.filename?.replace(/\.md$/i, '') || ''
+  title: entry?.title || entry?.filename?.replace(/\.md$/i, '') || '',
+  preview: entry?.preview || entry?.drawingPreview || ''
 })
 
 const getTransfer = (value) => value?.dataTransfer || value || null
@@ -41,7 +42,8 @@ export const writeDraggedEntry = (event, entry) => {
     kind: getEntryKind(entry),
     type: getEntryKind(entry),
     path: entry.path,
-    title: entry?.title || entry?.filename?.replace(/\.md$/i, '') || ''
+    title: entry?.title || entry?.filename?.replace(/\.md$/i, '') || '',
+    preview: entry?.preview || entry?.drawingPreview || ''
   }
   event.dataTransfer.effectAllowed = 'move'
   event.dataTransfer.dropEffect = 'move'

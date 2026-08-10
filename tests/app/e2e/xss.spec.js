@@ -20,15 +20,19 @@ test.describe('Test XSS Vulnerabilities', () => {
   })
 
   test('Load malicious document', async() => {
-    const { isVisible, isCrashed } = await app.evaluate(async process => {
+    const { isVisible, isCrashed, hasLoadedUi } = await app.evaluate(async process => {
       const mainWindow = process.BrowserWindow.getAllWindows()[0]
       return {
         isVisible: mainWindow.isVisible(),
-        isCrashed: mainWindow.webContents.isCrashed()
+        isCrashed: mainWindow.webContents.isCrashed(),
+        hasLoadedUi: await mainWindow.webContents.executeJavaScript(
+          'Boolean(document.querySelector(".en-shell, .en-empty"))'
+        )
       }
     })
 
-    expect(isVisible).toBeTruthy()
+    expect(isVisible).toBeFalsy()
     expect(isCrashed).toBeFalsy()
+    expect(hasLoadedUi).toBeTruthy()
   })
 })

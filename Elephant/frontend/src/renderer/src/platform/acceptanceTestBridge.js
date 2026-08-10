@@ -100,6 +100,14 @@ export const installAcceptanceTestBridge = ({
       return invokeApplicationCommand(target, command, payload)
     },
 
+    setLocalStorage(key, value = null) {
+      if (typeof key !== 'string' || !key) throw new TypeError('setLocalStorage requires a key')
+      if (value === null || value === undefined) target.localStorage?.removeItem?.(key)
+      else target.localStorage?.setItem?.(key, String(value))
+      log(target, 'storage:local:set', { key, present: value !== null && value !== undefined })
+      return { key, value: value === null || value === undefined ? null : String(value) }
+    },
+
     readDom(selector) {
       if (!selector || typeof selector !== 'string') throw new TypeError('readDom requires a CSS selector')
       const element = target.document?.querySelector?.(selector)
@@ -240,17 +248,25 @@ export const installAcceptanceTestBridge = ({
       return { commandId }
     },
 
-    press(selector, key) {
+    press(selector, key, modifiers = {}) {
       if (!selector || typeof selector !== 'string') throw new TypeError('press requires a CSS selector')
       if (!key || typeof key !== 'string') throw new TypeError('press requires a key')
       const element = target.document?.querySelector?.(selector)
       if (!element) throw new Error(`press target was not found: ${selector}`)
       const KeyboardEventConstructor = target.KeyboardEvent || target.window?.KeyboardEvent
       if (typeof KeyboardEventConstructor !== 'function') throw new Error('press requires KeyboardEvent support')
-      const eventInit = { key, bubbles: true, cancelable: true }
+      const eventInit = {
+        key,
+        bubbles: true,
+        cancelable: true,
+        altKey: !!modifiers.altKey,
+        ctrlKey: !!modifiers.ctrlKey,
+        metaKey: !!modifiers.metaKey,
+        shiftKey: !!modifiers.shiftKey
+      }
       element.dispatchEvent(new KeyboardEventConstructor('keydown', eventInit))
       element.dispatchEvent(new KeyboardEventConstructor('keyup', eventInit))
-      log(target, 'dom:press', { selector, key })
+      log(target, 'dom:press', { selector, key, modifiers: eventInit })
       return api.readDom(selector)
     },
 

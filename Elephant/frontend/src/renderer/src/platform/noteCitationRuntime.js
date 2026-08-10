@@ -7,6 +7,7 @@ const MARKDOWN_PATH_RE = /\.md$/i
 const MAX_QUOTE_ANCHOR_CHARS = 640
 const RUNTIME_KEY = '__ELEPHANT_NOTE_CITATION_RUNTIME__'
 const BUFFER_KEY = '__ELEPHANT_NOTE_CITATION_BUFFER__'
+const QUOTE_ICON = '<svg data-lucide="quote" aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.1-.9-2-2-2H5c-1.1 0-2 0-2 2v6c0 1.1.9 2 2 2h4"/><path d="M14 21c3 0 7-1 7-8V5c0-1.1-.9-2-2-2h-3c-1.1 0-2 0-2 2v6c0 1.1.9 2 2 2h4"/></svg>'
 
 const decodeComponent = (value = '') => {
   try {
@@ -167,6 +168,18 @@ export const resolveInternalNoteLink = ({
   }
 }
 
+export const resolveInternalEntryLink = (href = '') => {
+  const raw = String(href || '').trim()
+  const prefix = 'elephant://entry/'
+  if (!raw.toLowerCase().startsWith(prefix)) return null
+  try {
+    const path = normalizeVaultPath(decodeURIComponent(raw.slice(prefix.length).split('#')[0]))
+    return path ? { path, kind: MARKDOWN_PATH_RE.test(path) ? 'note' : 'folder' } : null
+  } catch {
+    return null
+  }
+}
+
 const comparableText = (value = '') => String(value || '')
   .normalize('NFKC')
   .replace(/\s+/g, ' ')
@@ -296,17 +309,53 @@ const createFeedback = (message, windowObject, isError = false) => {
   windowObject.setTimeout(() => feedback.remove(), 2200)
 }
 
-const appendCitationToCurrentNote = (editorStore, markdown) => {
+const pointToOffset = (markdown, point) => {
+  const lines = String(markdown || '').split('\n')
+  if (!Number.isInteger(point?.line) || !Number.isInteger(point?.ch)) return null
+  const line = Math.max(0, Math.min(lines.length - 1, point.line))
+  const ch = Math.max(0, Math.min(lines[line].length, point.ch))
+  return lines.slice(0, line).reduce((offset, value) => offset + value.length + 1, 0) + ch
+}
+
+const offsetToPoint = (markdown, offset) => {
+  const lines = String(markdown || '').split('\n')
+  let remaining = Math.max(0, Math.min(String(markdown || '').length, Number(offset) || 0))
+  for (let line = 0; line < lines.length; line += 1) {
+    if (remaining <= lines[line].length) return { line, ch: remaining }
+    remaining -= lines[line].length + 1
+  }
+  const line = Math.max(0, lines.length - 1)
+  return { line, ch: lines[line].length }
+}
+
+export const appendCitationToCurrentNote = (editorStore, markdown) => {
   if (!editorStore?.currentFile?.id) throw new Error('Ouvrez une note avant de coller une citation.')
   const current = String(editorStore.currentFile.markdown || '')
-  const separator = current && !current.endsWith('\n') ? '\n\n' : ''
-  const next = `${current}${separator}${markdown}\n`
+  const cursor = editorStore.currentFile.muyaIndexCursor
+  const anchor = pointToOffset(current, cursor?.anchor)
+  const focus = pointToOffset(current, cursor?.focus)
+  // A collapsed editor cursor is not an insertion target for a retained
+  // citation. After opening a note, Muya commonly restores its cursor at the
+  // beginning of the document (including front matter). Without an active
+  // selection, citations must be appended to the last line instead.
+  const hasSelectionRange = anchor != null && focus != null && anchor !== focus
+  const start = hasSelectionRange ? Math.min(anchor, focus) : current.length
+  const end = hasSelectionRange ? Math.max(anchor, focus) : current.length
+  const before = current.slice(0, start)
+  const after = current.slice(end)
+  const prefix = before && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after && !after.startsWith('\n') ? '\n' : ''
+  const inserted = `${prefix}${markdown}\n${suffix}`
+  const next = `${before}${inserted}${after}`
+  const nextCursor = offsetToPoint(next, before.length + inserted.length)
   editorStore.currentFile.markdown = next
   editorStore.currentFile.isSaved = false
+  editorStore.currentFile.muyaIndexCursor = { anchor: nextCursor, focus: nextCursor }
   bus.emit('file-changed', {
     id: editorStore.currentFile.id,
     markdown: next,
     cursor: editorStore.currentFile.cursor,
+    muyaIndexCursor: editorStore.currentFile.muyaIndexCursor,
     renderCursor: true,
     history: editorStore.currentFile.history,
     scrollTop: editorStore.currentFile.scrollTop
@@ -346,37 +395,10 @@ const getSelectionText = (selection) => {
   return selection.rangeCount ? selection.getRangeAt(0).toString() : ''
 }
 
-const createCitationButton = (copyCitation, windowObject) => {
-  const button = windowObject.document.createElement('button')
-  button.type = 'button'
-  button.dataset.elephantNoteCitation = 'true'
-  button.className = 'en-note-action-button en-note-citation-button'
-  button.title = 'Citer le texte sélectionné'
-  button.setAttribute('aria-label', 'Citer le texte sélectionné')
-  button.style.cssText = [
-    'width:30px',
-    'height:30px',
-    'display:inline-flex',
-    'align-items:center',
-    'justify-content:center',
-    'padding:0',
-    'border:1px solid var(--en-border)',
-    'border-radius:8px',
-    'background:transparent',
-    'color:var(--en-text)',
-    'cursor:pointer',
-    '-webkit-app-region:no-drag'
-  ].join(';')
+/* The citation action is intentionally rendered only for an active selection.
+  legacy top-bar implementation removed:
   button.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2h4"/><path d="M14 21c3 0 7-1 7-8V5c0-1.1-.9-2-2-2h-3c-1.1 0-2 .9-2 2v6c0 1.1.9 2 2 2h4"/></svg>'
-  button.addEventListener('mouseenter', () => {
-    button.style.background = 'var(--en-soft)'
-  })
-  button.addEventListener('mouseleave', () => {
-    button.style.background = 'transparent'
-  })
-  button.addEventListener('click', copyCitation)
-  return button
-}
+*/
 
 export const installNoteCitationRuntime = ({
   pinia,
@@ -389,7 +411,6 @@ export const installNoteCitationRuntime = ({
 
   const store = vaultStore || useVaultStore(pinia)
   const editorStore = providedEditorStore || (pinia ? useEditorStore(pinia) : null)
-  let citationButton = null
   let selectionButton = null
   let lastEditorSelectionRange = null
   let palette = null
@@ -410,7 +431,11 @@ export const installNoteCitationRuntime = ({
     appendDebugLog(target, 'info', '[elephantnote:citation] buffer item deleted', { id: item.id })
   }
 
-  const pasteCitation = (item) => {
+  const pasteCitation = (item = buffer.at(-1)) => {
+    if (!item) {
+      createFeedback('Aucune citation en attente.', target, true)
+      return false
+    }
     try {
       appendCitationToCurrentNote(editorStore, item.markdown)
       createFeedback('Citation collée dans la note.', target)
@@ -460,11 +485,14 @@ export const installNoteCitationRuntime = ({
       const button = target.document.createElement('button')
       button.type = 'button'
       button.dataset.elephantCitationBufferItem = item.id
+      button.setAttribute('data-elephant-citation-buffer-item', item.id)
       button.className = 'en-note-citation-buffer-item'
       button.title = 'Cliquer pour coller · clic droit pour les informations'
       button.setAttribute('aria-label', `Coller la citation ${item.title}`)
       button.textContent = `↳ ${item.title}: ${item.text.slice(0, 72)}${item.text.length > 72 ? '…' : ''}`
-      button.style.cssText = 'padding:9px 12px;border:1px solid var(--en-border);border-radius:10px;background:var(--en-surface);color:var(--en-text);box-shadow:0 12px 30px rgba(0,0,0,.22);text-align:left;cursor:pointer;'
+      button.dataset.lucide = 'quote'
+      button.innerHTML = QUOTE_ICON
+      button.style.cssText = 'width:36px;height:36px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--en-border);border-radius:10px;background:var(--en-surface);color:var(--en-text);box-shadow:0 12px 30px rgba(0,0,0,.22);cursor:pointer;'
       button.onclick = () => pasteCitation(item)
       button.oncontextmenu = (event) => {
         event.preventDefault()
@@ -548,24 +576,14 @@ export const installNoteCitationRuntime = ({
     selectionButton = target.document.createElement('button')
     selectionButton.type = 'button'
     selectionButton.dataset.elephantCitationSelectionAction = 'true'
+    selectionButton.setAttribute('data-elephant-citation-selection-action', 'true')
     selectionButton.className = 'en-note-citation-selection-action'
     selectionButton.setAttribute('aria-label', 'Ajouter la sélection aux citations')
-    selectionButton.textContent = 'Citer'
-    selectionButton.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:10000;padding:9px 13px;border:1px solid var(--en-primary);border-radius:10px;background:var(--en-primary);color:#fff;cursor:pointer;box-shadow:0 12px 30px rgba(0,0,0,.25);'
+    selectionButton.dataset.lucide = 'quote'
+    selectionButton.innerHTML = QUOTE_ICON
+    selectionButton.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:10000;width:38px;height:38px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--en-primary);border-radius:10px;background:var(--en-primary);color:#fff;cursor:pointer;box-shadow:0 12px 30px rgba(0,0,0,.25);'
     selectionButton.onclick = () => void copyCitation()
     target.document.body.appendChild(selectionButton)
-  }
-
-  const ensureCitationButton = () => {
-    const actionRail = target.document.querySelector('.en-note-topbar-actions')
-    if (!actionRail) return
-    const existing = actionRail.querySelector('[data-elephant-note-citation]')
-    if (existing) {
-      citationButton = existing
-      return
-    }
-    citationButton = createCitationButton(copyCitation, target)
-    actionRail.prepend(citationButton)
   }
 
   const handleInternalLinkClick = (event) => {
@@ -579,8 +597,27 @@ export const installNoteCitationRuntime = ({
     ) return
     const anchorElement = event.target?.closest?.('.en-editor-host a[href]')
     if (!anchorElement) return
+    const href = anchorElement.getAttribute('href') || anchorElement.href
+    const entryLink = resolveInternalEntryLink(href)
+    if (entryLink) {
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation?.()
+      if (entryLink.kind === 'note') {
+        store.openNote({
+          path: entryLink.path,
+          title: entryLink.path.split('/').pop()?.replace(/\.md$/i, '') || 'Untitled',
+          kind: 'note',
+          type: 'note'
+        })
+      } else {
+        void store.openDirectory(entryLink.path)
+      }
+      appendDebugLog(target, 'info', '[elephantnote:editor-link] entry activated', entryLink)
+      return
+    }
     const resolved = resolveInternalNoteLink({
-      href: anchorElement.getAttribute('href') || anchorElement.href,
+      href,
       currentNotePath: store.openedNotePath || '',
       appOrigin: target.location?.origin || ''
     })
@@ -609,12 +646,9 @@ export const installNoteCitationRuntime = ({
     }
   }
 
-  const observer = new target.MutationObserver(ensureCitationButton)
-  observer.observe(target.document.documentElement, { childList: true, subtree: true })
   target.document.addEventListener('click', handleInternalLinkClick, true)
   target.document.addEventListener('selectionchange', updateSelectionButton)
   target.document.addEventListener('mouseup', updateSelectionButton)
-  ensureCitationButton()
   renderPalette()
 
   const runtime = {
@@ -622,11 +656,9 @@ export const installNoteCitationRuntime = ({
     pasteCitation,
     buffer,
     dispose() {
-      observer.disconnect()
       target.document.removeEventListener('click', handleInternalLinkClick, true)
       target.document.removeEventListener('selectionchange', updateSelectionButton)
       target.document.removeEventListener('mouseup', updateSelectionButton)
-      citationButton?.remove()
       selectionButton?.remove()
       lastEditorSelectionRange = null
       palette?.remove()

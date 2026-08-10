@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { JSDOM } from 'jsdom'
+import { tokenizer } from '../../../Elephant/frontend/src/muya/lib/parser/index.js'
 
 import {
   applyOperation,
@@ -85,6 +86,13 @@ describe('Muya full editor runtime contracts', () => {
     const image = 'before ![Alt](pic.png) after'
     expect(imageToolbarState(image, 10).visible).toBe(true)
     expect(resizeImageMarkdown(image, 10, '50%')).toContain('{width=50%}')
+  })
+
+  it('parses persisted image widths so resized images survive a re-render', () => {
+    const [token] = tokenizer('![Alt](pic.png){width=144}', { hasBeginRules: false })
+    expect(token.type).toBe('image')
+    expect(token.raw).toBe('![Alt](pic.png){width=144}')
+    expect(token.attrs.width).toBe(144)
   })
 
   it('supports footnote popup, slash menu, floating toolbar and preview blocks', () => {

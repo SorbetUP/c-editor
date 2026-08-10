@@ -115,63 +115,12 @@ fn download_prebuilt_package(item: &CatalogAddon, package_path: &str, package_ha
   write_verified_package(item, bytes, package_hash)
 }
 
-fn fetch_legacy_sync_bytes(relative_path: &str) -> R<Vec<u8>> {
-  let normalized = safe_official_path(&format!("official/{relative_path}"))?
-    .strip_prefix("official/")
-    .ok_or_else(|| "Invalid immutable Sync package path".to_string())?
-    .to_string();
-  if !normalized.starts_with("addons/sync/releases/") || !normalized.ends_with(".enaddon") {
-    return Err("Immutable Sync packages must stay under addons/sync/releases".to_string());
-  }
-  let root = Url::parse(LEGACY_SYNC_ROOT).map_err(|error| error.to_string())?;
-  let url = root.join(&normalized).map_err(|error| error.to_string())?;
-  if url.scheme() != "https"
-    || url.host_str() != Some("raw.githubusercontent.com")
-    || !url.path().starts_with(
-      "/SorbetUP/ElephantNote/2a4547c17e3ce1e581e9956dc970c37039d49329/addons/sync/releases/",
-    )
-  {
-    return Err("Immutable Sync package URL escaped its pinned repository revision".to_string());
-  }
-  let client = reqwest::blocking::Client::builder()
-    .timeout(Duration::from_secs(90))
-    .redirect(reqwest::redirect::Policy::none())
-    .build()
-    .map_err(|error| error.to_string())?;
-  let mut response = client
-    .get(url)
-    .send()
-    .map_err(|error| format!("Failed to reach immutable Sync package: {error}"))?;
-  if !response.status().is_success() {
-    return Err(format!("Immutable Sync package returned HTTP {}", response.status()));
-  }
-  if response.content_length().is_some_and(|length| length > MAX_PACKAGE_BYTES) {
-    return Err("Immutable Sync package exceeds the allowed size".to_string());
-  }
-  let mut bytes = Vec::new();
-  response
-    .by_ref()
-    .take(MAX_PACKAGE_BYTES + 1)
-    .read_to_end(&mut bytes)
-    .map_err(|error| error.to_string())?;
-  if bytes.len() as u64 > MAX_PACKAGE_BYTES {
-    return Err("Immutable Sync package exceeds the allowed size".to_string());
-  }
-  Ok(bytes)
-}
-
 fn prebuilt_package(item: &CatalogAddon) -> R<Option<PathBuf>> {
   let platform = platform_key();
-  if uses_legacy_sync_package(item) {
-    let (package_path, package_hash) = legacy_sync_package(&platform)
-      .ok_or_else(|| format!("Official addon {} is not available for platform {platform}", item.id))?;
-    let bytes = fetch_legacy_sync_bytes(package_path)?;
-    return write_verified_package(item, bytes, package_hash).map(Some);
-  }
   if let Some(package) = item.packages.get(&platform) {
     return download_prebuilt_package(item, &package.path, &package.hash).map(Some);
   }
-  if item.requires_platform_package || !item.packages.is_empty() || item.id == "elephant.sync" {
+  if item.requires_platform_package || !item.packages.is_empty() {
     return Err(format!("Official addon {} is not available for platform {platform}", item.id));
   }
   Ok(None)

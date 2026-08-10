@@ -2,9 +2,11 @@ import bus from '@/bus'
 
 export const openNewDrawing = () => {
   bus.emit('ELEPHANT::open-excalidraw', {
-    fileName: `excalidraw-${Date.now()}.png`,
+    fileName: 'drawing.png',
     title: 'Excalidraw',
     saveMode: 'png',
-    insertOnSave: false
+    insertOnSave: false,
+    createNoteOnSave: true,
+    askNameOnClose: true
   })
 }

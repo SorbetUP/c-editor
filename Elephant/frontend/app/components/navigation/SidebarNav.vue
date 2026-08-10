@@ -19,8 +19,14 @@
       </button>
 
       <div class="en-tags-header">
-        <span class="en-tags-label">Tags</span>
-        <button class="en-tags-search-btn" type="button" title="Search tags" @click="emit('search')">
+        <span class="en-tags-label">Notes</span>
+        <button
+          class="en-tags-search-btn"
+          type="button"
+          title="Search notes"
+          aria-label="Search notes"
+          @click="emit('search')"
+        >
           <Search class="en-tags-search-icon" />
         </button>
       </div>

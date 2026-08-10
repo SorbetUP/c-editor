@@ -4,51 +4,51 @@
     :class="{
       list: store.viewMode === 'list',
       'is-drop-target': isRootDropTarget,
-      'is-empty': !visibleEntries.length && !renamingEntry
+      'is-empty': !visibleEntries.length
     }"
+    :data-view-mode="store.viewMode"
     @scroll.passive="handleGridScroll"
     @dragover.prevent="handleRootDragOver"
     @dragleave="handleRootDragLeave"
     @drop.prevent="handleRootDrop"
   >
-    <NoteCard
-      v-for="(entry, index) in visibleEntries"
-      :key="entry.path"
-      :entry="entry"
-      :featured="index === 0 && visibleEntries.length > 3"
-      @open="openEntry"
-      @rename="renameEntry"
-      @delete="deleteEntry"
-    />
-    <form
-      v-if="renamingEntry"
-      class="en-library-rename-form"
-      @submit.prevent="submitRenameEntry"
+    <div
+      v-if="store.viewMode === 'grid'"
+      class="en-library-grid-surface en-library-grid-surface--grid"
+      data-layout="grid"
     >
-      <span>Rename</span>
-      <input
-        ref="renameEntryInput"
-        v-model.trim="renameEntryTitle"
-        type="text"
-        aria-label="Entry name"
-        @keydown.esc="cancelRenameEntry"
-      >
-      <button type="submit">
-        Save
-      </button>
-      <button
-        type="button"
-        @click="cancelRenameEntry"
-      >
-        Cancel
-      </button>
-    </form>
+      <NoteCard
+        v-for="(entry, index) in visibleEntries"
+        :key="entry.path"
+        :entry="entry"
+        :featured="index === 0 && visibleEntries.length > 3"
+        @open="openEntry"
+        @rename="renameEntry"
+        @delete="deleteEntry"
+      />
+    </div>
+    <div
+      v-else
+      class="en-library-grid-surface en-library-grid-surface--list"
+      data-layout="list"
+    >
+      <NoteCard
+        v-for="entry in visibleEntries"
+        :key="entry.path"
+        :entry="entry"
+        :featured="false"
+        @open="openEntry"
+        @rename="renameEntry"
+        @delete="deleteEntry"
+      />
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import log from '@/platform/runtimeLogShim'
+import bus from '@/bus'
 import { useVaultStore } from '../../stores/vaultStore'
 import { useNavigationStore } from '../../stores/navigationStore'
 import { elephantnoteClient } from '../../services/elephantnoteClient'
@@ -58,6 +58,7 @@ import {
   getEntryKind,
   parseDraggedEntry
 } from '../../utils/entryDragDrop'
+import { getNoteCardDrawingPreview } from '../../utils/noteCardView'
 
 const DIRECTORY_PAGE_SIZE = 120
 const RENDER_CHUNK_SIZE = 72
@@ -65,9 +66,6 @@ const SCROLL_PREFETCH_PX = 720
 
 const store = useVaultStore()
 const navigationStore = useNavigationStore()
-const renamingEntry = ref(null)
-const renameEntryTitle = ref('')
-const renameEntryInput = ref(null)
 const isRootDropTarget = ref(false)
 const visibleEntryLimit = ref(RENDER_CHUNK_SIZE)
 const loadingMoreEntries = ref(false)
@@ -76,6 +74,7 @@ const directoryGeneration = ref(0)
 
 const normalizeSlashPath = (value = '') => String(value || '').split(String.fromCharCode(92)).join('/')
 const isMarkdownNotePath = (path = '') => /[.]md$/i.test(String(path || ''))
+const isExcalidrawPath = (path = '') => /[.]excalidraw(?:[.]png)?$/i.test(String(path || ''))
 const entryArray = (value) => Array.isArray(value) ? value : []
 
 const isCompatibilityRootWikiEntry = (entry) => {
@@ -232,6 +231,30 @@ const openEntry = async (entry) => {
     await openFolderInCurrentView(entry.path)
     return
   }
+  if (isExcalidrawPath(entry?.path)) {
+    const source = store.activeVault?.path
+      ? window.path.join(store.activeVault.path, entry.path)
+      : entry.path
+    bus.emit('open-excalidraw-from-image', source)
+    log.info('[library] opened Excalidraw entry', { path: entry.path, source })
+    return
+  }
+  if (kind === 'drawing') {
+    const source = getNoteCardDrawingPreview(entry)
+    if (!source) {
+      log.error('[library] drawing entry has no preview source', {
+        path: entry?.path || '',
+        title: entry?.title || ''
+      })
+      return
+    }
+    log.info('[library] opening drawing directly in Excalidraw', {
+      path: entry?.path || '',
+      source
+    })
+    bus.emit('open-excalidraw-from-image', source)
+    return
+  }
   if (kind === 'note' || isMarkdownNotePath(entry?.path)) {
     store.openNote(entry)
     return
@@ -243,26 +266,9 @@ const openEntry = async (entry) => {
   })
 }
 
-const renameEntry = async (entry) => {
-  renamingEntry.value = entry
-  renameEntryTitle.value = entry.title
-  await nextTick()
-  renameEntryInput.value?.focus()
-  renameEntryInput.value?.select()
-}
-
-const cancelRenameEntry = () => {
-  renamingEntry.value = null
-  renameEntryTitle.value = ''
-}
-
-const submitRenameEntry = async () => {
-  if (!renamingEntry.value) return
-  const nextName = renameEntryTitle.value.trim()
-  const entry = renamingEntry.value
-  cancelRenameEntry()
-  if (!nextName || nextName === entry.title) return
-  await store.renameEntry(entry, nextName)
+const renameEntry = async ({ entry, title } = {}) => {
+  if (!entry || !title) return
+  await store.renameEntry(entry, title)
   resetVisibleWindow()
 }
 
@@ -294,13 +300,45 @@ const handleRootDrop = async(event) => {
   min-height: 0;
   overflow: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 18px;
-  padding: 20px;
-  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+  align-content: stretch;
+  overscroll-behavior: contain;
+}
+
+/* The controls are intentionally floating, but their hit area must not share
+ * pixels with the first card. Keep the compact toolbar visually detached from
+ * the content while preserving a reliable pointer target on desktop. */
+@media (min-width: 761px) {
+  .en-library-grid {
+    padding-top: 72px;
+  }
 }
 .en-library-grid.list {
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.en-library-grid-surface {
+  min-width: 0;
+  min-height: 100%;
+  align-content: start;
+  padding: 0 10px 10px;
+}
+.en-library-grid-surface--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.en-library-grid-surface--list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
 }
 .en-library-grid.is-empty {
   display: block;
@@ -310,28 +348,5 @@ const handleRootDrop = async(event) => {
 .en-library-grid.is-drop-target {
   outline: 2px dashed var(--en-accent);
   outline-offset: -8px;
-}
-.en-library-rename-form {
-  border: 1px solid var(--en-border);
-  border-radius: 16px;
-  padding: 14px;
-  display: grid;
-  gap: 10px;
-  background: var(--en-surface);
-  color: var(--en-text);
-}
-.en-library-rename-form input {
-  border: 1px solid var(--en-border);
-  border-radius: 10px;
-  padding: 9px 10px;
-  background: var(--en-input-bg);
-  color: var(--en-text);
-}
-.en-library-rename-form button {
-  border: 1px solid var(--en-border);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: var(--en-chip-bg);
-  color: var(--en-text);
 }
 </style>

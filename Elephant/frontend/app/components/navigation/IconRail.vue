@@ -1,74 +1,184 @@
 <template>
-  <nav class="en-rail" :class="{ 'en-rail-macos': isMac }" aria-label="Workspace navigation">
+  <nav
+    class="en-rail"
+    :class="{ 'en-rail-macos': isMac }"
+    aria-label="Workspace navigation"
+  >
     <div class="en-rail-nav">
-      <template v-for="item in visibleRailItems" :key="item.id">
-        <div v-if="item.separator" class="en-rail-separator en-rail-separator-custom" aria-hidden="true" />
-
+      <template
+        v-for="item in visibleRailItems"
+        :key="item.id"
+      >
         <div
-          v-else-if="item.id === 'vault'"
-          class="en-rail-vault-wrap"
-          @mouseenter="showVaultMenu = true"
-          @mouseleave="showVaultMenu = false"
-        >
-          <button
-            class="en-rail-vault"
-            type="button"
-            :title="vaultTooltip"
-            :aria-label="vaultTooltip"
-            @click="runRailItem(item)"
-          >
-            <component :is="activeVaultIconComponent || Vault" class="en-rail-vault-lucide" aria-hidden="true" />
-          </button>
-          <transition name="en-vault-fade">
-            <div
-              v-if="showVaultMenu"
-              class="en-vault-menu"
-              @mouseenter="showVaultMenu = true"
-              @mouseleave="showVaultMenu = false"
-            >
-              <div class="en-vault-menu-header">Vaults</div>
-              <template v-for="vault in store.vaults" :key="vault.id">
-                <div class="en-vault-menu-item" :class="{ active: vault.id === store.activeVaultId }">
-                  <button class="en-vault-menu-select" type="button" @click="switchVault(vault.id)">
-                    <span class="en-vault-menu-initial">
-                      <component :is="getVaultIconComponent(vault) || Vault" class="en-vault-menu-lucide" aria-hidden="true" />
-                    </span>
-                    <span class="en-vault-menu-name">{{ vault.name }}</span>
-                  </button>
-                  <button class="en-vault-menu-edit" type="button" title="Change vault icon" @click.stop="toggleIconPicker(vault.id)">
-                    <Pencil class="en-vault-menu-edit-icon" />
-                  </button>
-                  <svg v-if="vault.id === store.activeVaultId" class="en-vault-menu-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                </div>
-                <div v-if="editingVaultId === vault.id" class="en-vault-icon-picker" @click.stop>
-                  <button class="en-vault-icon-choice" type="button" title="Use default vault icon" @mousedown.stop.prevent="setVaultIcon(vault.id, '')" @pointerdown.stop @pointerup.stop.prevent @click.stop.prevent><Vault class="en-vault-icon-choice-svg" /></button>
-                  <button v-for="icon in vaultIconOptions" :key="icon.name" class="en-vault-icon-choice" :class="{ active: normalizeVaultIcon(vault.icon) === icon.name }" type="button" :title="icon.label" @mousedown.stop.prevent="setVaultIcon(vault.id, icon.name)" @pointerdown.stop @pointerup.stop.prevent @click.stop.prevent>
-                    <component :is="icon.component" class="en-vault-icon-choice-svg" />
-                  </button>
-                </div>
-              </template>
-              <div class="en-vault-menu-divider" />
-              <button class="en-vault-menu-item en-vault-menu-add" type="button" @click="addVault"><Plus class="en-vault-menu-add-icon" /><span>Add another vault</span></button>
-            </div>
-          </transition>
-        </div>
+          v-if="item.separator"
+          class="en-rail-separator en-rail-separator-custom"
+          aria-hidden="true"
+        />
 
         <button
-          v-else
+          v-else-if="item.id !== 'vault'"
           class="en-rail-icon"
           :class="{ active: item.active, 'en-rail-sidebar-toggle': item.id === 'sidebar-toggle' }"
           type="button"
+          :draggable="item.id !== 'sidebar-toggle'"
           :title="item.title"
           :aria-label="item.title"
+          @dragstart="startRailDrag(item, $event)"
+          @dragover.prevent="allowRailDrop(item)"
+          @drop.prevent="dropRailItem(item)"
+          @dragend="finishRailDrag"
           @click="runRailItem(item)"
         >
-          <component :is="item.icon" class="en-rail-icon-svg" aria-hidden="true" />
+          <template v-if="item.id === 'sidebar-toggle'">
+            <PanelLeft
+              class="en-rail-icon-svg en-rail-sidebar-neutral-icon"
+              aria-hidden="true"
+            />
+            <component
+              :is="item.icon"
+              class="en-rail-icon-svg en-rail-sidebar-direction-icon"
+              aria-hidden="true"
+            />
+          </template>
+          <component
+            :is="item.icon"
+            v-else
+            class="en-rail-icon-svg"
+            aria-hidden="true"
+          />
         </button>
       </template>
     </div>
 
     <div class="en-rail-bottom">
-      <button class="en-rail-icon" type="button" title="Settings" aria-label="Settings" @click="openSettings"><Settings class="en-rail-icon-svg" aria-hidden="true" /></button>
+      <div
+        v-if="vaultRailItem"
+        class="en-rail-vault-wrap"
+        @mouseenter="showVaultMenu = true"
+        @mouseleave="showVaultMenu = false"
+      >
+        <button
+          class="en-rail-vault"
+          type="button"
+          :title="vaultTooltip"
+          :aria-label="vaultTooltip"
+          @click="runRailItem(vaultRailItem)"
+        >
+          <component
+            :is="activeVaultIconComponent || Vault"
+            class="en-rail-vault-lucide"
+            aria-hidden="true"
+          />
+        </button>
+        <transition name="en-vault-fade">
+          <div
+            v-if="showVaultMenu"
+            class="en-vault-menu"
+            @mouseenter="showVaultMenu = true"
+            @mouseleave="showVaultMenu = false"
+          >
+            <div class="en-vault-menu-header">
+              Vaults
+            </div>
+            <template
+              v-for="vault in store.vaults"
+              :key="vault.id"
+            >
+              <div
+                class="en-vault-menu-item"
+                :class="{ active: vault.id === store.activeVaultId }"
+              >
+                <button
+                  class="en-vault-menu-select"
+                  type="button"
+                  @click="switchVault(vault.id)"
+                >
+                  <span class="en-vault-menu-initial">
+                    <component
+                      :is="getVaultIconComponent(vault) || Vault"
+                      class="en-vault-menu-lucide"
+                      aria-hidden="true"
+                    />
+                  </span>
+                  <span class="en-vault-menu-name">{{ vault.name }}</span>
+                </button>
+                <button
+                  class="en-vault-menu-edit"
+                  type="button"
+                  title="Change vault icon"
+                  @click.stop="toggleIconPicker(vault.id)"
+                >
+                  <Pencil class="en-vault-menu-edit-icon" />
+                </button>
+                <svg
+                  v-if="vault.id === store.activeVaultId"
+                  class="en-vault-menu-check"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                ><polyline points="20 6 9 17 4 12" /></svg>
+              </div>
+              <div
+                v-if="editingVaultId === vault.id"
+                class="en-vault-icon-picker"
+                @click.stop
+              >
+                <button
+                  class="en-vault-icon-choice"
+                  type="button"
+                  title="Use default vault icon"
+                  @mousedown.stop.prevent="setVaultIcon(vault.id, '')"
+                  @pointerdown.stop
+                  @pointerup.stop.prevent
+                  @click.stop.prevent
+                >
+                  <Vault class="en-vault-icon-choice-svg" />
+                </button>
+                <button
+                  v-for="icon in vaultIconOptions"
+                  :key="icon.name"
+                  class="en-vault-icon-choice"
+                  :class="{ active: normalizeVaultIcon(vault.icon) === icon.name }"
+                  type="button"
+                  :title="icon.label"
+                  @mousedown.stop.prevent="setVaultIcon(vault.id, icon.name)"
+                  @pointerdown.stop
+                  @pointerup.stop.prevent
+                  @click.stop.prevent
+                >
+                  <component
+                    :is="icon.component"
+                    class="en-vault-icon-choice-svg"
+                  />
+                </button>
+              </div>
+            </template>
+            <div class="en-vault-menu-divider" />
+            <button
+              class="en-vault-menu-item en-vault-menu-add"
+              type="button"
+              @click="addVault"
+            >
+              <Plus class="en-vault-menu-add-icon" /><span>Add another vault</span>
+            </button>
+          </div>
+        </transition>
+      </div>
+      <button
+        class="en-rail-icon"
+        type="button"
+        title="Settings"
+        aria-label="Settings"
+        @click="openSettings"
+      >
+        <Settings
+          class="en-rail-icon-svg"
+          aria-hidden="true"
+        />
+      </button>
     </div>
   </nav>
 </template>
@@ -87,7 +197,9 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageCircle,
+  PanelLeftClose,
   PanelLeft,
+  PanelLeftOpen,
   Pencil,
   Plus,
   Rocket,
@@ -110,6 +222,7 @@ import {
   isIconRailSeparatorId,
   normalizeIconRailHidden,
   normalizeIconRailOrder,
+  moveIconRailItem,
   pushIconRailLog
 } from './iconRailLayout'
 
@@ -125,6 +238,7 @@ const editingVaultId = ref('')
 const showVaultMenu = ref(false)
 const runtimeRailOrder = ref([])
 const lastRailAction = ref({ id: '', at: 0 })
+const draggingRailId = ref('')
 const DUPLICATE_ACTION_WINDOW_MS = 420
 
 const VAULT_ICON_COMPONENTS = { Database, FileText, GraduationCap, Home, Landmark, Rocket, Star, Terminal, Workflow }
@@ -148,7 +262,7 @@ const isMac = navigator.platform ? navigator.platform.startsWith('Mac') : /mac/i
 const getVaultIconComponent = (vault) => vaultIconComponentsByName[normalizeVaultIcon(vault?.icon)] || null
 const activeVaultIconComponent = computed(() => getVaultIconComponent(store.activeVault))
 const sidebarVisible = computed(() => props.sidebarVisible)
-const vaultTooltip = computed(() => `${store.activeVault?.name || 'No vault'} — open vault switcher`)
+const vaultTooltip = computed(() => `${store.activeVault?.name || 'No vault'} - open vault switcher`)
 
 const closeAddonAndOpen = (view) => {
   emit('close-addon-view')
@@ -174,7 +288,7 @@ const coreRailItems = computed(() => [
   {
     id: 'sidebar-toggle',
     title: sidebarVisible.value ? 'Hide sidebar' : 'Show sidebar',
-    icon: PanelLeft,
+    icon: sidebarVisible.value ? PanelLeftClose : PanelLeftOpen,
     active: false,
     run: toggleSidebar
   },
@@ -217,6 +331,7 @@ const visibleRailItems = computed(() => {
     .filter(Boolean)
 })
 const visibleRailIds = computed(() => visibleRailItems.value.map((item) => item.id))
+const vaultRailItem = computed(() => visibleRailItems.value.find((item) => item.id === 'vault'))
 const layoutSignature = computed(() => JSON.stringify({
   order: normalizeIconRailOrder(runtimeRailOrder.value, allRailItemIds.value),
   hidden: normalizeIconRailHidden(preferences.iconRailHidden, allRailItemIds.value),
@@ -306,6 +421,38 @@ const handleAddonSidebarItem = async (item) => {
   if (item.view) closeAddonAndOpen(item.view)
 }
 
+const startRailDrag = (item, event) => {
+  if (!item?.id || item.id === 'sidebar-toggle') return
+  draggingRailId.value = item.id
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', item.id)
+  }
+  pushIconRailLog('drag:start', { id: item.id })
+}
+
+const allowRailDrop = (item) => {
+  if (!draggingRailId.value || draggingRailId.value === item?.id) return
+  pushIconRailLog('drag:over', { sourceId: draggingRailId.value, targetId: item?.id || '' })
+}
+
+const dropRailItem = (item) => {
+  const sourceId = draggingRailId.value
+  draggingRailId.value = ''
+  const targetId = item?.id || ''
+  if (!sourceId || !targetId || sourceId === targetId) return
+  const targetIndex = runtimeRailOrder.value.indexOf(targetId)
+  const next = moveIconRailItem(runtimeRailOrder.value, sourceId, targetIndex)
+  runtimeRailOrder.value = next
+  preferences.SET_SINGLE_PREFERENCE({ type: 'iconRailOrder', value: next })
+  pushIconRailLog('drag:drop', { sourceId, targetId, targetIndex, next })
+}
+
+const finishRailDrag = () => {
+  if (draggingRailId.value) pushIconRailLog('drag:end', { id: draggingRailId.value })
+  draggingRailId.value = ''
+}
+
 watch(configuredRailOrderSignature, () => {
   runtimeRailOrder.value = extendIconRailOrder(preferences.iconRailOrder, allRailItemIds.value)
 }, { immediate: true })
@@ -379,6 +526,9 @@ onBeforeUnmount(() => {
 .en-rail-icon:hover { color: var(--en-text); background: var(--en-soft); }
 .en-rail-icon.active { color: var(--en-text); background: var(--en-soft-strong, var(--en-soft)); }
 .en-rail-icon-svg { width: 18px; height: 18px; display: block; color: currentColor; stroke: currentColor; }
+.en-rail-sidebar-direction-icon { display: none; }
+.en-rail-sidebar-toggle:hover .en-rail-sidebar-neutral-icon { display: none; }
+.en-rail-sidebar-toggle:hover .en-rail-sidebar-direction-icon { display: block; }
 .en-vault-fade-enter-active, .en-vault-fade-leave-active { transition: opacity .12s ease, transform .12s ease; }
 .en-vault-fade-enter-from, .en-vault-fade-leave-to { opacity: 0; transform: translateX(-4px); }
 </style>

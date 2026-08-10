@@ -289,6 +289,11 @@ const tokenizerFac = (src, beginRules, inlineRules, pos = 0, top, labels, option
           second: imageTo[5]
         }
       })
+      if (imageTo[6]) {
+        tokens[tokens.length - 1].attrs.width = /^\d+$/.test(imageTo[6])
+          ? Number(imageTo[6])
+          : imageTo[6]
+      }
       src = src.substring(imageTo[0].length)
       pos = pos + imageTo[0].length
       continue

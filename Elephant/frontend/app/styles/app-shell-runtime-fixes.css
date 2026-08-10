@@ -9,20 +9,75 @@
 }
 
 .en-topstrip {
-  background: linear-gradient(
-    to right,
-    var(--en-sidebar-bg, var(--en-bg)) 0,
-    var(--en-sidebar-bg, var(--en-bg)) calc(48px + var(--en-sidebar-width) + 1px),
-    var(--en-bg) calc(48px + var(--en-sidebar-width) + 1px),
-    var(--en-bg) 100%
-  ) !important;
+  height: 28px !important;
+  background: var(--en-bg) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
 }
 
 .en-topstrip::after {
-  left: calc(48px + var(--en-sidebar-width)) !important;
-  width: 1px !important;
+  display: none !important;
 }
 
 .en-topstrip-sidebar-hidden {
+  background: var(--en-bg) !important;
+}
+
+.en-topstrip-nav {
+  top: 4px !important;
+  left: 56px !important;
+}
+
+.en-topstrip-nav-macos {
+  top: 4px !important;
+  left: 84px !important;
+}
+
+.en-floating-surfaces .en-topstrip {
+  background: var(--en-bg) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+}
+
+.en-floating-surfaces .en-sidebar-resizer {
+  width: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+
+/* The floating shell owns the visible surfaces. Keep the resize hit target
+ * keyboard/pointer accessible without leaving a stray vertical handle between
+ * the sidebar and the canvas. */
+.en-floating-surfaces .en-sidebar-resizer::after {
+  display: none !important;
+}
+
+.en-floating-surfaces .en-sidebar {
+  border-right: 0 !important;
+}
+
+.en-floating-surfaces .en-body-main {
+  border-left: 0 !important;
+}
+
+.en-floating-surfaces .en-rail {
+  background: var(--en-bg) !important;
+  box-shadow: none !important;
+  gap: 12px !important;
+}
+
+.en-floating-surfaces .en-rail-icon,
+.en-floating-surfaces .en-rail-vault {
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--en-text) 16%, transparent) !important;
+}
+
+.en-floating-surfaces .en-note-topbar {
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
   background: var(--en-bg) !important;
 }

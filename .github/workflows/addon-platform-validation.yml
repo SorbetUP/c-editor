@@ -25,12 +25,12 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Materialize official addons
-        run: node build/scripts/sync-elephant-addons.mjs
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - name: Materialize official addons
+        run: node build/scripts/sync-elephant-addons.mjs
 
       - name: Validate integrated official addon catalogue
         shell: bash
@@ -46,16 +46,22 @@ jobs:
           node build/scripts/validate-integrated-addon-packs.mjs \
             2>&1 | tee addon-pack-tests.txt
 
-      - name: Package full app access reference addon
+      - name: Package every example addon
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/addons
-          node build/scripts/package-addon.mjs \
-            examples/addons/trusted-workspace-lab \
-            build/addons/trusted-workspace-lab.enaddon \
-            2>&1 | tee trusted-addon-package.txt
-          unzip -t build/addons/trusted-workspace-lab.enaddon
+          mkdir -p build/addons/examples
+          : > example-addon-packages.txt
+          for source in examples/addons/*
+          do
+            [ -d "$source" ] || continue
+            slug="$(basename "$source")"
+            node build/scripts/package-addon.mjs \
+              "$source" \
+              "build/addons/examples/$slug.enaddon" \
+              2>&1 | tee -a example-addon-packages.txt
+            unzip -t "build/addons/examples/$slug.enaddon"
+          done
 
       - name: Package every integrated physical addon
         shell: bash
@@ -78,6 +84,15 @@ jobs:
             fi
           done
           find build/out/addons/releases -name '*.enaddon' -print -exec unzip -t {} \; 2>/dev/null || true
+
+      - name: Exercise every complete official addon pack
+        shell: bash
+        env:
+          ELEPHANT_E2E_ADDON_RELEASE_ROOT: build/out/addons/releases
+        run: |
+          set -o pipefail
+          node build/scripts/test-official-addon-packs.mjs \
+            2>&1 | tee addon-pack-usage.txt
 
       - name: Package Android and iOS Code execution variants
         shell: bash
@@ -174,8 +189,9 @@ jobs:
           path: |
             addon-catalog-tests.txt
             addon-pack-tests.txt
+            addon-pack-usage.txt
             addon-tests.txt
-            trusted-addon-package.txt
+            example-addon-packages.txt
             physical-addon-packages.txt
             mobile-addon-packages.txt
             addon-build.txt

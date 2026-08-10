@@ -56,3 +56,35 @@ export const createDomEditor = (root, doc = globalThis.document) => {
     focus() { root.focus?.() }
   }
 }
+
+const selectionBoundaryElement = (node) => {
+  if (!node) return null
+  return node.nodeType === 1 ? node : node.parentElement
+}
+
+/**
+ * A contenteditable root can become the boundary of a range when the user
+ * starts a drag in its padding. That range contains no editor text, but Muya
+ * still receives it as a selection and may try to scroll it into view.
+ */
+export const isPaddingOnlySelection = (selection, editorRoot) => {
+  if (!selection || !editorRoot || selection.rangeCount === 0) return false
+  const range = selection.getRangeAt(0)
+  if (!editorRoot.contains(range.startContainer) || !editorRoot.contains(range.endContainer)) return false
+  const selectedText = selection.toString?.() || ''
+  if (selectedText.trim()) return false
+
+  const start = selectionBoundaryElement(range.startContainer)
+  const end = selectionBoundaryElement(range.endContainer)
+  return range.startContainer === editorRoot ||
+    range.endContainer === editorRoot ||
+    range.commonAncestorContainer === editorRoot ||
+    start === editorRoot ||
+    end === editorRoot
+}
+
+export const clearPaddingOnlySelection = (selection, editorRoot) => {
+  if (!isPaddingOnlySelection(selection, editorRoot)) return false
+  selection.removeAllRanges()
+  return true
+}

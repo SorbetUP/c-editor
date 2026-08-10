@@ -127,7 +127,7 @@ export default function image(h, cursor, block, token, outerClass) {
         props: { alt: alt.replace(/[`*{}[\]()#+\-.!_>~:|<>$]/g, ''), src: domsrc, title }
       }
 
-      if (typeof width === 'number') {
+      if (width !== undefined && width !== '') {
         Object.assign(data.props, { width })
       }
 

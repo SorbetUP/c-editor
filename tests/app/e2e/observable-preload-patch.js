@@ -11,6 +11,7 @@ const redactObservableValue = (value, key = '', seen = new WeakSet()) => {
   if (secretPattern.test(String(key || ''))) return '[REDACTED_SECRET_VALUE]'
   if (value === null || value === undefined) return value
   if (typeof value === 'bigint') return String(value)
+  if (typeof value === 'string' && value.length > 512) return value.slice(0, 509) + '... [truncated ' + value.length + ' chars]'
   if (typeof value !== 'object') return value
   if (seen.has(value)) return '[CIRCULAR]'
   seen.add(value)

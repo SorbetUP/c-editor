@@ -64,10 +64,13 @@ let rendererServer = null
 const createWindow = async () => {
   rendererServer = await startRendererServer()
   const address = rendererServer.address()
+  // E2E runs are background checks by default. A visible window is an explicit
+  // opt-in for local visual debugging and must never steal the user's focus.
+  const showTestWindow = process.env.ELEPHANT_E2E_SHOW_WINDOW === '1' && process.env.ELEPHANT_E2E_HIDE_WINDOW !== '1'
   const window = new BrowserWindow({
     width: 1280,
     height: 720,
-    show: true,
+    show: showTestWindow,
     backgroundColor: '#ffffff',
     webPreferences: {
       preload,

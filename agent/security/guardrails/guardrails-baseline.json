@@ -60,6 +60,12 @@
       "file": ".github/workflows/publish-native-addon-packages.yml",
       "value": "contents: write",
       "reason": "Dedicated release workflow: it publishes signed and hashed platform-specific .enaddon archives to feature/physical-addon-catalog. It has no pull_request trigger and needs branch write access only for the final catalogue publication job."
+    },
+    {
+      "id": "GITHUB_ACTIONS_WRITE_PERMISSION",
+      "file": ".github/workflows/actions-storage-cleanup.yml",
+      "value": "actions: write",
+      "reason": "Dedicated scheduled maintenance workflow: it deletes only repository Actions artifacts and caches through the GitHub Actions API. It has no pull_request trigger, runs on main/develop or manual dispatch, and requires actions: write for the delete endpoints."
     }
   ]
 }

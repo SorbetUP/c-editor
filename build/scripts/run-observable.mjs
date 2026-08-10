@@ -25,7 +25,7 @@ const startedAt = new Date()
 const runId = `${startedAt.toISOString().replaceAll(':', '-').replaceAll('.', '-')}-${label}-${process.pid}`
 const outputRoot = path.resolve(
   repositoryRoot,
-  process.env.ELEPHANT_OBSERVABILITY_DIR || 'test-results/observability'
+  process.env.ELEPHANT_OBSERVABILITY_DIR || 'test-results-observability'
 )
 const rawLogPath = path.join(outputRoot, `${runId}.log`)
 const eventLogPath = path.join(outputRoot, `${runId}.ndjson`)

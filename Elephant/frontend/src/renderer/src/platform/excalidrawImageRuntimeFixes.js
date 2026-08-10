@@ -20,6 +20,18 @@ const decodeSafe = (value = '') => {
     return String(value || '')
   }
 }
+const decodePersistedPath = (value = '') => {
+  let decoded = String(value || '')
+  // Older image-loader passes could encode the same asset URL repeatedly.
+  // Normalize that persisted artifact at the URL/path boundary, while the
+  // bounded loop prevents malformed input from becoming an expensive decode.
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const next = decodeSafe(decoded)
+    if (next === decoded) break
+    decoded = next
+  }
+  return decoded
+}
 
 const errorDetails = (error) => ({
   name: error?.name || 'Error',
@@ -49,15 +61,24 @@ const pushExcalidrawImageLog = (level, message, details = {}) => {
 
 const localSourceToPath = (value = '') => {
   const text = stripQueryAndHash(value)
-  if (text.startsWith(LOCAL_FILE_PREFIX)) return decodeSafe(text.slice(LOCAL_FILE_PREFIX.length))
-  if (/^file:/i.test(text)) {
+  if (text.startsWith(LOCAL_FILE_PREFIX)) return decodePersistedPath(text.slice(LOCAL_FILE_PREFIX.length))
+  if (/^asset:/i.test(text)) {
     try {
-      return decodeSafe(new URL(text).pathname)
+      const pathname = new URL(text).pathname
+      const encodedAbsolutePath = pathname.startsWith('/%2F') ? pathname.slice(1) : pathname
+      return normalizeSlashes(decodePersistedPath(encodedAbsolutePath))
     } catch {
-      return decodeSafe(text.replace(/^file:\/\//i, ''))
+      return decodePersistedPath(text.replace(/^asset:\/\//i, ''))
     }
   }
-  return decodeSafe(text)
+  if (/^file:/i.test(text)) {
+    try {
+      return decodePersistedPath(new URL(text).pathname)
+    } catch {
+      return decodePersistedPath(text.replace(/^file:\/\//i, ''))
+    }
+  }
+  return decodePersistedPath(text)
 }
 
 const isAbsoluteLocalPath = (pathname = '') => {
@@ -258,7 +279,9 @@ const refreshImageSource = (img, source) => {
   const token = `${pathname}:${cacheBustSerial}`
   if (img.getAttribute(CACHE_BUST_ATTR) === token) return
   img.setAttribute(CACHE_BUST_ATTR, token)
-  img.dataset.elephantExcalidrawPath = pathname
+  if (img.dataset.elephantExcalidrawPath !== pathname) {
+    img.dataset.elephantExcalidrawPath = pathname
+  }
   const nextSrc = `${pathToDisplayUrl(pathname)}?v=${cacheBustSerial}`
   if (img.getAttribute('src') !== nextSrc) img.setAttribute('src', nextSrc)
 }
@@ -275,8 +298,11 @@ const ensureEditButton = (img, source) => {
   const button = document.createElement('button')
   button.type = 'button'
   button.className = 'en-excalidraw-edit-button'
-  button.textContent = '✎ Excalidraw'
+  button.setAttribute('aria-label', 'Edit Excalidraw drawing')
   button.title = 'Edit Excalidraw drawing'
+  button.dataset.testid = 'excalidraw-edit-button'
+  button.innerHTML = '<svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>'
+  button.style.cssText = 'position:absolute;top:10px;right:10px;z-index:3;width:32px;height:32px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--en-border, rgba(255,255,255,.24));border-radius:9px;background:var(--en-surface, rgba(25,25,28,.86));color:var(--en-text, #fff);box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer;'
   button.addEventListener('pointerdown', (event) => {
     event.preventDefault()
     event.stopPropagation()
@@ -346,7 +372,9 @@ const repairImage = (img) => {
   const source = imageSource(img) || img.dataset.elephantExcalidrawPath || ''
   if (!source) return false
   const resolvedPath = resolveExcalidrawAssetPath(source)
-  if (resolvedPath) img.dataset.elephantExcalidrawPath = resolvedPath
+  if (resolvedPath && img.dataset.elephantExcalidrawPath !== resolvedPath) {
+    img.dataset.elephantExcalidrawPath = resolvedPath
+  }
   removeLocalImageLoaders(img)
   refreshImageSource(img, resolvedPath || source)
   ensureEditButton(img, resolvedPath || source)
@@ -433,12 +461,29 @@ export const installExcalidrawImageRuntimeFixes = (target = globalThis) => {
   if (existing?.dispose) return existing
 
   let disposed = false
+  let repairFrame = null
+  const isRelevantImageNode = (node) => {
+    if (node?.nodeType !== 1) return false
+    if (node.matches?.('.ag-image-fail[data-image-src], .ag-image-fail[data-image-domsrc]')) return true
+    if (node.matches?.('img') && (imageSource(node) || node.dataset.elephantExcalidrawPath)) return true
+    return [...(node.querySelectorAll?.('img') || [])].some((img) => (
+      imageSource(img) || img.dataset.elephantExcalidrawPath
+    ))
+  }
+  const hasRelevantMutation = (records) => records.some((record) => {
+    if (record.type === 'attributes') {
+      return isRelevantImageNode(record.target)
+    }
+    return [...(record.addedNodes || [])].some(isRelevantImageNode)
+  })
   const repairSoon = () => {
     if (disposed) return
+    if (repairFrame !== null) return
     const schedule = typeof target.requestAnimationFrame === 'function'
       ? target.requestAnimationFrame.bind(target)
       : (typeof target.setTimeout === 'function' ? target.setTimeout.bind(target) : globalThis.setTimeout.bind(globalThis))
-    schedule(() => {
+    repairFrame = schedule(() => {
+      repairFrame = null
       if (!disposed) repairAllImages()
     })
   }
@@ -457,7 +502,7 @@ export const installExcalidrawImageRuntimeFixes = (target = globalThis) => {
       }, 80)
       return
     }
-    repairSoon()
+    if (hasRelevantMutation(records)) repairSoon()
   })
   const handleLoad = (event) => {
     if (!disposed && event.target?.tagName === 'IMG') repairImage(event.target)
@@ -482,7 +527,16 @@ export const installExcalidrawImageRuntimeFixes = (target = globalThis) => {
     repairImage(img)
   }
 
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'data-src', 'class'] })
+  // The repair routine changes classes and data attributes on the same images
+  // it inspects. Observing `class` turns that harmless normalization into a
+  // self-triggering MutationObserver loop. New nodes plus image source changes
+  // are sufficient to catch real editor updates.
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['src', 'data-src', 'data-origin-src', 'data-original-src']
+  })
   document.addEventListener('load', handleLoad, true)
   document.addEventListener('error', handleError, true)
   bus.on('invalidate-image-cache', refreshAllDrawings)
@@ -491,6 +545,11 @@ export const installExcalidrawImageRuntimeFixes = (target = globalThis) => {
     dispose() {
       disposed = true
       observer.disconnect()
+      if (repairFrame !== null) {
+        if (typeof target.cancelAnimationFrame === 'function') target.cancelAnimationFrame(repairFrame)
+        else target.clearTimeout?.(repairFrame)
+        repairFrame = null
+      }
       document.removeEventListener('load', handleLoad, true)
       document.removeEventListener('error', handleError, true)
       bus.off?.('invalidate-image-cache', refreshAllDrawings)

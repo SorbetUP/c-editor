@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { installNoteCitationRuntime } from '../../../../../../Elephant/frontend/src/renderer/src/platform/noteCitationRuntime.js'
+import {
+  appendCitationToCurrentNote,
+  installNoteCitationRuntime,
+  resolveInternalEntryLink,
+} from '../../../../../../Elephant/frontend/src/renderer/src/platform/noteCitationRuntime.js'
 
 describe('note citation runtime', () => {
   it('keeps the selected text when activating the citation action', async() => {
@@ -48,5 +52,32 @@ describe('note citation runtime', () => {
     expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining('> Selected citation text'))
     expect(dom.querySelector('[data-elephant-citation-feedback]')?.textContent).toContain('Citation copiée')
     runtime.dispose()
+  })
+
+  it('appends a citation at the last line when the active note has no selection', () => {
+    const editorStore = {
+      currentFile: {
+        id: 'target-note',
+        markdown: 'alpha\nomega',
+        muyaIndexCursor: {
+          anchor: { line: 1, ch: 0 },
+          focus: { line: 1, ch: 0 },
+        },
+        isSaved: true,
+      },
+    }
+
+    const result = appendCitationToCurrentNote(editorStore, '> quoted text')
+
+    expect(result).toBe('alpha\nomega\n\n> quoted text\n')
+    expect(editorStore.currentFile.markdown).toBe(result)
+    expect(editorStore.currentFile.isSaved).toBe(false)
+  })
+
+  it('resolves app-owned folder links used by drag and drop', () => {
+    expect(resolveInternalEntryLink('elephant://entry/Projects%2FAlpha')).toEqual({
+      path: 'Projects/Alpha',
+      kind: 'folder',
+    })
   })
 })

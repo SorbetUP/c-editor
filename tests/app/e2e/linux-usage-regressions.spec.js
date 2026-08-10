@@ -189,7 +189,11 @@ test.describe('Linux production-renderer usage regressions', () => {
 
   defineUsageTest('library-title-sort', async ({ page, checkpoint }) => {
     const before = await page.locator('.en-note-card:not(.is-folder) h3').allTextContents()
-    await page.locator('.en-library-actions .en-select').selectOption('title')
+    const sortButton = page.locator('.en-sort-cycle')
+    await expect(sortButton).toHaveAttribute('data-sort', 'updated-newest')
+    await sortButton.click()
+    await sortButton.click()
+    await expect(sortButton).toHaveAttribute('data-sort', 'title-az')
     await page.waitForTimeout(300)
     const after = await page.locator('.en-note-card:not(.is-folder) h3').allTextContents()
     const normalized = after.map((title) => title.trim()).filter(Boolean)

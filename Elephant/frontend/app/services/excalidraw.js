@@ -16,11 +16,10 @@ export {
 } from 'common/elephantnote/excalidrawAssets'
 
 export const resolveExcalidrawModule = (mod) => {
-  const resolved = mod?.Excalidraw
-    ? mod
-    : mod?.default?.Excalidraw
-      ? mod.default
-      : mod?.default || mod
+  const namespaces = [mod?.default, mod].filter((value) => (
+    value && (typeof value === 'object' || typeof value === 'function')
+  ))
+  const resolved = Object.assign({}, ...namespaces)
 
   if (!resolved?.Excalidraw) {
     throw new Error('Excalidraw could not be loaded from the installed package.')
@@ -103,11 +102,43 @@ const isEmptyScene = (data) => {
   return nonDeleted.length === 0 && fileCount === 0
 }
 
+const readSceneFromBlob = async(blob) => {
+  try {
+    const data = JSON.parse(await blob.text())
+    if (data?.type === 'excalidraw' && Array.isArray(data.elements)) return data
+  } catch {
+    // Non-JSON blobs are image-backed drawings and use the existing loader below.
+  }
+  return null
+}
+
+const blobToDataUrl = async(blob) => {
+  if (typeof FileReader !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(reader.error || new Error('Failed to read Excalidraw image.'))
+      reader.readAsDataURL(blob)
+    })
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  const base64 = typeof btoa === 'function'
+    ? btoa(binary)
+    : Buffer.from(bytes).toString('base64')
+  return `data:${blob.type || 'application/octet-stream'};base64,${base64}`
+}
+
 const createSceneFromImageBlob = async(blob, theme) => {
-  const { getDataURL, MIME_TYPES } = await loadExcalidrawModule()
+  const { MIME_TYPES } = await loadExcalidrawModule()
   const now = Date.now()
   const fileId = globalThis.crypto?.randomUUID?.() || `${now}-${Math.random()}`
-  const dataURL = await getDataURL(blob)
+  const dataURL = await blobToDataUrl(blob)
   const { width: naturalWidth, height: naturalHeight } = await blobToImageSize(blob)
   const maxW = 1200
   const maxH = 900
@@ -169,20 +200,26 @@ const createSceneFromImageBlob = async(blob, theme) => {
   }
 }
 
-export const createInitialExcalidrawData = async({ blob, theme }) => {
+export const createInitialExcalidrawData = async({ blob, fileName = '', theme }) => {
   if (!blob) {
     return createEmptyExcalidrawScene(theme)
   }
 
+  const sourceBlob = !blob.type && /\.png$/i.test(fileName)
+    ? new Blob([blob], { type: 'image/png' })
+    : blob
+  const scene = await readSceneFromBlob(sourceBlob)
+  if (scene) return scene
+
   const { loadFromBlob } = await loadExcalidrawModule()
   try {
-    const restored = await loadFromBlob(blob, null, null)
+    const restored = await loadFromBlob(sourceBlob, null, null)
     if (isEmptyScene(restored)) {
-      return createSceneFromImageBlob(blob, theme)
+      return createSceneFromImageBlob(sourceBlob, theme)
     }
     return restored
   } catch {
-    return createSceneFromImageBlob(blob, theme)
+    return createSceneFromImageBlob(sourceBlob, theme)
   }
 }
 

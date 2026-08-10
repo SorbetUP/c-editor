@@ -16,7 +16,7 @@ export const installNoteCitationSelectionGuard = (target = globalThis.window) =>
   target[RUNTIME_KEY]?.dispose?.()
 
   const preserveEditorSelection = (event) => {
-    const citationButton = event.target?.closest?.('[data-elephant-note-citation]')
+    const citationButton = event.target?.closest?.('[data-elephant-citation-selection-action], [data-elephant-note-citation]')
     if (!citationButton) return
     const editorHost = target.document.querySelector('.en-editor-host')
     if (!selectionBelongsToEditor(target.getSelection?.(), editorHost)) return

@@ -1,0 +1,5 @@
+bin/
+obj/
+TestResults/
+*.user
+src/ElephantNote.Avalonia/Assets/Muya/

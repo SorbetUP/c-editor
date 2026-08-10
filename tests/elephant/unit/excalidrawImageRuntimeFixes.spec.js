@@ -84,8 +84,119 @@ describe('Excalidraw image runtime fixes', () => {
 
     const runtime = installExcalidrawImageRuntimeFixes(window)
     expect(typeof runtime.dispose).toBe('function')
+    const editButton = container.querySelector('[data-testid="excalidraw-edit-button"]')
+    expect(editButton).not.toBeNull()
+    expect(editButton.getAttribute('aria-label')).toBe('Edit Excalidraw drawing')
+    expect(editButton.querySelector('svg')).not.toBeNull()
+    expect(editButton.textContent).not.toContain('Excalidraw')
     expect(img.getAttribute('src')).toContain('data:image/png;base64,')
     expect(convertFileSrcMock).not.toHaveBeenCalled()
+  })
+
+  it('decodes an asset URL once instead of accumulating percent-encoding on every repair pass', async() => {
+    window.__ELEPHANT_GET_ACTIVE_VAULT_PATH__ = () => '/vault'
+    convertFileSrcMock.mockImplementation((pathname) => `asset://localhost/${encodeURIComponent(pathname)}`)
+    const container = document.createElement('div')
+    container.className = 'ag-image-container'
+
+    const img = document.createElement('img')
+    img.setAttribute('src', 'asset://localhost/%2Fvault%2F.assets%2Fexcalidraw-mon%252525252520dessin.png')
+    setImageComplete(img, true)
+    container.appendChild(img)
+    document.body.appendChild(container)
+
+    const runtime = installExcalidrawImageRuntimeFixes(window)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(convertFileSrcMock).toHaveBeenCalledWith('/vault/.assets/excalidraw-mon dessin.png')
+    expect(img.dataset.elephantExcalidrawPath).toBe('/vault/.assets/excalidraw-mon dessin.png')
+    expect(convertFileSrcMock.mock.calls).toHaveLength(1)
+
+    runtime.dispose()
+  })
+
+  it('does not reschedule indefinitely for repair mutations and disposes pending observer work', async() => {
+    const pendingFrames = new Map()
+    let nextFrameId = 0
+    window.requestAnimationFrame = vi.fn((callback) => {
+      const frameId = ++nextFrameId
+      pendingFrames.set(frameId, callback)
+      return frameId
+    })
+    window.cancelAnimationFrame = vi.fn((frameId) => pendingFrames.delete(frameId))
+    const runNextFrame = () => {
+      const next = pendingFrames.entries().next().value
+      if (!next) return false
+      pendingFrames.delete(next[0])
+      next[1]()
+      return true
+    }
+
+    const container = document.createElement('div')
+    container.className = 'ag-image-container'
+    const img = document.createElement('img')
+    img.setAttribute('data-src', 'file:///vault/.assets/excalidraw-loop-guard.png')
+    setImageComplete(img, true)
+    container.appendChild(img)
+    document.body.appendChild(container)
+
+    const repairMutations = []
+    const mutationProbe = new MutationObserver((records) => repairMutations.push(...records))
+    mutationProbe.observe(container, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: [
+        'class',
+        'data-elephant-excalidraw-edit-installed',
+        'data-elephant-excalidraw-cache-bust',
+        'data-elephant-excalidraw-path'
+      ]
+    })
+
+    const runtime = installExcalidrawImageRuntimeFixes(window)
+    expect(runNextFrame()).toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(repairMutations.some(({ attributeName }) => attributeName === 'class')).toBe(true)
+    expect(repairMutations.some(({ attributeName }) => attributeName?.startsWith('data-elephant'))).toBe(true)
+    expect(pendingFrames.size).toBe(1)
+    expect(runNextFrame()).toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(pendingFrames.size).toBe(0)
+
+    window.requestAnimationFrame.mockClear()
+    container.classList.add('unrelated-class-mutation')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(window.requestAnimationFrame).not.toHaveBeenCalled()
+
+    const unrelatedNode = document.createElement('div')
+    unrelatedNode.textContent = 'editor mutation'
+    document.body.appendChild(unrelatedNode)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(window.requestAnimationFrame).not.toHaveBeenCalled()
+
+    img.setAttribute('data-src', 'file:///vault/.assets/excalidraw-loop-guard-next.png')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(pendingFrames.size).toBe(1)
+
+    runtime.dispose()
+    mutationProbe.disconnect()
+
+    expect(window.cancelAnimationFrame).toHaveBeenCalledTimes(1)
+    expect(pendingFrames.size).toBe(0)
+    expect(busMock.off).toHaveBeenCalledWith('invalidate-image-cache', expect.any(Function))
+    expect(window.__ELEPHANT_EXCALIDRAW_IMAGE_RUNTIME_FIXES__).toBeUndefined()
+
+    window.requestAnimationFrame.mockClear()
+    container.classList.add('after-dispose-class-mutation')
+    img.setAttribute('src', 'file:///vault/.assets/excalidraw-loop-guard-next.png')
+    await Promise.resolve()
+    expect(window.requestAnimationFrame).not.toHaveBeenCalled()
   })
 
   it('rebuilds a failed Excalidraw image container from the local asset on disk', async() => {

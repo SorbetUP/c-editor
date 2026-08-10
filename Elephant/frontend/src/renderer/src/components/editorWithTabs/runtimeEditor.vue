@@ -14,6 +14,7 @@
     <div
       ref="editorRef"
       class="editor-component"
+      data-testid="muya-runtime-editor"
     />
     <div
       v-show="imageViewerVisible"
@@ -36,7 +37,7 @@
       center
       dir="ltr"
     >
-      <template #title>
+      <template #header>
         <div class="dialog-title">
           {{ t('editor.insertTable.title') }}
         </div>
@@ -121,6 +122,7 @@ import { useProjectStore } from '@/store/project'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { dispatchMuyaChange } from './runtimeEditorChanges'
+import { clearPaddingOnlySelection } from '@/muya/selectionRuntime'
 
 import 'muya/themes/default.css'
 import CloseIcon from '@/assets/icons/close.svg'
@@ -228,6 +230,10 @@ let switchLanguageCommand = null
 let imageViewer = null
 let disposeEditorRuntimeResource = null
 const editorRuntimeListeners = new Set()
+let pointerSelection = false
+let markPointerSelection = null
+let taskCheckboxClickHandler = null
+let clearPaddingSelection = null
 
 class SimpleImageViewer {
   constructor (container, { url }) {
@@ -884,22 +890,25 @@ const handleUploadedImage = (url, deletionUrl) => {
 
 const scrollToCursor = (duration = 300) => {
   nextTick(() => {
-    const { container } = editor.value
-    if (!container) return
-    const { y } = editor.value.getSelection().cursorCoords
+    const container = editor.value?.container
+    if (!container || !editor.value) return
+    const cursorCoords = editor.value.getSelection?.()?.cursorCoords
+    if (!cursorCoords || !Number.isFinite(cursorCoords.y)) return
+    const { y } = cursorCoords
     animatedScrollTo(container, container.scrollTop + y - STANDAR_Y, duration)
   })
 }
 
 const scrollToCords = (y) => {
-  const { container } = editor.value
+  const container = editor.value?.container
+  if (!container) return
   // Depending on how much the user previously scrolled, sometimes the container has not fully rendered all elements.
   // Hence, container.scrollHeight < [saved scrollTop]
   // What we need to do is to temporarily add a padding to the container so that we can actually set the scrollTop without getting clamped.
 
   const maxScrollHeight = container.scrollHeight - container.clientHeight // max scroll height is actually calculated as such
-  if (y > maxScrollHeight) {
-    const editorId = container.firstElementChild
+  const editorId = container.firstElementChild
+  if (editorId && y > maxScrollHeight) {
     editorId.style.paddingBottom = `${y - maxScrollHeight + 100}px` // 100px is the default ag-editor-id padding
     // attach a resize observer so we know when to remove the padding when it is of the "correct" height
     resizeObserverForEditor.observe(editorId)
@@ -1164,13 +1173,15 @@ const handleScreenShot = () => {
 }
 
 const handleResetPaddingBottom = () => {
-  const { container } = editor.value
+  const container = editor.value?.container
+  if (!container || !container.firstElementChild) return
+  const currentPadding = Number.parseFloat(container.firstElementChild.style.paddingBottom) || 0
   const newScollableHeightWithoutPadding =
     container.scrollHeight -
     container.clientHeight -
-    parseFloat(container.firstElementChild.style.paddingBottom)
+    currentPadding
 
-  if (newScollableHeightWithoutPadding > currentFile.value.scrollTop) {
+  if (newScollableHeightWithoutPadding > Number(currentFile.value?.scrollTop || 0)) {
     container.style.paddingBottom = ''
     resizeObserverForEditor.unobserve(container.firstElementChild) // unobserve #ag-editor-id since we have removed the padding
   }
@@ -1265,6 +1276,30 @@ onMounted(() => {
 
   const { container } = editor.value
 
+  // Install pointer/checkbox listeners once per editor instance. Installing
+  // them from scroll restoration caused duplicate handlers after every tab
+  // switch and made a checkbox change publish several changes recursively.
+  markPointerSelection = () => {
+    pointerSelection = true
+  }
+  container.addEventListener('pointerdown', markPointerSelection, { passive: true })
+  taskCheckboxClickHandler = (event) => {
+    const checkbox = event.target?.closest?.('input.ag-task-list-item-checkbox, [data-muya-rust-task-checkbox]')
+    if (!checkbox || !container.contains(checkbox)) return
+    // Muya/Rust updates the task block during the delegated click handler and
+    // the browser toggles the native checked property as the click default
+    // action. Publish once after both have completed.
+    window.setTimeout(() => {
+      if (editor.value === null || editor.value?.container !== container) return
+      editor.value.dispatchChange()
+    }, 0)
+  }
+  container.addEventListener('click', taskCheckboxClickHandler, true)
+  clearPaddingSelection = () => {
+    clearPaddingOnlySelection(window.getSelection?.(), container)
+  }
+  document.addEventListener('selectionchange', clearPaddingSelection)
+
   // Listen for language changes and update Muya's translation function
   bus.on('language-changed', handleLanguageChanged)
 
@@ -1357,7 +1392,9 @@ onMounted(() => {
 
   editor.value.on('selectionChange', (changes) => {
     const { y } = changes.cursorCoords
-    if (typewriter.value) {
+    const selectionWasPointerDriven = pointerSelection
+    pointerSelection = false
+    if (!selectionWasPointerDriven && typewriter.value) {
       const startPosition = container.scrollTop
       const toPosition = startPosition + y - STANDAR_Y
 
@@ -1368,7 +1405,7 @@ onMounted(() => {
     }
 
     // Used to fix #628: auto scroll cursor to visible if the cursor is too low.
-    if (container.clientHeight - y < 100) {
+    if (!selectionWasPointerDriven && container.clientHeight - y < 100) {
       // editableHeight is the lowest cursor position(till to top) that editor allowed.
       const editableHeight = container.clientHeight - 100
       animatedScrollTo(container, container.scrollTop + (y - editableHeight), 0)
@@ -1430,6 +1467,13 @@ onMounted(() => {
   editor.value.off('heading-copy-link')
   editor.value.off('format-click')
   editor.value.off('selectionChange')
+  if (markPointerSelection) editor.value.container?.removeEventListener('pointerdown', markPointerSelection)
+  markPointerSelection = null
+  pointerSelection = false
+  if (taskCheckboxClickHandler) editor.value.container?.removeEventListener('click', taskCheckboxClickHandler, true)
+  taskCheckboxClickHandler = null
+  if (clearPaddingSelection) document.removeEventListener('selectionchange', clearPaddingSelection)
+  clearPaddingSelection = null
   editor.value.off('selectionFormats')
 
   resizeObserverForEditor.disconnect()

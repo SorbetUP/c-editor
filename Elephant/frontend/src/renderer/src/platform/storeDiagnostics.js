@@ -10,6 +10,8 @@ const ROOT_ASSET_REFERENCE_RE = /(!\[[^\]]*\]\()(\.assets\/[^)\s]+)([^)]*)(\))/g
 const PROGRAMMATIC_MARKDOWN_PROTECTION_MS = 5_000
 const tabMarkdownSnapshots = new Map()
 const protectedProgrammaticMarkdown = new Map()
+const rootAssetRewriteSnapshots = new Map()
+const rootAssetRewriteInFlight = new Set()
 
 const summarizeProject = (store) => ({
   root: store.projectTree?.pathname || null,
@@ -39,6 +41,13 @@ const encodeMarkdownAssetPath = (value = '') => normalizeSlashPath(value)
   .split('/')
   .map((segment) => encodeURIComponent(segment).replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`))
   .join('/')
+const decodeMarkdownAssetPath = (value = '') => {
+  try {
+    return decodeURI(normalizeSlashPath(value))
+  } catch {
+    return normalizeSlashPath(value)
+  }
+}
 
 const shouldIgnoreProgrammaticStaleEcho = (change = {}) => {
   const protection = protectedProgrammaticMarkdown.get(change.id)
@@ -81,7 +90,7 @@ const getVaultRootPath = (vaultStore, projectStore) => {
     ''
 }
 
-const noteRelativeRootAssetPath = (assetSource, tab, vaultStore, projectStore) => {
+export const noteRelativeRootAssetPath = (assetSource, tab, vaultStore, projectStore) => {
   const vaultRoot = getVaultRootPath(vaultStore, projectStore)
   const notePath = tab?.pathname || ''
   const pathApi = globalThis.window?.path
@@ -89,7 +98,7 @@ const noteRelativeRootAssetPath = (assetSource, tab, vaultStore, projectStore) =
     return assetSource
   }
   const noteDirectory = pathApi.dirname(notePath)
-  const assetPath = pathApi.join(vaultRoot, assetSource)
+  const assetPath = pathApi.join(vaultRoot, decodeMarkdownAssetPath(assetSource))
   const relativePath = normalizeSlashPath(pathApi.relative(noteDirectory, assetPath))
   if (!relativePath || pathApi.isAbsolute?.(relativePath)) return assetSource
   return encodeMarkdownAssetPath(relativePath)
@@ -97,36 +106,48 @@ const noteRelativeRootAssetPath = (assetSource, tab, vaultStore, projectStore) =
 
 const rewriteRootAssetMarkdownReferencesIfNeeded = (tab, vaultStore, projectStore) => {
   if (!tab?.id || typeof tab.markdown !== 'string' || !tab.markdown.includes('](.assets/')) return false
+  if (rootAssetRewriteInFlight.has(tab.id)) return false
+  const previousRewrite = rootAssetRewriteSnapshots.get(tab.id)
+  if (previousRewrite?.input === tab.markdown || previousRewrite?.output === tab.markdown) return false
+
+  const originalMarkdown = tab.markdown
   let rewrittenCount = 0
-  const nextMarkdown = tab.markdown.replace(ROOT_ASSET_REFERENCE_RE, (full, prefix, source, suffix, close) => {
+  const nextMarkdown = originalMarkdown.replace(ROOT_ASSET_REFERENCE_RE, (full, prefix, source, suffix, close) => {
     const replacement = noteRelativeRootAssetPath(source, tab, vaultStore, projectStore)
     if (replacement !== source) rewrittenCount += 1
     return `${prefix}${replacement}${suffix}${close}`
   })
-  if (!rewrittenCount || nextMarkdown === tab.markdown) return false
-  tab.markdown = nextMarkdown
-  tab.isSaved = false
-  protectedProgrammaticMarkdown.set(tab.id, {
-    markdown: nextMarkdown,
-    until: Date.now() + PROGRAMMATIC_MARKDOWN_PROTECTION_MS
-  })
-  bus.emit('file-changed', {
-    id: tab.id,
-    markdown: nextMarkdown,
-    cursor: tab.cursor || null,
-    muyaIndexCursor: tab.muyaIndexCursor || null,
-    renderCursor: false,
-    history: tab.history,
-    blocks: tab.blocks
-  })
-  pushDiagnosticLog('info', 'editor-state:rewrote-root-vault-assets-relative-to-note', {
-    id: tab.id,
-    pathname: tab.pathname || null,
-    vaultRoot: getVaultRootPath(vaultStore, projectStore) || null,
-    rewrittenCount,
-    markdownLength: nextMarkdown.length
-  })
-  return true
+  if (!rewrittenCount || nextMarkdown === originalMarkdown) return false
+
+  rootAssetRewriteInFlight.add(tab.id)
+  rootAssetRewriteSnapshots.set(tab.id, { input: originalMarkdown, output: nextMarkdown })
+  try {
+    tab.markdown = nextMarkdown
+    tab.isSaved = false
+    protectedProgrammaticMarkdown.set(tab.id, {
+      markdown: nextMarkdown,
+      until: Date.now() + PROGRAMMATIC_MARKDOWN_PROTECTION_MS
+    })
+    bus.emit('file-changed', {
+      id: tab.id,
+      markdown: nextMarkdown,
+      cursor: tab.cursor || null,
+      muyaIndexCursor: tab.muyaIndexCursor || null,
+      renderCursor: false,
+      history: tab.history,
+      blocks: tab.blocks
+    })
+    pushDiagnosticLog('info', 'editor-state:rewrote-root-vault-assets-relative-to-note', {
+      id: tab.id,
+      pathname: tab.pathname || null,
+      vaultRoot: getVaultRootPath(vaultStore, projectStore) || null,
+      rewrittenCount,
+      markdownLength: nextMarkdown.length
+    })
+    return true
+  } finally {
+    rootAssetRewriteInFlight.delete(tab.id)
+  }
 }
 
 const protectProgrammaticMarkdownIfNeeded = (tab, vaultStore, projectStore) => {

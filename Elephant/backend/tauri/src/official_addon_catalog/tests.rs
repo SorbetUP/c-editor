@@ -81,37 +81,11 @@ mod tests {
   }
 
   #[test]
-  fn immutable_sync_packages_cover_all_supported_desktop_targets() {
-    for platform in ["linux-x86_64", "macos-aarch64", "macos-x86_64", "windows-x86_64"] {
-      let (path, hash) = legacy_sync_package(platform).expect("supported Sync package");
-      assert!(path.starts_with("addons/sync/releases/elephant.sync-1.2.0-"));
-      assert!(path.ends_with(".enaddon"));
-      assert_eq!(hash.len(), 64);
-      assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    }
-    assert!(legacy_sync_package("android-aarch64").is_none());
-  }
-
-  #[test]
-  fn future_source_only_sync_versions_are_not_silently_downgraded() {
-    let item = sync_item("1.3.0");
-    assert!(!uses_legacy_sync_package(&item));
-    assert!(!available_for_platform(&item, "macos-aarch64"));
-  }
-
-  #[test]
-  fn current_sync_package_downloads_with_its_declared_service() {
-    if std::env::var_os("CI").is_none() {
-      return;
-    }
-    let platform = platform_key();
-    let Some((path, expected_hash)) = legacy_sync_package(&platform) else {
-      return;
-    };
-    let bytes = fetch_legacy_sync_bytes(path).expect("download immutable Sync package");
-    assert_eq!(blake3::hash(&bytes).to_hex().to_string(), expected_hash);
-    validate_prebuilt_package(&sync_item(LEGACY_SYNC_VERSION), &bytes)
-      .expect("real Sync package contains its declared executable");
+  fn source_only_sync_uses_the_addon_repository_package() {
+    let item = sync_item("1.2.0");
+    assert!(available_for_platform(&item, "macos-aarch64"));
+    assert!(item.packages.is_empty());
+    assert!(!item.requires_platform_package);
   }
 
   #[test]
@@ -120,7 +94,7 @@ mod tests {
     let sidecar = format!("native/{platform}/elephant-sync-service");
     let manifest = serde_json::json!({
       "id": "elephant.sync",
-      "version": LEGACY_SYNC_VERSION,
+      "version": "1.2.0",
       "runtime": { "entry": "main.service.js" },
       "permissions": { "native": true },
       "native": {
@@ -136,7 +110,7 @@ mod tests {
     writer.write_all(b"export default {};").unwrap();
     let bytes = writer.finish().unwrap().into_inner();
 
-    let error = validate_prebuilt_package(&sync_item(LEGACY_SYNC_VERSION), &bytes)
+    let error = validate_prebuilt_package(&sync_item("1.2.0"), &bytes)
       .expect_err("a package without its declared service must fail before installation");
     assert!(error.contains(&sidecar));
   }
@@ -153,7 +127,7 @@ mod tests {
       }
     });
     let files = BTreeMap::from([("manifest.json".to_string(), Vec::new())]);
-    let error = require_declared_sidecar(&sync_item(LEGACY_SYNC_VERSION), &manifest, &files)
+    let error = require_declared_sidecar(&sync_item("1.2.0"), &manifest, &files)
       .expect_err("missing native executables must fail during package construction");
     assert!(error.contains(&sidecar));
   }

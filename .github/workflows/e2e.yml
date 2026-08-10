@@ -140,6 +140,24 @@ jobs:
           set -euxo pipefail
           xvfb-run --auto-servernum pnpm test:e2e 2>&1 | tee e2e-tests.txt
 
+      - name: Run the linked official addon UI suite
+        shell: bash
+        run: |
+          set -euxo pipefail
+          xvfb-run --auto-servernum pnpm test:official-addons:e2e 2>&1 | tee official-addon-e2e.txt
+
+      - name: Run real example addon package UI flows
+        shell: bash
+        run: |
+          set -euxo pipefail
+          xvfb-run --auto-servernum pnpm test:example-addons:e2e 2>&1 | tee example-addon-e2e.txt
+
+      - name: Run complete official addon pack integration
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pnpm test:official-addon-packs 2>&1 | tee addon-pack-usage.txt
+
       - name: Build and run the packaged Tauri desktop acceptance scenario
         shell: bash
         run: |
@@ -174,9 +192,13 @@ jobs:
             official-addon-native-build.txt
             e2e-build.txt
             e2e-tests.txt
+            official-addon-e2e.txt
+            example-addon-e2e.txt
+            addon-pack-usage.txt
             tauri-linux-build.txt
             tauri-acceptance-tests.txt
             test-results/observability/**
+            test-results-observability/**
             test-results/e2e-results.json
             test-results/e2e-junit.xml
             test-results/**

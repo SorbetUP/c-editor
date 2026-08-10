@@ -55,7 +55,6 @@
           <template v-else>
             <div class="en-settings-page-title">
               <h1>{{ activeSectionMeta.label }}</h1>
-              <span v-if="activeSection === 'addons'" id="en-addons-title-actions" class="en-settings-title-actions" />
             </div>
 
             <template v-if="activeSection === 'appearance'">
@@ -86,6 +85,11 @@
                   </div>
                 </div>
 
+                <div class="en-settings-row">
+                  <div class="en-settings-row-copy"><strong>Floating surfaces</strong><span>Lift navigation, controls and the writing surface above the background.</span></div>
+                  <button class="en-switch" type="button" role="switch" aria-label="Floating surfaces" :aria-checked="preferences.floatingSurfaces" :class="{ active: preferences.floatingSurfaces }" @click="setPreference('floatingSurfaces', !preferences.floatingSurfaces)"><span /></button>
+                </div>
+
                 <div class="en-settings-row en-settings-row-stacked en-settings-row-compact">
                   <icon-rail-layout-settings />
                 </div>
@@ -103,7 +107,7 @@
                 <div class="en-settings-row"><div class="en-settings-row-copy"><strong>Pair quotes</strong><span>Automatically insert the matching closing quote.</span></div><button class="en-switch" type="button" role="switch" aria-label="Automatically pair quotes" :aria-checked="preferences.autoPairQuote" :class="{ active: preferences.autoPairQuote }" @click="setPreference('autoPairQuote', !preferences.autoPairQuote)"><span /></button></div>
                 <div class="en-settings-row"><div class="en-settings-row-copy"><strong>Spellchecker</strong><span>Check spelling while writing.</span></div><button class="en-switch" type="button" role="switch" aria-label="Enable spellchecker" :aria-checked="preferences.spellcheckerEnabled" :class="{ active: preferences.spellcheckerEnabled }" @click="setPreference('spellcheckerEnabled', !preferences.spellcheckerEnabled)"><span /></button></div>
                 <div class="en-settings-row"><div class="en-settings-row-copy"><strong>Code block line numbers</strong><span>Display line numbers in fenced code blocks.</span></div><button class="en-switch" type="button" role="switch" aria-label="Show code block line numbers" :aria-checked="preferences.codeBlockLineNumbers" :class="{ active: preferences.codeBlockLineNumbers }" @click="setPreference('codeBlockLineNumbers', !preferences.codeBlockLineNumbers)"><span /></button></div>
-                <div class="en-settings-row"><div class="en-settings-row-copy"><strong>Note margins</strong><span>Horizontal space around the title and text.</span></div><label class="en-range-control"><input type="range" min="8" max="160" step="4" :value="preferences.noteEditorMargin" @input="setNoteEditorMargin(Number($event.target.value))"><output>{{ preferences.noteEditorMargin }} px</output></label></div>
+                <div class="en-settings-row"><div class="en-settings-row-copy"><strong>Note margins</strong><span>Horizontal space around the title and text.</span></div><label class="en-range-control"><input type="range" min="8" max="48" step="4" :value="preferences.noteEditorMargin" @input="setNoteEditorMargin(Number($event.target.value))"><output>{{ preferences.noteEditorMargin }} px</output></label></div>
                 <div class="en-settings-row"><div class="en-settings-row-copy"><strong>Autosave</strong><span>Write changes to disk automatically.</span></div><button class="en-switch" type="button" role="switch" aria-label="Enable autosave" :aria-checked="preferences.autoSave" :class="{ active: preferences.autoSave }" @click="setPreference('autoSave', !preferences.autoSave)"><span /></button></div>
                 <div class="en-settings-row"><div class="en-settings-row-copy"><strong>Autosave delay</strong><span>How long ElephantNote waits after the last edit.</span></div><select class="en-compact-select" :disabled="!preferences.autoSave" :value="preferences.autoSaveDelay" @change="setPreference('autoSaveDelay', Number($event.target.value))"><option :value="250">Instant · 250 ms</option><option :value="500">Fast · 500 ms</option><option :value="1000">Balanced · 1 s</option><option :value="2000">Relaxed · 2 s</option><option :value="5000">Battery saver · 5 s</option></select></div>
               </section>
@@ -175,6 +179,7 @@ const CORE_SETTINGS_INDEX = Object.freeze([
   { id: 'appearance-mode', section: 'appearance', label: 'Color mode', description: 'Light and dark appearance.' },
   { id: 'appearance-language', section: 'appearance', label: 'Language', description: 'System, built-in and ISO language packs.' },
   { id: 'appearance-theme', section: 'appearance', label: 'Theme', description: 'Elephant, Apple, Graphite, Nord, Solar, Forest, Beige, Pastel and Gamer Violet themes.' },
+  { id: 'appearance-floating-surfaces', section: 'appearance', label: 'Floating surfaces', description: 'Lift navigation, controls and the writing surface above the background.' },
   { id: 'appearance-icon-rail', section: 'appearance', label: 'Vertical icon bar', description: 'Reorder, hide and divide navigation icons.' },
   { id: 'editor-footer', section: 'editor', label: 'Editor footer', description: 'Word count and typography controls.' },
   { id: 'editor-tags', section: 'editor', label: 'Tag prefix', description: 'Show or hide the # before tags.' },
@@ -325,7 +330,7 @@ const openSearchResult = (result) => {
 }
 const setPreference = (type, value) => preferences.SET_SINGLE_PREFERENCE({ type, value })
 const setQuickInsertTrigger = (value) => setPreference('quickInsertTrigger', String(value || '/').slice(0, 1))
-const setNoteEditorMargin = (value) => setPreference('noteEditorMargin', Math.max(8, Math.min(160, Number(value) || 24)))
+const setNoteEditorMargin = (value) => setPreference('noteEditorMargin', Math.max(8, Math.min(48, Number(value) || 12)))
 
 const removeVaultFromApp = async (vault) => {
   if (!vault?.id || !window.confirm(`Remove "${vault.name}" from ElephantNote? The folder stays on disk.`)) return

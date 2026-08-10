@@ -108,6 +108,11 @@ fn is_markdown_name(name: &str) -> bool {
   name.to_ascii_lowercase().ends_with(".md")
 }
 
+fn is_excalidraw_name(name: &str) -> bool {
+  let lower = name.to_ascii_lowercase();
+  lower.ends_with(".excalidraw") || lower.ends_with(".excalidraw.png")
+}
+
 fn title_from_name(name: &str) -> String {
   name.strip_suffix(".md").unwrap_or(name).to_string()
 }
@@ -137,7 +142,9 @@ fn markdown_preview(path: &Path, fallback_title: &str) -> Value {
 
   let raw = String::from_utf8_lossy(&buffer);
   let mut title = String::new();
+  let mut entry_type = String::from("note");
   let mut excerpt_lines = Vec::new();
+  let mut body_lines = Vec::new();
   let mut in_frontmatter = raw.trim_start().starts_with("---");
   let mut seen_frontmatter_start = false;
 
@@ -157,11 +164,18 @@ fn markdown_preview(path: &Path, fallback_title: &str) -> Value {
       if let Some(value) = trimmed.strip_prefix("title:") {
         title = value.trim().trim_matches('"').to_string();
       }
+      if let Some(value) = trimmed.strip_prefix("type:") {
+        let candidate = value.trim().trim_matches('"').trim_matches('\'');
+        if !candidate.is_empty() {
+          entry_type = candidate.to_string();
+        }
+      }
       continue;
     }
     if trimmed.is_empty() {
       continue;
     }
+    body_lines.push(trimmed.to_string());
     if title.is_empty() {
       if let Some(value) = trimmed.strip_prefix("# ") {
         title = value.trim().to_string();
@@ -180,7 +194,15 @@ fn markdown_preview(path: &Path, fallback_title: &str) -> Value {
   if title.is_empty() && !is_generated_untitled_title(fallback_title) {
     title = fallback_title.to_string();
   }
-  json!({ "title": title, "excerpt": excerpt_lines.join(" ") })
+  let is_legacy_drawing = entry_type == "note"
+    && body_lines.len() == 2
+    && body_lines[0].starts_with("# ")
+    && body_lines[1].starts_with("![Excalidraw:")
+    && body_lines[1].contains(".png");
+  if is_legacy_drawing {
+    entry_type = "drawing".to_string();
+  }
+  json!({ "title": title, "type": entry_type, "excerpt": excerpt_lines.join(" ") })
 }
 
 fn direct_markdown_note_count(path: &Path) -> usize {
@@ -199,6 +221,49 @@ fn direct_markdown_note_count(path: &Path) -> usize {
     .unwrap_or(0)
 }
 
+fn directory_preview_items(path: &Path) -> Vec<Value> {
+  let Ok(children) = fs::read_dir(path) else {
+    return Vec::new();
+  };
+
+  let mut items = children
+    .filter_map(Result::ok)
+    .filter(|child| {
+      child
+        .file_name()
+        .to_str()
+        .map(|name| !is_ignored_entry(name))
+        .unwrap_or(false)
+    })
+    .filter_map(|child| {
+      let name = child.file_name().to_string_lossy().to_string();
+      let is_directory = child.file_type().ok()?.is_dir();
+      Some(json!({
+        "title": title_from_name(&name),
+        "type": if is_directory {
+          "folder"
+        } else if is_markdown_name(&name) {
+          "note"
+        } else if is_excalidraw_name(&name) {
+          "drawing"
+        } else {
+          "file"
+        }
+      }))
+    })
+    .collect::<Vec<_>>();
+
+  items.sort_by(|left, right| {
+    left.get("title")
+      .and_then(Value::as_str)
+      .unwrap_or("")
+      .to_ascii_lowercase()
+      .cmp(&right.get("title").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase())
+  });
+  items.truncate(3);
+  items
+}
+
 fn entry_summary(root: &Path, path: &Path, metadata: &fs::Metadata, include_preview: bool) -> Value {
   let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("").to_string();
   let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/");
@@ -213,9 +278,16 @@ fn entry_summary(root: &Path, path: &Path, metadata: &fs::Metadata, include_prev
     "title": preview.get("title").and_then(Value::as_str).unwrap_or("").to_string(),
     "path": relative,
     "fullPath": path.to_string_lossy(),
-    "type": if is_dir { "folder" } else if is_markdown_name(&name) { "note" } else { "file" },
+    "type": if is_dir {
+      "folder".to_string()
+    } else if is_markdown_name(&name) {
+      preview.get("type").and_then(Value::as_str).unwrap_or("note").to_string()
+    } else {
+      "file".to_string()
+    },
     "isDirectory": is_dir,
     "noteCount": if is_dir { direct_markdown_note_count(path) } else { 0 },
+    "childrenPreview": if is_dir { directory_preview_items(path) } else { Vec::<Value>::new() },
     "preview": preview.get("excerpt").and_then(Value::as_str).unwrap_or("").to_string(),
     "excerpt": preview.get("excerpt").and_then(Value::as_str).unwrap_or("").to_string(),
     "updatedAt": metadata_updated_at(metadata)
@@ -395,6 +467,63 @@ mod tests {
     assert!(is_ignored_entry(".git"));
     assert!(is_ignored_entry(".elephantnote"));
     assert!(!is_ignored_entry("note.md"));
+  }
+
+  #[test]
+  fn preserves_drawing_type_from_markdown_frontmatter() {
+    let root = temp_dir("drawing-type");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+      root.join("Sketch.md"),
+      "---\ntitle: \"Sketch\"\ntype: \"drawing\"\n---\n\n![Excalidraw](.assets/sketch.png)\n",
+    )
+    .unwrap();
+    let entries = list_directory_page(&test_vault(&root), "", 0, None, true).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].get("type").and_then(Value::as_str), Some("drawing"));
+
+    let _ = fs::remove_dir_all(&root);
+  }
+
+  #[test]
+  fn classifies_legacy_drawing_note_shape_as_drawing() {
+    let root = temp_dir("legacy-drawing-type");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+      root.join("Legacy.md"),
+      "---\ntitle: \"Legacy\"\ntype: \"note\"\n---\n\n# Legacy\n\n![Excalidraw: Legacy](./.assets/excalidraw-Legacy.png)\n",
+    )
+    .unwrap();
+    let entries = list_directory_page(&test_vault(&root), "", 0, None, true).unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].get("type").and_then(Value::as_str), Some("drawing"));
+
+    let _ = fs::remove_dir_all(&root);
+  }
+
+  #[test]
+  fn includes_a_small_sorted_preview_for_folder_cards() {
+    let root = temp_dir("folder-preview");
+    fs::create_dir_all(root.join("Projects").join("Nested")).unwrap();
+    fs::write(root.join("Projects").join("zeta.md"), "# Zeta\n").unwrap();
+    fs::write(root.join("Projects").join("Alpha.md"), "# Alpha\n").unwrap();
+    fs::write(root.join("Projects").join("diagram.excalidraw"), "{}\n").unwrap();
+    fs::write(root.join("Projects").join("zzzz.txt"), "ignored from preview limit\n").unwrap();
+
+    let entries = list_directory_page(&test_vault(&root), "", 0, None, true).unwrap();
+    let folder = entries.iter().find(|entry| entry.get("title").and_then(Value::as_str) == Some("Projects")).unwrap();
+    let preview = folder.get("childrenPreview").and_then(Value::as_array).unwrap();
+
+    assert_eq!(preview.len(), 3);
+    assert_eq!(preview[0].get("title").and_then(Value::as_str), Some("Alpha"));
+    assert_eq!(preview[0].get("type").and_then(Value::as_str), Some("note"));
+    assert_eq!(preview[1].get("title").and_then(Value::as_str), Some("diagram.excalidraw"));
+    assert_eq!(preview[1].get("type").and_then(Value::as_str), Some("drawing"));
+    assert_eq!(preview[2].get("title").and_then(Value::as_str), Some("Nested"));
+
+    let _ = fs::remove_dir_all(&root);
   }
 
   #[test]

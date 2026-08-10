@@ -11,47 +11,63 @@ const svg = (kind) => {
   if (kind === 'sort') {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 6 3-3 3 3M6 3v14M21 18l-3 3-3-3M18 21V7"/></svg>'
   }
+  if (kind === 'sort-newest') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7 4-4 4 4M12 3v12M4 19h16M7 15h10"/></svg>'
+  }
+  if (kind === 'sort-oldest') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 17 4 4 4-4M12 21V9M4 5h16M7 9h10"/></svg>'
+  }
+  if (kind === 'sort-title-az') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h7M3 12h7M3 18h7M14 17l3-3 3 3M17 14v7"/></svg>'
+  }
+  if (kind === 'sort-title-za') {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h7M3 12h7M3 18h7M14 7l3 3 3-3M17 10V3"/></svg>'
+  }
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>'
 }
 
 const currentView = (target) => {
-  const listButton = target.document.querySelector('.en-view-toggle button[title="List"]')
-  return listButton?.classList.contains('active') ? 'list' : 'grid'
+  return target.document.querySelector('.en-view-cycle')?.dataset.viewMode || 'grid'
 }
 
 const setView = (target, mode) => {
-  const selector = mode === 'list'
-    ? '.en-view-toggle button[title="List"]'
-    : '.en-view-toggle button[title="Grid"]'
-  target.document.querySelector(selector)?.click()
+  const button = target.document.querySelector('.en-view-cycle')
+  if (button && currentView(target) !== mode) button.click()
 }
 
-const currentSort = (target) => target.document.querySelector('.en-library-actions .en-select')?.value || 'updated-newest'
+const currentSort = (target) => target.document.querySelector('.en-sort-cycle')?.dataset.sort || 'updated-newest'
 
-const setSort = (target, value) => {
-  const select = target.document.querySelector('.en-library-actions .en-select')
-  if (!select) return
-  select.value = value
-  select.dispatchEvent(new Event('input', { bubbles: true }))
-  select.dispatchEvent(new Event('change', { bubbles: true }))
+const setSort = (target, value, onDone) => {
+  const button = target.document.querySelector('.en-sort-cycle')
+  if (!button) return
+  const advance = () => {
+    if (currentSort(target) === value) {
+      onDone?.()
+      return
+    }
+    button.click()
+    target.requestAnimationFrame(advance)
+  }
+  advance()
 }
 
 const openSortSheet = (target) => {
   const active = currentSort(target)
   const options = [
-    ['updated-newest', 'Updated newest'],
-    ['updated-oldest', 'Updated oldest'],
-    ['title', 'Title A–Z']
+    ['updated-newest', 'Updated newest', 'sort-newest'],
+    ['updated-oldest', 'Updated oldest', 'sort-oldest'],
+    ['title-az', 'Title A–Z', 'sort-title-az'],
+    ['title-za', 'Title Z–A', 'sort-title-za']
   ]
   const backdrop = target.document.createElement('div')
   backdrop.className = 'en-mobile-sort-sheet-backdrop'
   backdrop.innerHTML = `
     <section class="en-mobile-sort-sheet" role="dialog" aria-modal="true" aria-label="Sort notes">
       <header><strong>Sort notes</strong></header>
-      <div>${options.map(([value, label]) => `
-        <button type="button" data-sort="${value}" class="${value === active ? 'active' : ''}">
+      <div>${options.map(([value, label, icon]) => `
+        <button type="button" data-sort="${value}" aria-label="${label}" title="${label}" class="${value === active ? 'active' : ''}">
           <span class="check">${value === active ? '✓' : ''}</span>
-          <span>${label}</span>
+          ${svg(icon)}
         </button>`).join('')}
       </div>
     </section>
@@ -61,8 +77,7 @@ const openSortSheet = (target) => {
     if (event.target === backdrop) close()
     const value = event.target.closest('[data-sort]')?.dataset.sort
     if (!value) return
-    setSort(target, value)
-    close()
+    setSort(target, value, close)
   })
   target.document.body.appendChild(backdrop)
 }

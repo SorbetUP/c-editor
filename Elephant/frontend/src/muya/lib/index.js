@@ -215,6 +215,7 @@ class Muya {
         item.listItemType || '',
         item.bulletMarkerOrDelimiter || '',
         item.isLooseListItem ? '1' : '0',
+        item.checked === true ? '1' : item.checked === false ? '0' : '',
         item.start ?? ''
       ]
       if (item.children?.length) {

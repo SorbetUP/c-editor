@@ -1,6 +1,10 @@
 import { formatShortDate } from '../services/markdownMetaService'
 
-const cardTitleFromName = (entry) => String(entry?.name || entry?.filename || '').replace(/\.md$/i, '')
+const cardTitleFromName = (entry) => String(entry?.name || entry?.filename || '')
+  .replace(/\.(?:md|excalidraw(?:\.png)?)$/i, '')
+
+const stripDrawingFileExtension = (value = '') => String(value || '')
+  .replace(/\.excalidraw(?:\.png)?$/i, '')
 
 const FRONTMATTER_KEYS = new Set([
   'title',
@@ -14,6 +18,7 @@ const FRONTMATTER_KEYS = new Set([
 ])
 
 const FRONTMATTER_BLOCK_PATTERN = /^---[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*---[ \t]*(?:\r?\n|$)/
+const DRAWING_IMAGE_PATTERN = /!\[\s*Excalidraw\s*:[^\]]*\]\(((?:\.\.?\/)*\.assets\/[^\s)]+\.png)(?:\s+[^)]*)?\)/ig
 const INLINE_FRONTMATTER_PAIR_PATTERN = new RegExp(
   `(?:^|\\s)(?:${Array.from(FRONTMATTER_KEYS).join('|')}):\\s*(?:"[^"]*"|'[^']*'|\\[[^\\]]*\\]|[^\\s]+)`,
   'gi'
@@ -69,10 +74,36 @@ const stripLeadingDocumentTitle = (value = '') => {
 
 const cleanPreview = (value) => stripLeadingDocumentTitle(stripFrontmatter(value))
 
-export const getNoteCardTitle = (entry) => entry?.title?.trim() || cardTitleFromName(entry) || 'Untitled'
+export const getNoteCardTitle = (entry) => stripDrawingFileExtension(
+  entry?.title?.trim() || cardTitleFromName(entry) || 'Untitled'
+)
 
 export const getNoteCardTypeLabel = (entry) => entry?.type?.trim() || 'Note'
 
 export const getNoteCardUpdatedLabel = (entry) => formatShortDate(entry?.updatedAt)
 
-export const getNoteCardExcerpt = (entry) => cleanPreview(entry?.excerpt || entry?.markdown || entry?.content) || 'No preview yet.'
+export const getNoteCardExcerpt = (entry) => {
+  if (/\.excalidraw(?:\.png)?$/i.test(String(entry?.path || entry?.name || entry?.filename || ''))) {
+    return 'No preview yet.'
+  }
+  return cleanPreview(entry?.excerpt || entry?.markdown || entry?.content) || 'No preview yet.'
+}
+
+export const getNoteCardDrawingPreview = (entry) => {
+  const explicitPreview = String(entry?.drawingPreview || '').trim()
+  if (/^(?:\.\.?\/)*\.assets\/[^/]+\.png$/i.test(explicitPreview)) return explicitPreview
+
+  const directDrawingPath = String(entry?.path || entry?.name || entry?.filename || '').trim()
+  if (/\.excalidraw\.png$/i.test(directDrawingPath)) return directDrawingPath
+  if (/\.excalidraw$/i.test(directDrawingPath)) {
+    return directDrawingPath.replace(/\.excalidraw$/i, '.png')
+  }
+
+  const candidates = [entry?.excerpt, entry?.preview, entry?.markdown, entry?.content]
+  for (const candidate of candidates) {
+    DRAWING_IMAGE_PATTERN.lastIndex = 0
+    const match = DRAWING_IMAGE_PATTERN.exec(String(candidate || ''))
+    if (match?.[1]) return match[1]
+  }
+  return ''
+}

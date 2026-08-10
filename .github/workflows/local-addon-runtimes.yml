@@ -1,0 +1,81 @@
+name: Native addon runtimes
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - .github/workflows/local-addon-runtimes.yml
+      - addons/official/**
+      - build/scripts/ensure-test-model.mjs
+      - tests/app/e2e/addon-ui/local-runtime/**
+      - tests/app/e2e/addon-ui/real-sync/**
+      - package.json
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/workflows/local-addon-runtimes.yml
+      - addons/official/**
+      - build/scripts/ensure-test-model.mjs
+      - tests/app/e2e/addon-ui/local-runtime/**
+      - tests/app/e2e/addon-ui/real-sync/**
+      - package.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-addon-runtimes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-runtimes:
+    name: macOS native addon runtime and cached model proof
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      ELEPHANT_E2E_LOCAL_RUNTIME_CACHE: ${{ github.workspace }}/.cache/elephant-e2e/local-runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ./.github/actions/setup
+
+      - name: Materialize the pinned addon source
+        shell: bash
+        run: pnpm addons:sync
+
+      - name: Cache the micro GGUF model
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/elephant-e2e/local-runtime
+          key: elephant-local-runtime-${{ runner.os }}-${{ hashFiles('build/scripts/ensure-test-model.mjs') }}
+
+      - name: Ensure Tesseract is installed
+        shell: bash
+        run: brew list tesseract >/dev/null 2>&1 || brew install tesseract
+
+      - name: Run the real two-process Sync scenario
+        shell: bash
+        run: pnpm test:sync-native:e2e 2>&1 | tee sync-native-e2e.txt
+
+      - name: Run Open Models, OCR and Knowledge with cached local runtime
+        shell: bash
+        run: pnpm test:local-addon-runtimes:e2e 2>&1 | tee local-addon-runtimes-e2e.txt
+
+      - name: Upload native runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-native-addon-runtime-evidence
+          path: |
+            sync-native-e2e.txt
+            local-addon-runtimes-e2e.txt
+            test-results/**
+            test-results/observability/**
+            test-results-observability/**
+          if-no-files-found: warn
+          retention-days: 30

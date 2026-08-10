@@ -161,7 +161,8 @@ const applyBlockAttributes = (element, kind) => {
     const checkbox = element.ownerDocument.createElement('input')
     checkbox.type = 'checkbox'
     checkbox.checked = checked
-    checkbox.tabIndex = -1
+    checkbox.tabIndex = 0
+    checkbox.setAttribute('aria-label', 'Toggle task')
     checkbox.setAttribute('data-muya-rust-task-checkbox', '')
     element.appendChild(checkbox)
   }

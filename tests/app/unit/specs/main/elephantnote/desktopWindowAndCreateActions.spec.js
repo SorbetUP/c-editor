@@ -8,6 +8,10 @@ const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'u
 const titleBar = read('Elephant/frontend/app/components/shell/TopVaultBar.vue')
 const libraryToolbar = read('Elephant/frontend/app/components/library/LibraryToolbar.vue')
 const createEntryMenu = read('Elephant/frontend/app/components/library/CreateEntryMenu.vue')
+const iconRail = read('Elephant/frontend/app/components/navigation/IconRail.vue')
+const createEntryActions = read('Elephant/frontend/app/components/library/createEntryActions.js')
+const noteCard = read('Elephant/frontend/app/components/library/NoteCard.vue')
+const excalidrawOverlay = read('Elephant/frontend/src/renderer/src/addons/builtin/ui/ExcalidrawEditorOverlay.vue')
 const linuxConfig = JSON.parse(read('Elephant/backend/tauri/tauri.linux.conf.json'))
 
 describe('desktop shell controls and creation actions', () => {
@@ -28,8 +32,13 @@ describe('desktop shell controls and creation actions', () => {
 
   it('exposes one create trigger and delegates the choices to its menu', () => {
     expect(libraryToolbar).toContain('<CreateEntryMenu')
-    expect(libraryToolbar).toContain('<span>{{ isBusy ? \'Creating…\' : \'Create\' }}</span>')
+    expect(libraryToolbar).toContain('aria-label="Create"')
+    expect(libraryToolbar).not.toContain('<span>{{ isBusy ? \'Creating…\' : \'Create\' }}</span>')
     expect(libraryToolbar).toContain('@click="toggle"')
+    expect(libraryToolbar).not.toContain('<select')
+    expect(libraryToolbar).toContain('ArrowDownNarrowWide')
+    expect(libraryToolbar).toContain('ArrowUpNarrowWide')
+    expect(libraryToolbar).toContain('ArrowDownAZ')
     expect(libraryToolbar).not.toContain('New note')
     expect(libraryToolbar).not.toContain('New folder')
     expect(libraryToolbar).not.toContain('New Excalidraw')
@@ -42,5 +51,19 @@ describe('desktop shell controls and creation actions', () => {
     expect(libraryToolbar).toContain('store.createFolder()')
     expect(libraryToolbar).toContain(':disabled="isBusy || !store.hasVault"')
     expect(libraryToolbar).toContain('role="alert"')
+  })
+
+  it('keeps the vault control directly above settings in the rail', () => {
+    expect(iconRail.indexOf('class="en-rail-bottom"')).toBeGreaterThanOrEqual(0)
+    expect(iconRail.indexOf('class="en-rail-bottom"')).toBeLessThan(iconRail.indexOf('class="en-rail-vault-wrap"'))
+  })
+
+  it('creates a named drawing note and renders drawing previews in the library card', () => {
+    expect(createEntryActions).toContain('createNoteOnSave: true')
+    expect(createEntryActions).toContain('askNameOnClose: true')
+    expect(excalidrawOverlay).toContain('const assetNameForSave = createNoteOnSave.value ? drawingAssetName(resolvedName) : resolvedName')
+    expect(excalidrawOverlay).toContain('window.path.join(vaultRoot, relativePath)')
+    expect(noteCard).toContain('getNoteCardDrawingPreview')
+    expect(noteCard).toContain('<img')
   })
 })

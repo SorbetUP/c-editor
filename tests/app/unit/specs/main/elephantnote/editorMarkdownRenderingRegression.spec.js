@@ -14,7 +14,7 @@ const markdown = [
   'literal code',
   '```',
   '',
-  '![drawing](../assets/excalidraw.png)',
+  '![drawing](assets/excalidraw.png)',
   '',
   '# ddd'
 ].join('\n')
@@ -45,7 +45,7 @@ describe('Muya Markdown rendering regression', () => {
     expect(surface.querySelector('h2 .ag-plain-text')?.textContent).toBe('Tasks')
     expect(surface.querySelector('input[type="checkbox"]')).not.toBeNull()
     expect(surface.querySelector('pre.ag-fence-code')?.textContent).toContain('literal code')
-    const image = surface.querySelector('.ag-inline-image[data-raw="![drawing](../assets/excalidraw.png)"]')
+    const image = surface.querySelector('.ag-inline-image[data-raw="![drawing](assets/excalidraw.png)"]')
     expect(image?.querySelector('.ag-image-container')).not.toBeNull()
     expect(surface.textContent).not.toContain('```text')
     expect(surface.textContent).not.toContain('![drawing]')

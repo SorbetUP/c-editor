@@ -163,6 +163,37 @@ describe('Excalidraw Tauri image loading', () => {
     }
   })
 
+  it('resolves repeatedly encoded file URLs before reading the local preview', async () => {
+    const wrapper = document.createElement('div')
+    const imageText = document.createElement('span')
+    imageText.className = 'ag-image-loading'
+    wrapper.appendChild(imageText)
+    document.body.appendChild(wrapper)
+
+    const originalQuerySelector = document.querySelector.bind(document)
+    document.querySelector = (selector) => {
+      if (String(selector || '').startsWith('#')) return imageText
+      return originalQuerySelector(selector)
+    }
+
+    try {
+      const context = {
+        loadImageMap: new Map(),
+        urlMap: new Map()
+      }
+      const encodedSource = 'file:///vault/.assets/excalidraw-mon%252525252520dessin.png'
+
+      loadImageAsync.call(context, { src: encodedSource }, {}, 'ag-image', 'ag-image')
+      await flushPromises()
+
+      expect(window.fileUtils.readFile).toHaveBeenCalledWith('/vault/.assets/excalidraw-mon dessin.png')
+      expect(imageText.classList.contains('ag-image-fail')).toBe(false)
+      expect(wrapper.querySelector('img')?.dataset.resolvedSrc).toMatch(/^data:image\/png;base64,/)
+    } finally {
+      document.querySelector = originalQuerySelector
+    }
+  })
+
   it('replaces a Tauri asset URL after the browser rejects an existing preview', async () => {
     window.__ELEPHANT_GET_ACTIVE_VAULT_PATH__ = () => '/vault'
 

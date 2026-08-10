@@ -1,6 +1,9 @@
 <template>
   <Teleport to="body">
-    <div class="en-excalidraw-overlay" :style="themeTokens">
+    <div
+      class="en-excalidraw-overlay"
+      :style="themeTokens"
+    >
       <section
         class="en-excalidraw-shell"
         data-testid="excalidraw-dialog"
@@ -17,6 +20,7 @@
               spellcheck="false"
               :placeholder="t('excalidraw.drawingPlaceholder')"
               :aria-label="t('excalidraw.drawingName')"
+              @input="markNameEdited"
               @pointerdown.stop
               @pointerup.stop
               @mousedown.stop
@@ -25,38 +29,101 @@
               @keydown.stop
             >
           </div>
-
-          <div class="en-excalidraw-actions">
-            <button
-              type="button"
-              class="en-excalidraw-button secondary"
-              data-testid="excalidraw-close"
-              :aria-label="t('excalidraw.cancel')"
-              :title="`${t('excalidraw.cancel')} · Esc`"
-              @pointerdown.stop
-              @pointerup.stop.prevent="handleClose"
-              @mousedown.stop
-              @mouseup.stop.prevent="handleClose"
-              @click.stop.prevent="handleClose"
-            >
-              ✕
-            </button>
-            <button
-              type="button"
-              class="en-excalidraw-button primary"
-              :disabled="isSaving || !apiRef || !!errorMessage"
-              :aria-label="t('excalidraw.save')"
-              :title="`${t('excalidraw.save')} · ${isMacOS ? '⌘S' : 'Ctrl S'}`"
-              @pointerdown.stop
-              @pointerup.stop.prevent="handleSave"
-              @mousedown.stop
-              @mouseup.stop.prevent="handleSave"
-              @click.stop.prevent="handleSave"
-            >
-              {{ isSaving ? '…' : '✓' }}
-            </button>
-          </div>
         </header>
+
+        <div class="en-excalidraw-actions">
+          <button
+            type="button"
+            class="en-excalidraw-button secondary"
+            data-testid="excalidraw-close"
+            :aria-label="t('excalidraw.cancel')"
+            :title="`${t('excalidraw.cancel')} · Esc`"
+            @pointerdown.stop
+            @pointerup.stop.prevent="handleClose"
+            @mousedown.stop
+            @mouseup.stop.prevent="handleClose"
+            @click.stop.prevent="handleClose"
+          >
+            <X
+              :size="16"
+              aria-hidden="true"
+            />
+          </button>
+          <button
+            type="button"
+            class="en-excalidraw-button primary"
+            data-testid="excalidraw-save"
+            :disabled="isSaving || !apiRef || !!errorMessage"
+            :aria-label="t('excalidraw.save')"
+            :title="`${t('excalidraw.save')} · ${isMacOS ? '⌘S' : 'Ctrl S'}`"
+            @pointerdown.stop
+            @pointerup.stop.prevent="handleSave"
+            @mousedown.stop
+            @mouseup.stop.prevent="handleSave"
+            @click.stop.prevent="handleSave"
+          >
+            <span
+              v-if="isSaving"
+              aria-hidden="true"
+            >…</span>
+            <Check
+              v-else
+              :size="16"
+              aria-hidden="true"
+            />
+          </button>
+        </div>
+
+        <div
+          v-if="isNamePromptOpen"
+          class="en-excalidraw-name-prompt-backdrop"
+          data-testid="excalidraw-name-prompt"
+          role="presentation"
+          @pointerdown.stop
+          @click.stop
+        >
+          <form
+            class="en-excalidraw-name-prompt"
+            role="alertdialog"
+            aria-modal="true"
+            :aria-label="t('excalidraw.namePromptTitle')"
+            @submit.prevent="confirmNameAndSave"
+          >
+            <h2>{{ t('excalidraw.namePromptTitle') }}</h2>
+            <p>{{ t('excalidraw.namePromptDescription') }}</p>
+            <input
+              ref="namePromptInput"
+              v-model.trim="promptName"
+              type="text"
+              :placeholder="t('excalidraw.drawingPlaceholder')"
+              :aria-label="t('excalidraw.drawingName')"
+              autofocus
+            >
+            <p
+              v-if="promptError"
+              class="en-excalidraw-name-prompt-error"
+              role="alert"
+            >
+              {{ promptError }}
+            </p>
+            <div class="en-excalidraw-name-prompt-actions">
+              <button
+                type="button"
+                class="en-excalidraw-button secondary"
+                @click="cancelNamePrompt"
+              >
+                {{ t('common.cancel') }}
+              </button>
+              <button
+                type="submit"
+                class="en-excalidraw-button primary"
+                :disabled="!promptName"
+              >
+                {{ t('common.save') }}
+              </button>
+            </div>
+          </form>
+        </div>
 
         <div
           v-if="errorMessage"
@@ -78,10 +145,11 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import React from 'react'
 import { createRoot } from 'react-dom/client'
+import { Check, X } from '@lucide/vue'
 import { getThemeMode, getThemeTokens } from 'common/elephantnote/appearance'
 import { getExcalidrawBackgroundColor } from 'elephant-shared/excalidrawAssets'
 import {
@@ -116,24 +184,34 @@ const props = defineProps({
   insertOnSave: {
     type: Boolean,
     default: false
+  },
+  askNameOnClose: {
+    type: Boolean,
+    default: false
   }
 })
 
 const emit = defineEmits(['close', 'save'])
 const { t } = useI18n()
 const mountEl = ref(null)
-const apiRef = ref(null)
-const root = ref(null)
-const excalidrawModule = ref(null)
+const apiRef = shallowRef(null)
+const root = shallowRef(null)
+const excalidrawModule = shallowRef(null)
 const isSaving = ref(false)
-const initialData = ref(null)
+const initialData = shallowRef(null)
 const errorMessage = ref('')
+const isNamePromptOpen = ref(false)
+const promptName = ref('')
+const promptError = ref('')
+const namePromptInput = ref(null)
+const nameWasEdited = ref(false)
 const isMacOS = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`)
 
 const logDialogError = (event, error) => {
   const details = {
     name: error?.name || 'Error',
-    message: error?.message || String(error)
+    message: error?.message || String(error),
+    stack: error?.stack || ''
   }
   window.__ELEPHANT_DEBUG_LOGS__ = Array.isArray(window.__ELEPHANT_DEBUG_LOGS__)
     ? window.__ELEPHANT_DEBUG_LOGS__
@@ -172,7 +250,39 @@ const normalizedBaseName = computed(() => {
 const resolvedFileName = computed(() => ensurePngName(normalizedBaseName.value))
 
 const handleClose = () => {
+  if (!props.askNameOnClose) {
+    emit('close')
+    return
+  }
+  if (nameWasEdited.value) {
+    void handleSave()
+    return
+  }
+  promptError.value = ''
+  promptName.value = ''
+  isNamePromptOpen.value = true
+  void nextTick(() => namePromptInput.value?.focus())
+}
+
+const markNameEdited = () => {
+  nameWasEdited.value = true
+}
+
+const cancelNamePrompt = () => {
+  isNamePromptOpen.value = false
   emit('close')
+}
+
+const confirmNameAndSave = () => {
+  const nextName = promptName.value.trim()
+  if (!nextName) {
+    promptError.value = t('excalidraw.namePromptRequired')
+    return
+  }
+  editableBaseName.value = nextName
+  nameWasEdited.value = true
+  isNamePromptOpen.value = false
+  void handleSave()
 }
 
 const renderExcalidraw = () => {
@@ -183,7 +293,7 @@ const renderExcalidraw = () => {
       theme: excalidrawTheme.value,
       name: normalizedBaseName.value,
       excalidrawAPI: (api) => {
-        apiRef.value = api
+        if (api && apiRef.value !== api) apiRef.value = api
       },
       UIOptions: {
         canvasActions: {
@@ -199,14 +309,16 @@ const renderExcalidraw = () => {
 }
 
 const applyExcalidrawTheme = (theme) => {
-  renderExcalidraw()
   const api = apiRef.value
   if (!api?.updateScene) return
+  const currentAppState = api.getAppState?.() || {}
+  const viewBackgroundColor = getExcalidrawBackgroundColor(theme)
+  if (currentAppState.theme === theme && currentAppState.viewBackgroundColor === viewBackgroundColor) return
   api.updateScene({
     appState: {
-      ...api.getAppState?.(),
+      ...currentAppState,
       theme,
-      viewBackgroundColor: getExcalidrawBackgroundColor(theme)
+      viewBackgroundColor
     }
   })
 }
@@ -215,6 +327,7 @@ const renderCanvas = async () => {
   excalidrawModule.value = await loadExcalidrawModule()
   initialData.value = await createInitialExcalidrawData({
     blob: props.initialBlob,
+    fileName: props.fileName,
     theme: excalidrawTheme.value
   })
 
@@ -229,8 +342,19 @@ watch(excalidrawTheme, (theme) => {
 
 const handleSave = async () => {
   if (!apiRef.value || isSaving.value) return
+  if (props.askNameOnClose && !nameWasEdited.value) {
+    promptError.value = ''
+    promptName.value = ''
+    isNamePromptOpen.value = true
+    void nextTick(() => namePromptInput.value?.focus())
+    return
+  }
   isSaving.value = true
   errorMessage.value = ''
+  const reportSaveError = (error) => {
+    logDialogError('save failed', error)
+    errorMessage.value = error?.message || t('excalidraw.failedSave')
+  }
   try {
     const sceneBlob = await exportExcalidrawSceneBlob({
       api: apiRef.value,
@@ -245,7 +369,8 @@ const handleSave = async () => {
       imageBlob: await blobToBytes(blob),
       fileName: resolvedFileName.value,
       baseName: normalizedBaseName.value,
-      sceneBlob: await sceneBlob.text()
+      sceneBlob: await sceneBlob.text(),
+      onError: reportSaveError
     })
   } catch (error) {
     logDialogError('save failed', error)
@@ -319,7 +444,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid rgba(148, 163, 184, 0.08);
   background: color-mix(in srgb, var(--en-bg, #0f172a) 94%, transparent);
   backdrop-filter: blur(16px);
-  z-index: 4;
+  z-index: 1000;
 }
 
 .en-excalidraw-name-wrap {
@@ -341,9 +466,82 @@ onBeforeUnmount(() => {
 }
 
 .en-excalidraw-actions {
+  position: absolute;
+  top: 16px;
+  /* Keep the shell actions in the same row as Excalidraw's Library control,
+   * with enough horizontal space that neither control covers the other. */
+  right: 176px;
+  z-index: 1002;
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.en-excalidraw-name-prompt-backdrop {
+  position: absolute;
+  inset: 28px 0 0;
+  z-index: 1001;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 42%);
+}
+
+.en-excalidraw-name-prompt {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid var(--en-border-strong, var(--en-border));
+  border-radius: 16px;
+  color: var(--en-text);
+  background: var(--en-surface, #242424);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 34%);
+}
+
+.en-excalidraw-name-prompt h2,
+.en-excalidraw-name-prompt p {
+  margin: 0;
+}
+
+.en-excalidraw-name-prompt h2 {
+  font-size: 18px;
+}
+
+.en-excalidraw-name-prompt p {
+  color: var(--en-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.en-excalidraw-name-prompt input {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--en-border);
+  border-radius: 8px;
+  color: var(--en-text);
+  background: var(--en-bg);
+  font: inherit;
+}
+
+.en-excalidraw-name-prompt-error {
+  color: var(--en-danger, #ef4444) !important;
+}
+
+.en-excalidraw-name-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.en-excalidraw-name-prompt-actions .en-excalidraw-button {
+  width: auto;
+  height: 34px;
+  min-width: 84px;
+  padding: 0 14px;
+  border-radius: 8px;
 }
 
 .en-excalidraw-button {

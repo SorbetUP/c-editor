@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -16,10 +16,12 @@ const configRoot = join(fixtureRoot, 'config')
 const artifactRoot = join(root, 'test-results', 'acceptance')
 mkdirSync(artifactRoot, { recursive: true })
 mkdirSync(join(vaultRoot, '.elephantnote'), { recursive: true })
+mkdirSync(join(vaultRoot, 'assets'), { recursive: true })
 mkdirSync(join(vaultRoot, 'Getting Started'), { recursive: true })
 mkdirSync(join(vaultRoot, 'Sites'), { recursive: true })
 mkdirSync(configRoot, { recursive: true })
 writeFileSync(join(vaultRoot, 'Acceptance.md'), '# Acceptance\n\nInitial\n', 'utf8')
+writeFileSync(join(vaultRoot, 'assets', 'excalidraw.png'), readFileSync(resolve(root, 'Elephant/frontend/src/muya/lib/assets/pngicon/image/2.png')))
 writeFileSync(join(vaultRoot, 'Getting Started', 'Welcome.md'), '# Welcome\n\nElephant live rendering fixture.\n', 'utf8')
 writeFileSync(join(vaultRoot, 'Sites', 'Home.md'), '# Home\n\nDesktop site acceptance fixture.\n', 'utf8')
 writeFileSync(join(vaultRoot, 'Sites', 'index.html'), '<!doctype html><title>Acceptance site</title><h1>Acceptance site</h1>', 'utf8')
@@ -32,6 +34,7 @@ let output = ''
 const { ELEPHANT_E2E_VAULT_ROOT: _ignoredE2EVaultRoot, ...processEnvWithoutE2E } = process.env
 const originalHome = process.env.HOME || '/Users/sorbet'
 const appPath = process.env.ELEPHANT_ACCEPTANCE_APP_PATH || './build/scripts/build_dev.sh'
+const showAcceptanceWindow = process.env.ELEPHANT_ACCEPTANCE_SHOW_WINDOW === '1'
 const collect = (prefix, chunk) => {
   const text = chunk.toString()
   output += text
@@ -42,7 +45,7 @@ const startChild = async() => {
   console.log(`[acceptance-runner] launching ${appPath}`)
   child = spawn(appPath, [], {
     cwd: root,
-    env: { ...processEnvWithoutE2E, HOME: fixtureRoot, PNPM_HOME: process.env.PNPM_HOME || `${originalHome}/Library/pnpm`, RUSTUP_HOME: process.env.RUSTUP_HOME || `${originalHome}/.rustup`, CARGO_HOME: process.env.CARGO_HOME || `${originalHome}/.cargo`, ELEPHANTNOTE_CONFIG_DIR: configRoot, ELEPHANT_ACCEPTANCE_TAURI_PORT: '0' },
+    env: { ...processEnvWithoutE2E, HOME: fixtureRoot, PNPM_HOME: process.env.PNPM_HOME || `${originalHome}/Library/pnpm`, RUSTUP_HOME: process.env.RUSTUP_HOME || `${originalHome}/.rustup`, CARGO_HOME: process.env.CARGO_HOME || `${originalHome}/.cargo`, ELEPHANTNOTE_CONFIG_DIR: configRoot, ELEPHANT_ACCEPTANCE_TAURI_PORT: '0', ELEPHANT_ACCEPTANCE_HIDE_WINDOW: showAcceptanceWindow ? '0' : '1' },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe']
   })
@@ -111,6 +114,17 @@ const waitForDisplayedText = async(expectedText, timeoutMs = 10000) => {
   throw new Error(`Timed out waiting for displayed text ${JSON.stringify(expectedText)}: ${JSON.stringify(last)}`)
 }
 
+const waitForVisibleDom = async(selector, timeoutMs = 10000) => {
+  const deadline = Date.now() + timeoutMs
+  let last = null
+  while (Date.now() <= deadline) {
+    last = await command('readDom', selector)
+    if (last.exists && last.visible) return last
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50))
+  }
+  throw new Error(`Timed out waiting for visible ${selector}: ${JSON.stringify(last)}`)
+}
+
 const health = await fetch(`${endpoint}/health`).then((response) => response.json())
 if (health.transport !== 'tauri') throw new Error(`Acceptance transport is not Tauri: ${JSON.stringify(health)}`)
 
@@ -145,23 +159,58 @@ try {
   if (process.env.ELEPHANT_ACCEPTANCE_UI_ONLY === '1') {
     const createToolbar = await command('waitFor', '.en-library-toolbar', 10000)
     const createButton = await command('readDom', '.en-create-button-primary')
-    if (!createToolbar.exists || !createButton.exists || !createButton.visible || createButton.text.trim() !== 'Create') {
+    const railVault = await command('readDom', '.en-rail-bottom .en-rail-vault-wrap')
+    if (!createToolbar.exists || !createButton.exists || !createButton.visible || createButton.text.trim() !== '' || createButton.attributes['aria-label'] !== 'Create' || !railVault.exists) {
       throw new Error(`Create trigger is not visible or has an unexpected label: ${JSON.stringify({ createToolbar, createButton })}`)
     }
     await command('click', '.en-create-button-primary')
     const createMenu = await command('waitFor', '.en-create-menu-popover', 10000)
     const createOptions = await command('readDom', '.en-create-menu-popover')
+    const excalidrawLogo = await command('readDom', '[data-testid="excalidraw-logo"]')
     const menuItemCount = (createOptions.html.match(/role="menuitem"/g) || []).length
-    if (!createMenu.exists || createMenu.attributes.role !== 'menu' || !createOptions.text.includes('Note') || !createOptions.text.includes('Drawing') || !createOptions.text.includes('Folder') || menuItemCount !== 3) {
-      throw new Error(`Create menu is incomplete: ${JSON.stringify({ createMenu, createOptions, menuItemCount })}`)
+    if (!createMenu.exists || createMenu.attributes.role !== 'menu' || !createOptions.text.includes('Note') || !createOptions.text.includes('Drawing') || !createOptions.text.includes('Folder') || menuItemCount !== 3 || !excalidrawLogo.exists || !excalidrawLogo.html.includes('#6965DB')) {
+      throw new Error(`Create menu is incomplete: ${JSON.stringify({ createMenu, createOptions, excalidrawLogo, menuItemCount })}`)
     }
     await command('click', '.en-create-menu-option:nth-of-type(2)')
     const drawingDialog = await command('waitFor', '[data-testid="excalidraw-dialog"]', 15000)
     const drawingCanvas = await command('waitFor', '.en-excalidraw-canvas canvas', 15000)
     if (!drawingDialog.exists || !drawingCanvas.exists) throw new Error(`Drawing option did not open the real Excalidraw canvas: ${JSON.stringify({ drawingDialog, drawingCanvas })}`)
     await command('click', '[data-testid="excalidraw-close"]')
+    const drawingNamePrompt = await command('waitFor', '[data-testid="excalidraw-name-prompt"]', 5000)
+    if (!drawingNamePrompt.exists) throw new Error(`Drawing close did not request a note name: ${JSON.stringify({ drawingNamePrompt })}`)
+    await command('fill', '[data-testid="excalidraw-name-prompt"] input', 'Acceptance drawing')
+    await command('click', '[data-testid="excalidraw-name-prompt"] button[type="submit"]')
     await command('waitUntilGone', '[data-testid="excalidraw-dialog"]', 10000)
-    const uiResult = { createToolbar, createButton, createMenu, createOptions, menuItemCount, drawingDialog, drawingCanvas }
+    const drawingCardPreview = await command('waitFor', '.en-note-card-drawing-preview img', 10000)
+    if (!drawingCardPreview.exists) throw new Error(`Saved drawing note has no library preview: ${JSON.stringify({ drawingCardPreview })}`)
+    const folderMenuTrigger = await command('waitFor', '.en-note-card.is-folder .en-card-menu', 10000)
+    await command('click', '.en-note-card.is-folder .en-card-menu')
+    const folderActions = await command('readDom', '.en-note-card.is-folder .en-card-popover')
+    const folderRenameAction = await command('readDom', '[data-entry-action="rename"]')
+    if (!folderMenuTrigger.exists || !folderActions.exists || !folderRenameAction.exists || !folderRenameAction.html.includes('svg')) {
+      throw new Error(`Folder actions are not icon-based: ${JSON.stringify({ folderMenuTrigger, folderActions, folderRenameAction })}`)
+    }
+    await command('click', '[data-entry-action="rename"]')
+    const renameInput = await command('waitFor', '[data-entry-rename-input]', 5000)
+    await command('fill', '[data-entry-rename-input]', 'Acceptance cancelled rename')
+    await command('press', '[data-entry-rename-input]', 'Escape')
+    await command('waitUntilGone', '[data-entry-rename-input]', 5000)
+    const cancelledRename = await command('readDom', '.en-note-card.is-folder')
+    if (!renameInput.exists || cancelledRename.text.includes('Acceptance cancelled rename')) throw new Error(`Escape did not cancel inline folder rename: ${JSON.stringify({ renameInput, cancelledRename })}`)
+    await command('click', '.en-note-card.is-folder .en-card-menu')
+    await command('click', '[data-entry-action="rename"]')
+    await command('fill', '[data-entry-rename-input]', 'Acceptance renamed folder')
+    await command('press', '[data-entry-rename-input]', 'Enter')
+    await command('waitUntilGone', '[data-entry-rename-input]', 5000)
+    const committedRename = await command('readDom', '.en-note-card.is-folder')
+    const listView = await command('readDom', '.en-library-grid')
+    await command('click', '[aria-label="List view"]')
+    const compactListView = await command('readDom', '.en-library-grid')
+    await command('click', '[aria-label="Grid view"]')
+    if (!committedRename.text.includes('Acceptance renamed folder') || !compactListView.attributes.class?.includes('list')) {
+      throw new Error(`Inline folder rename or list view failed: ${JSON.stringify({ committedRename, listView, compactListView })}`)
+    }
+    const uiResult = { createToolbar, createButton, railVault, createMenu, createOptions, excalidrawLogo, menuItemCount, drawingDialog, drawingCanvas, drawingNamePrompt, drawingCardPreview, folderMenuTrigger, folderActions, folderRenameAction, cancelledRename, committedRename, listView, compactListView }
     result = { emptyVaultUi: null, uiResult }
     writeFileSync(join(artifactRoot, 'latest.json'), JSON.stringify({ at: new Date().toISOString(), runtime: 'tauri', result }, null, 2))
     writeFileSync(join(artifactRoot, 'latest-tauri.log'), output, 'utf8')
@@ -327,7 +376,7 @@ try {
     'literal code',
     '```',
     '',
-    '![drawing](../assets/excalidraw.png)',
+    '![drawing](assets/excalidraw.png)',
     '',
     '# ddd'
   ].join('\n')
@@ -338,7 +387,7 @@ try {
   const renderedSecondHeading = await command('readDom', `${editorSelector} h1:nth-of-type(2) .ag-plain-text`)
   const renderedMarkdown = await command('readDom', editorSelector)
   const renderedTask = await command('readDom', `${editorSelector} input[type="checkbox"]`)
-  const renderedImage = await command('readDom', `${editorSelector} .ag-inline-image[data-raw="![drawing](../assets/excalidraw.png)"]`)
+  const renderedImage = await command('readDom', `${editorSelector} .ag-inline-image[data-raw="![drawing](assets/excalidraw.png)"]`)
   if (renderedFirstHeading.text !== 'Notes' || renderedSecondHeading.text !== 'ddd' || !renderedTask.exists || !renderedImage.exists || renderedMarkdown.text.includes('```text') || renderedMarkdown.text.includes('![drawing]')) {
     throw new Error(`Markdown rendered in the wrong order, as raw text, or lost semantic nodes: ${JSON.stringify({ renderedFirstHeading, renderedSecondHeading, renderedTask, renderedImage, text: renderedMarkdown.text, html: renderedMarkdown.html })}`)
   }
@@ -391,6 +440,8 @@ try {
   await command('save')
   const citationSelection = await command('selectText', `${editorSelector} .ag-paragraph-content`, 0, citationSourceText.length)
   const citationSelectionAction = await command('waitFor', '[data-elephant-citation-selection-action]', 10000)
+  const citationIcon = await command('readDom', '[data-elephant-citation-selection-action]')
+  if (!citationIcon.exists || citationIcon.text.trim() || !citationIcon.html.includes('data-lucide="quote"')) throw new Error(`Citation action is not icon-only: ${JSON.stringify(citationIcon)}`)
   await command('click', '[data-elephant-citation-selection-action]')
   const citationFeedback = await command('waitFor', '[data-elephant-citation-feedback]', 10000)
   if (!citationSelection.text || !citationFeedback.text.includes('Citation copiée')) throw new Error(`Citation selection flow failed: ${JSON.stringify({ citationSelection, citationFeedback })}`)
@@ -404,21 +455,19 @@ try {
   if (!citationHasText || !citationHasLink) {
     throw new Error(`Citation paste did not create a linked quote: ${JSON.stringify({ citationHasText, citationHasLink, citationPasted })}`)
   }
-  await command('contextClick', '[data-elephant-citation-buffer-item]')
-  const citationContext = await command('waitFor', '[data-elephant-citation-context]', 10000)
-  await command('click', '[aria-label^="Supprimer la citation"]')
-  await command('waitUntilGone', '[data-elephant-citation-buffer-item]', 10000)
-  const dom = await command('readDom', editorSelector)
-  if (!dom.exists || !dom.text.includes('Edited by the real Tauri command runner')) throw new Error(`Displayed editor DOM is incomplete: ${JSON.stringify({ exists: dom.exists, textLength: dom.text.length })}`)
-  const sidebarInitial = await command('readDom', '.en-body')
-  await command('click', '.en-rail-sidebar-toggle')
-  const sidebarToggled = await command('readDom', '.en-body')
-  await command('click', '.en-rail-sidebar-toggle')
-  const sidebarRestored = await command('readDom', '.en-body')
-  const initialHidden = sidebarInitial.attributes.class?.includes('en-sidebar-hidden')
-  const toggledHidden = sidebarToggled.attributes.class?.includes('en-sidebar-hidden')
-  const restoredHidden = sidebarRestored.attributes.class?.includes('en-sidebar-hidden')
-  if (!sidebarInitial.exists || toggledHidden === initialHidden || restoredHidden !== initialHidden) throw new Error(`Sidebar toggle round-trip failed: ${JSON.stringify({ sidebarInitial, sidebarToggled, sidebarRestored })}`)
+  await command('openNote', 'Acceptance.md')
+  await waitForDomText(`${editorSelector} .ag-paragraph-content`, citationSourceText)
+  const citationDom = await command('readDom', `${editorSelector} .ag-paragraph-content`)
+  if (!citationDom.exists || !citationDom.text.includes('Edited by the real Tauri command runner')) {
+    throw new Error(`Displayed citation source is incomplete: ${JSON.stringify({ exists: citationDom.exists, textLength: citationDom.text.length })}`)
+  }
+  const primaryFindModifier = process.platform === 'darwin' ? { metaKey: true } : { ctrlKey: true }
+  await command('press', editorSelector, 'f', primaryFindModifier)
+  const editorSearch = await waitForVisibleDom('.search-bar', 10000)
+  const editorSearchInput = await command('readDom', '.search-bar input')
+  if (!editorSearchInput.exists || !editorSearchInput.visible) throw new Error(`Editor Cmd/Ctrl+F did not focus the editor search: ${JSON.stringify({ editorSearch, editorSearchInput })}`)
+  await command('press', '.search-bar input', 'Escape')
+  await command('waitUntilGone', '.search-bar', 10000)
   await command('click', '.en-rail-icon[aria-label="Search"]')
   await command('waitFor', '.en-search-bar-input', 10000)
   await command('fill', '.en-search-bar-input', 'Edited by the real Tauri command runner')
@@ -432,6 +481,28 @@ try {
   await command('press', '.en-search-bar-input', 'Escape')
   await command('press', '.en-search-bar-input', 'Escape')
   await command('waitUntilGone', '.en-search-bar-input', 10000)
+  await command('setMarkdown', '# Acceptance\n\n- [ ] Tauri checkbox regression')
+  const checkbox = await command('waitFor', `${editorSelector} input[type="checkbox"]`, 10000)
+  await command('click', `${editorSelector} input[type="checkbox"]`)
+  const checkedState = await command('readState')
+  if (!checkbox.exists || !checkedState.markdown.includes('[x] Tauri checkbox regression')) throw new Error(`Task checkbox did not persist its checked state: ${JSON.stringify({ checkbox, checkedState })}`)
+  await command('contextClick', '[data-elephant-citation-buffer-item]')
+  const citationContext = await command('waitFor', '[data-elephant-citation-context]', 10000)
+  await command('click', '[aria-label^="Supprimer la citation"]')
+  await command('waitUntilGone', '[data-elephant-citation-buffer-item]', 10000)
+  const dom = await command('readDom', editorSelector)
+  if (!dom.exists || !dom.text.includes('Tauri checkbox regression')) throw new Error(`Displayed checkbox editor DOM is incomplete: ${JSON.stringify({ exists: dom.exists, textLength: dom.text.length })}`)
+  const sidebarInitial = await command('readDom', '.en-body')
+  await command('click', '.en-rail-sidebar-toggle')
+  await command('waitFor', '.en-body.en-sidebar-hidden', 5000)
+  const sidebarToggled = await command('readDom', '.en-body')
+  await command('click', '.en-rail-sidebar-toggle')
+  await command('waitFor', '.en-body:not(.en-sidebar-hidden)', 5000)
+  const sidebarRestored = await command('readDom', '.en-body')
+  const initialHidden = sidebarInitial.attributes.class?.includes('en-sidebar-hidden')
+  const toggledHidden = sidebarToggled.attributes.class?.includes('en-sidebar-hidden')
+  const restoredHidden = sidebarRestored.attributes.class?.includes('en-sidebar-hidden')
+  if (!sidebarInitial.exists || toggledHidden === initialHidden || restoredHidden !== initialHidden) throw new Error(`Sidebar toggle round-trip failed: ${JSON.stringify({ sidebarInitial, sidebarToggled, sidebarRestored })}`)
   await command('click', '[aria-label="Close note"]')
   await command('waitFor', '.en-library-grid', 10000)
   const afterClose = await command('readState')
@@ -477,15 +548,18 @@ try {
   await command('click', '[aria-label="List view"]')
   const listView = await command('readDom', '.en-library-grid')
   await command('click', '[aria-label="Grid view"]')
-  await command('fill', '.en-library-actions .en-select', 'title')
+  await command('click', '[aria-label="Title A-Z"]')
   const sortedLibrary = await command('readDom', '.en-library-grid')
-  const sortControl = await command('readDom', '.en-library-actions .en-select')
-  if (!listView.attributes.class?.includes('list') || !sortedLibrary.exists || sortControl.value !== 'title') throw new Error(`Library view/sort round-trip failed: ${JSON.stringify({ listBefore, listView, sortedLibrary, sortControl })}`)
+  const sortControl = await command('readDom', '[aria-label="Title A-Z"]')
+  const railVault = await command('readDom', '.en-rail-bottom .en-rail-vault-wrap')
+  if (!listView.attributes.class?.includes('list') || !sortedLibrary.exists || sortControl.attributes['aria-pressed'] !== 'true' || !railVault.exists) throw new Error(`Library view/sort/rail round-trip failed: ${JSON.stringify({ listBefore, listView, sortedLibrary, sortControl, railVault })}`)
   const navigationCycles = []
   for (let cycle = 1; cycle <= 3; cycle += 1) {
     await command('click', '.en-rail-sidebar-toggle')
+    await command('waitFor', '.en-body.en-sidebar-hidden', 5000)
     const hidden = await command('readDom', '.en-body')
     await command('click', '.en-rail-sidebar-toggle')
+    await command('waitFor', '.en-body:not(.en-sidebar-hidden)', 5000)
     const restored = await command('readDom', '.en-body')
     await command('click', '[aria-label="Settings"]')
     await command('waitFor', '.en-settings-panel', 10000)
@@ -531,7 +605,7 @@ try {
   const afterDelete = await command('invokeTauri', 'tauri_directory_list', { relativePath: 'Acceptance', offset: 0, limit: 1000, includePreview: false })
   if (afterDelete.some((entry) => entry.path === 'Acceptance/Renamed.md')) throw new Error(`Deleted note is still listed: ${JSON.stringify(afterDelete)}`)
   const search = await command('invokeTauri', 'tauri_search_query', { params: { query: 'Second real Tauri scenario', limit: 10 } })
-  if (!Array.isArray(search) || !search.some((entry) => JSON.stringify(entry).includes('Second real Tauri scenario'))) throw new Error(`Search command did not find the created note: ${JSON.stringify(search)}`)
+  if (!Array.isArray(search) || !search.some((entry) => entry.path === 'Acceptance/Created.md')) throw new Error(`Search command did not find the created note: ${JSON.stringify(search)}`)
   const drawing = await command('invokeTauri', 'tauri_drawings_create', { title: 'Acceptance drawing' })
   console.log(`[acceptance-runner] drawing-created ${JSON.stringify(drawing)}`)
   const drawingRead = await command('invokeTauri', 'tauri_drawings_read', { relativePath: drawing.path })
@@ -563,7 +637,7 @@ try {
   const catalogSource = output.includes('[official-addon-catalog] source=bundled') ? 'bundled' : 'local-or-remote'
   if (packagedRun && catalogSource !== 'bundled') throw new Error('Packaged acceptance did not use the bundled official addon catalogue')
   if (packagedRun && output.includes('Addon service executable is unavailable')) throw new Error('Packaged acceptance reproduced the missing addon service executable regression')
-  result = { emptyVaultUi, initial, saved, created, createdSaved, disk, displayed, codeRunButton, codeOutput, citationSelection, citationSelectionAction, citationFeedback, citationBufferItem, citationPasted, citationContext, dom, chatPanel, calendarPanel, graphPanel, sidebarInitial, sidebarToggled, sidebarRestored, searchUi, searchEmptyUi, afterClose, createToolbar, createMenu, createOptions, pinned, settingsSearch, themeBefore, themeToggled, themeRestored, listBefore, listView, sortedLibrary, navigationCycles, capabilities, addonState, installedOfficialAddons, installedAddonState, enabledOfficialAddons, enabledAddonState, addonCoverage, nativeRuntimeProbes, addonResourceProbes, addonActionProbes, dashboardAction, dashboardNote, keepImport, keepNote, siteGenerated, siteStatus, siteStopped, syncStatus, platform, vaults, directory, drawings, attachments, features, searchStatus, atomicFeatures, localBackendProbes, search, folder, lifecycle, moved, attachmentWrite, attachmentList, drawing, drawingRead, drawingWritten, expectedFailure, invalidPathFailure, missingResourceFailure, logs, restartPersistence, packagedRun, catalogSource }
+  result = { emptyVaultUi, initial, saved, created, createdSaved, disk, displayed, codeRunButton, codeOutput, citationSelection, citationSelectionAction, citationIcon, citationFeedback, citationBufferItem, citationPasted, citationContext, checkbox, checkedState, dom, chatPanel, calendarPanel, graphPanel, sidebarInitial, sidebarToggled, sidebarRestored, searchUi, searchEmptyUi, afterClose, createToolbar, createMenu, createOptions, pinned, settingsSearch, themeBefore, themeToggled, themeRestored, listBefore, listView, sortedLibrary, navigationCycles, capabilities, addonState, installedOfficialAddons, installedAddonState, enabledOfficialAddons, enabledAddonState, addonCoverage, nativeRuntimeProbes, addonResourceProbes, addonActionProbes, dashboardAction, dashboardNote, keepImport, keepNote, siteGenerated, siteStatus, siteStopped, syncStatus, platform, vaults, directory, drawings, attachments, features, searchStatus, atomicFeatures, localBackendProbes, search, folder, lifecycle, moved, attachmentWrite, attachmentList, drawing, drawingRead, drawingWritten, expectedFailure, invalidPathFailure, missingResourceFailure, logs, restartPersistence, packagedRun, catalogSource }
   writeFileSync(join(artifactRoot, 'latest.json'), JSON.stringify({ at: new Date().toISOString(), runtime: 'tauri', result }, null, 2))
   writeFileSync(join(artifactRoot, 'latest-tauri.log'), output, 'utf8')
   console.log(`[acceptance-runner] artifact ${join(artifactRoot, 'latest.json')}`)

@@ -127,8 +127,11 @@ export const useVaultStore = defineStore('elephantnoteVaults', {
         if (state.sort === 'updated-oldest') {
           return new Date(a.updatedAt) - new Date(b.updatedAt)
         }
-        if (state.sort === 'title') {
-          return a.title.localeCompare(b.title)
+        if (state.sort === 'title' || state.sort === 'title-az') {
+          return String(a.title || '').localeCompare(String(b.title || ''))
+        }
+        if (state.sort === 'title-za') {
+          return String(b.title || '').localeCompare(String(a.title || ''))
         }
         return new Date(b.updatedAt) - new Date(a.updatedAt)
       })
@@ -139,7 +142,11 @@ export const useVaultStore = defineStore('elephantnoteVaults', {
     },
     rootSidebarEntries(state) {
       const pinned = new Set(entryArray(state.pinnedNotePaths))
-      return [...entryArray(state.rootEntries)].sort((a, b) => {
+      const attachedPaths = new Set(getSidebarItems(state.workspace).map((item) => item?.path).filter(Boolean))
+      return [...entryArray(state.rootEntries)].filter((entry) => {
+        const kind = entry?.kind || entry?.type
+        return kind !== 'folder' || attachedPaths.has(entry.path)
+      }).sort((a, b) => {
         const aPinned = pinned.has(a.path)
         const bPinned = pinned.has(b.path)
         if (aPinned !== bPinned) return aPinned ? -1 : 1

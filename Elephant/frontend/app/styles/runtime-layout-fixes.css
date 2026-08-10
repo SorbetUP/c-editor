@@ -107,9 +107,24 @@
 }
 
 .en-library-grid {
-  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)) !important;
+  grid-template-columns: minmax(0, 1fr) !important;
   overflow-x: hidden !important;
   overscroll-behavior-x: none;
+}
+
+.en-library-grid-surface {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.en-library-grid-surface--grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)) !important;
+}
+
+.en-library-grid-surface--list {
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 .en-note-card,

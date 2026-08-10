@@ -94,7 +94,7 @@ describe('note text citations', () => {
     })).toBeNull()
   })
 
-  it('adds the citation action, preserves selection on press and copies the selected text', async() => {
+  it('keeps the note top bar clean and exposes the citation action after selection', async() => {
     document.body.innerHTML = `
       <header class="en-note-topbar">
         <input class="en-note-title-input" value="Source note">
@@ -118,8 +118,10 @@ describe('note text citations', () => {
     selection.removeAllRanges()
     selection.addRange(range)
 
-    const button = document.querySelector('[data-elephant-note-citation]')
+    document.dispatchEvent(new Event('selectionchange', { bubbles: true }))
+    const button = document.querySelector('[data-elephant-citation-selection-action="true"]')
     expect(button).not.toBeNull()
+    expect(document.querySelector('[data-elephant-note-citation]')).toBeNull()
     const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
     button.dispatchEvent(press)
     expect(press.defaultPrevented).toBe(true)
@@ -184,14 +186,31 @@ describe('note text citations', () => {
     const selection = window.getSelection()
     selection.removeAllRanges()
     selection.addRange(range)
-    const copy = document.querySelector('[data-elephant-note-citation]')
+    document.dispatchEvent(new Event('selectionchange', { bubbles: true }))
+    const copy = document.querySelector('[data-elephant-citation-selection-action="true"]')
     copy.click()
     await flushPromises()
 
     const buffered = document.querySelector('[data-elephant-citation-buffer-item]')
     expect(buffered).not.toBeNull()
+
+    // Simulate opening another note before activating the retained citation.
+    // Its restored caret is collapsed, so the product contract is to append
+    // after the last line rather than paste at an arbitrary restored cursor.
+    sourceVault.openedNotePath = 'Destination.md'
+    editorStore.currentFile = {
+      id: 'destination',
+      markdown: 'Première ligne\nDernière ligne',
+      muyaIndexCursor: {
+        anchor: { line: 0, ch: 0 },
+        focus: { line: 0, ch: 0 }
+      },
+      isSaved: true
+    }
     buffered.click()
-    expect(editorStore.currentFile.markdown).toContain('> Passage à conserver.')
+    expect(editorStore.currentFile.markdown).toBe(
+      'Première ligne\nDernière ligne\n\n> Passage à conserver.\n>\n> — [Source](</Source.md#quote=UGFzc2FnZSDDoCBjb25zZXJ2ZXIu>)\n'
+    )
     expect(editorStore.currentFile.isSaved).toBe(false)
 
     buffered.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 20, clientY: 20 }))

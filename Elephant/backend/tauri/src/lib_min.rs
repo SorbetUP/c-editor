@@ -92,6 +92,13 @@ pub fn run() {
             app.manage(markdown::muya_session::MuyaEngineSessions::default());
             app.manage(acceptance_server::AcceptanceState::default());
             acceptance_server::start(&handle);
+            #[cfg(not(mobile))]
+            if std::env::var("ELEPHANT_ACCEPTANCE_HIDE_WINDOW").ok().as_deref() == Some("1") {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.hide()?;
+                    println!("[acceptance-runner] native_window_visible={}", window.is_visible()?);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

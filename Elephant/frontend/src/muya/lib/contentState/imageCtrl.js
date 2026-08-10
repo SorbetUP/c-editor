@@ -121,6 +121,19 @@ const imageCtrl = (ContentState) => {
     const attrs = Object.assign({}, token.attrs)
     attrs[attrName] = attrValue
 
+    // Keep resized Markdown images in the shared format used by the Rust
+    // editor. The old path converted them to HTML and could lose the change
+    // when the re-render replaced the old image id.
+    if (token.type === 'image' && attrName === 'width') {
+      const source = attrs.src || token.src || ''
+      const title = attrs.title ? ` "${attrs.title}"` : ''
+      imageText = `![${attrs.alt || token.alt || ''}](${source}${title}){width=${attrValue}}`
+      block.text = oldText.substring(0, start) + imageText + oldText.substring(end)
+      this.cursor = { ...this.cursor, isEdit: true }
+      this.singleRender(block, false)
+      return this.muya.dispatchChange()
+    }
+
     imageText = '<img '
     for (const attr of Object.keys(attrs)) {
       let value = attrs[attr]
@@ -135,11 +148,9 @@ const imageCtrl = (ContentState) => {
 
     this.singleRender(block, false)
     const image = document.querySelector(`#${imageId} img`)
-    if (image) {
-      this.cursor = { ...this.cursor, isEdit: true } // To trigger a history record
-      image.click()
-      return this.muya.dispatchChange()
-    }
+    this.cursor = { ...this.cursor, isEdit: true } // To trigger a history record
+    if (image) image.click()
+    return this.muya.dispatchChange()
   }
 
   ContentState.prototype.replaceImage = function(

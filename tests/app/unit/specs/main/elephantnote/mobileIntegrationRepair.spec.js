@@ -37,8 +37,10 @@ describe('mobile integration repair', () => {
 
   it('restores mobile sort and view controls without changing the library store contract', () => {
     const runtime = read('Elephant/frontend/src/renderer/src/platform/mobileLibraryChromeRuntime.js')
-    expect(runtime).toContain('.en-view-toggle button[title="List"]')
-    expect(runtime).toContain('.en-library-actions .en-select')
+    expect(runtime).toContain('.en-view-cycle')
+    expect(runtime).toContain('.en-sort-cycle')
+    expect(runtime).toContain('title-za')
+    expect(runtime).not.toContain('.en-library-actions .en-select')
     expect(runtime).toContain('en-mobile-library-controls')
     expect(runtime).toContain('en-mobile-sort-sheet-backdrop')
   })

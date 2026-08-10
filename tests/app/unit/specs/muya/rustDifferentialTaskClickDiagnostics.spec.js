@@ -35,7 +35,6 @@ const seedJsHistory = (muya, initialState, changedState) => {
 }
 
 const readJsMarkdown = (muya) => {
-  muya._markdownBlockCache?.clear()
   return muya.getMarkdown()
 }
 

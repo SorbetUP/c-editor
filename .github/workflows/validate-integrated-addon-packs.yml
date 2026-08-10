@@ -3,24 +3,46 @@ name: Validate integrated addon packs
 on:
   push:
     branches:
+      - develop
+      - main
       - develop_next-unified-candidate2
       - develop_next-unified-recovery
       - develop_next-mobile-recovery
     paths:
       - .github/workflows/validate-integrated-addon-packs.yml
+      - build/scripts/sync-elephant-addons.mjs
+      - build/scripts/validate-integrated-addon-packs.mjs
+      - build/scripts/test-official-addon-packs.mjs
+      - tests/app/integration/official-addon-packs.spec.js
+      - examples/addons/**
       - addons/catalog.json
-      - addons/official/**/manifest.json
+      - addons/official/**
       - packs/**
   pull_request:
     paths:
       - .github/workflows/validate-integrated-addon-packs.yml
+      - build/scripts/sync-elephant-addons.mjs
+      - build/scripts/validate-integrated-addon-packs.mjs
+      - build/scripts/test-official-addon-packs.mjs
+      - tests/app/integration/official-addon-packs.spec.js
+      - examples/addons/**
       - addons/catalog.json
-      - addons/official/**/manifest.json
+      - addons/official/**
       - packs/**
+  repository_dispatch:
+    types: [elephant-addons-updated]
   workflow_dispatch:
+    inputs:
+      addon_ref:
+        description: 'Elephant-Addons commit SHA to validate'
+        required: false
+        type: string
 
 permissions:
   contents: read
+
+env:
+  ELEPHANT_ADDONS_REF: ${{ github.event.client_payload.sha || inputs.addon_ref || '' }}
 
 concurrency:
   group: validate-integrated-addon-packs-${{ github.ref }}
@@ -29,13 +51,19 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ./.github/actions/setup
 
       - name: Validate pack, catalogue and manifest consistency
         shell: bash
         run: |
+          set -o pipefail
+          node build/scripts/sync-elephant-addons.mjs 2>&1 | tee addon-sync.txt
           python3 - <<'PY'
           from pathlib import Path
           import json
@@ -101,3 +129,31 @@ jobs:
 
           print(f'Validated {len(develop_ids)} Develop parity addons and {len(base_ids)} Base addons.')
           PY
+
+      - name: Exercise the complete protected packs
+        shell: bash
+        env:
+          ELEPHANT_E2E_ADDON_RELEASE_ROOT: build/out/addons/releases
+        run: |
+          set -o pipefail
+          : > physical-addon-build.txt
+          for source in addons/official/*
+          do
+            [ -f "$source/addon.build.json" ] || continue
+            node build/scripts/build-physical-addon.mjs "$source" \
+              2>&1 | tee -a physical-addon-build.txt
+          done
+          node build/scripts/test-official-addon-packs.mjs 2>&1 | tee addon-pack-usage.txt
+
+      - name: Upload pack and native build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integrated-addon-pack-evidence
+          path: |
+            addon-sync.txt
+            addon-pack-usage.txt
+            physical-addon-build.txt
+            build/out/addons/releases/**/*.enaddon
+            build/out/addons/releases/**/*.json
+          if-no-files-found: ignore

@@ -2,6 +2,7 @@
   <header
     ref="rootRef"
     class="en-note-topbar"
+    :class="{ 'is-compact': compact }"
     @click.stop
   >
     <input
@@ -150,6 +151,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  compact: {
+    type: Boolean,
+    default: false
+  },
   isAddingTag: {
     type: Boolean,
     default: false
@@ -277,22 +282,38 @@ watch(
 <style scoped>
 .en-note-topbar {
   position: relative;
-  min-height: 58px;
+  min-height: 52px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 var(--en-note-editor-gutter-right, var(--en-note-editor-gutter, 24px)) 0 var(--en-note-editor-gutter-left, var(--en-note-editor-gutter, 24px));
+  padding: 0 var(--en-note-editor-gutter-right, var(--en-note-editor-gutter, 12px)) 0 var(--en-note-editor-gutter-left, var(--en-note-editor-gutter, 12px));
   color: var(--en-text);
   background: var(--en-bg);
   box-sizing: border-box;
   overflow: visible;
 }
 
+.en-note-topbar.is-compact {
+  min-height: 36px;
+}
+
+.en-note-topbar.is-compact .en-note-title-input {
+  font-size: 19px;
+}
+
+.en-note-topbar,
+.en-note-title-input,
+.en-note-date-chip,
+.en-note-chip,
+.en-note-action-button {
+  transition: min-height .18s ease, height .18s ease, font-size .18s ease, padding .18s ease;
+}
+
 .en-note-topbar::after {
   content: '';
   position: absolute;
-  left: var(--en-note-editor-gutter-left, var(--en-note-editor-gutter, 24px));
-  right: var(--en-note-editor-gutter-right, var(--en-note-editor-gutter, 24px));
+  left: var(--en-note-editor-gutter-left, var(--en-note-editor-gutter, 12px));
+  right: var(--en-note-editor-gutter-right, var(--en-note-editor-gutter, 12px));
   bottom: 0;
   height: 1px;
   background: color-mix(in srgb, var(--en-border) 42%, transparent);
@@ -432,7 +453,7 @@ watch(
   .en-note-topbar {
     flex-wrap: wrap;
     align-content: center;
-    padding: 6px var(--en-note-editor-gutter-right, 24px) 6px var(--en-note-editor-gutter-left, 32px);
+    padding: 4px var(--en-note-editor-gutter-right, 12px) 4px var(--en-note-editor-gutter-left, 12px);
   }
 
   .en-note-title-input {

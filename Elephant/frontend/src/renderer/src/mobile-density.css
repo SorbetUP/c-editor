@@ -65,17 +65,16 @@
     gap: 8px !important;
   }
 
-  .en-library-actions .en-select,
-  .en-library-actions .en-view-toggle {
+  .en-library-actions .en-sort-cycle,
+  .en-library-actions .en-view-cycle {
     min-width: 0 !important;
     height: var(--en-mobile-tap-target) !important;
     border-radius: 13px !important;
     background: color-mix(in srgb, var(--en-surface) 72%, var(--en-bg)) !important;
   }
 
-  .en-library-actions .en-select {
-    flex: 1 1 auto !important;
-    font-size: 13px !important;
+  .en-library-actions .en-sort-cycle {
+    flex: 0 0 auto !important;
   }
 
   .en-mobile-shell .en-library-grid {

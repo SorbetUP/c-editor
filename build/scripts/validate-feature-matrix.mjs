@@ -23,8 +23,13 @@ const linuxCatalog = readJson('tests/app/usage/linux/scenarios.json')
 const addonCatalog = readJson('addons/catalog.json')
 const linuxSuite = readText('tests/app/e2e/linux-usage-regressions.spec.js')
 const officialAddonSuite = readText('tests/app/e2e/official-addons-regressions.spec.js')
+const officialAddonUiSuite = readText('tests/app/e2e/official-addon-ui-usage.spec.js')
+const exampleAddonUiSuite = readText('tests/app/e2e/example-addon-ui-usage.spec.js')
+const addonPackSuite = readText('build/scripts/test-official-addon-packs.mjs')
 const packageJson = readJson('package.json')
 const workflow = readText('.github/workflows/e2e.yml')
+const nativeRuntimeWorkflow = readText('.github/workflows/local-addon-runtimes.yml')
+const validationWorkflows = `${workflow}\n${nativeRuntimeWorkflow}`
 const observableRunner = readText('build/scripts/run-observable.mjs')
 
 for (const relativePath of [
@@ -33,6 +38,15 @@ for (const relativePath of [
   'tests/app/e2e/observable-preload-patch.js',
   'tests/app/e2e/official-addon-preload-patch.js',
   'tests/app/e2e/official-addons-regressions.spec.js',
+  'tests/app/e2e/official-addon-ui-usage.spec.js',
+  'tests/app/e2e/example-addon-ui-usage.spec.js',
+  'tests/app/e2e/addon-ui/real-sync/real-sync-service.js',
+  'tests/app/e2e/addon-ui/real-sync/real-sync-service.spec.js',
+  'tests/app/e2e/addon-ui/local-runtime/protocol-client.mjs',
+  'tests/app/e2e/addon-ui/local-runtime/ocr-fixture.mjs',
+  'tests/app/e2e/addon-ui/local-runtime/real-local-runtime.spec.js',
+  'build/scripts/ensure-test-model.mjs',
+  'build/scripts/test-official-addon-packs.mjs',
   'tests/app/e2e/tauri-preload-entry.js',
   'tests/app/e2e/playwright.config.js'
 ]) {
@@ -149,6 +163,29 @@ pass('official addon lifecycle suite is catalogue-driven', {
   scenariosPerAddon: (matrix.officialAddonScenarios || []).length
 })
 
+try {
+  const { validateCoverage } = require(path.join(root, 'tests/app/e2e/addon-ui/coverage-manifest.js'))
+  const scenarioModules = [
+    require(path.join(root, 'tests/app/e2e/addon-ui/dashboard-recent-calendar-sites.js')),
+    require(path.join(root, 'tests/app/e2e/addon-ui/ai-family.js')),
+    require(path.join(root, 'tests/app/e2e/addon-ui/knowledge-wiki-graph.js')),
+    require(path.join(root, 'tests/app/e2e/addon-ui/native-services.js')),
+    require(path.join(root, 'tests/app/e2e/addon-ui/ocr-code-execution.js')),
+    require(path.join(root, 'tests/app/e2e/addon-ui/google-keep-import.js'))
+  ]
+  const scenarios = scenarioModules.flatMap((module) => Array.isArray(module) ? module : Object.values(module))
+  validateCoverage(addonCatalog, scenarios)
+  if (!officialAddonUiSuite.includes('launchUiApp') || !officialAddonUiSuite.includes('scenario.run')) {
+    throw new Error('official addon UI runner is not connected to the shared harness and scenario execution')
+  }
+  pass('all official addons have a catalogue-driven real UI usage scenario', {
+    addons: scenarios.length,
+    files: new Set(scenarios.map((scenario) => scenario.addonId)).size
+  })
+} catch (error) {
+  fail(`official addon UI usage coverage is invalid: ${error?.stack || error?.message || String(error)}`)
+}
+
 const serviceAddons = new Set((matrix.officialAddons || [])
   .filter((addon) => addon.runtime === 'service')
   .map((addon) => addon.id))
@@ -160,7 +197,37 @@ for (const addonId of serviceAddons) {
 }
 pass('service-backed addons require native package evidence', { count: serviceAddons.size })
 
-const observableScripts = ['tauri:dev', 'test', 'test:unit', 'test:e2e', 'test:official-addons:e2e']
+for (const [scriptName, marker] of [
+  ['test:official-addon-packs', 'test-official-addon-packs.mjs'],
+  ['test:example-addons:e2e', 'test:example-addons:e2e:raw'],
+  ['test:sync-native:e2e', 'test:sync-native:e2e:raw'],
+  ['test:local-addon-runtimes:e2e', 'test:local-addon-runtimes:e2e:raw']
+]) {
+  const script = packageJson.scripts?.[scriptName] || ''
+  if (!script.includes(marker)) fail(`${scriptName} is not connected to ${marker}`)
+  else pass('addon validation script is connected', { scriptName, marker })
+}
+if (!addonPackSuite.includes('obsolete-version rejection probe passed') || !addonPackSuite.includes('actionCount')) {
+  fail('official addon pack suite does not exercise stale versions and addon actions')
+} else {
+  pass('complete official addon pack suite exercises installed addon actions')
+}
+if (!exampleAddonUiSuite.includes('installPackage') || !exampleAddonUiSuite.includes('cleanup')) {
+  fail('example addon UI suite is not connected to real package install and cleanup')
+} else {
+  pass('example addon UI suite is connected to package install, use, reload and cleanup')
+}
+
+const observableScripts = [
+  'tauri:dev',
+  'test',
+  'test:unit',
+  'test:e2e',
+  'test:official-addons:e2e',
+  'test:example-addons:e2e',
+  'test:sync-native:e2e',
+  'test:local-addon-runtimes:e2e'
+]
 for (const scriptName of observableScripts) {
   const script = packageJson.scripts?.[scriptName] || ''
   if (!script.includes('run-observable.mjs')) fail(`${scriptName} bypasses the observable command runner`)
@@ -176,11 +243,15 @@ pass('observable runner emits structured lifecycle and output events')
 for (const workflowMarker of [
   'pnpm test:feature-matrix',
   'pnpm test:e2e',
+  'pnpm test:official-addon-packs',
+  'pnpm test:example-addons:e2e',
+  'pnpm test:sync-native:e2e',
+  'pnpm test:local-addon-runtimes:e2e',
   'test-results/observability/**',
   'official-addon-evidence/**',
   'build/out/addons/releases/**'
 ]) {
-  if (!workflow.includes(workflowMarker)) fail(`E2E workflow does not retain ${workflowMarker}`)
+  if (!validationWorkflows.includes(workflowMarker)) fail(`E2E workflow does not retain ${workflowMarker}`)
 }
 pass('E2E workflow keeps feature, addon and observability evidence')
 

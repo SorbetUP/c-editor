@@ -24,8 +24,6 @@ const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 const MAX_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_PACKAGE_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_PACKAGE_FILE_BYTES: u64 = 128 * 1024 * 1024;
-const LEGACY_SYNC_ROOT: &str = "https://raw.githubusercontent.com/SorbetUP/ElephantNote/2a4547c17e3ce1e581e9956dc970c37039d49329/";
-const LEGACY_SYNC_VERSION: &str = "1.2.0";
 
 #[derive(Deserialize)]
 struct IntegratedCatalog {
@@ -60,39 +58,7 @@ fn valid_platform_key(value: &str) -> bool {
     && matches!(arch, "aarch64" | "x86_64" | "armv7" | "i686")
 }
 
-fn legacy_sync_package(platform: &str) -> Option<(&'static str, &'static str)> {
-  match platform {
-    "linux-x86_64" => Some((
-      "addons/sync/releases/elephant.sync-1.2.0-linux-x86_64.enaddon",
-      "6a9996f9542616d18835d807a03577a976ffbb2c9b321ad24fe8ce37cbe9eaad",
-    )),
-    "macos-aarch64" => Some((
-      "addons/sync/releases/elephant.sync-1.2.0-macos-aarch64.enaddon",
-      "ada18591bb94f4a7218c098dee79673d652c77031562bd9f2c856b051c3ccda3",
-    )),
-    "macos-x86_64" => Some((
-      "addons/sync/releases/elephant.sync-1.2.0-macos-x86_64.enaddon",
-      "bd3d5d28f561d3fa88042025729067d6f5ba044663dc490b7359b1d469118bc3",
-    )),
-    "windows-x86_64" => Some((
-      "addons/sync/releases/elephant.sync-1.2.0-windows-x86_64.enaddon",
-      "318d9ba10d85d9496fadcf539bed4fb6391da9cc1d53f20cc12c5dc2560aa8f6",
-    )),
-    _ => None,
-  }
-}
-
-fn uses_legacy_sync_package(item: &CatalogAddon) -> bool {
-  item.id == "elephant.sync" && item.version == LEGACY_SYNC_VERSION && item.packages.is_empty()
-}
-
 fn available_for_platform(item: &CatalogAddon, platform: &str) -> bool {
-  if uses_legacy_sync_package(item) {
-    return legacy_sync_package(platform).is_some();
-  }
-  if item.id == "elephant.sync" && item.packages.is_empty() {
-    return false;
-  }
   if item.packages.is_empty() {
     !item.requires_platform_package
   } else {

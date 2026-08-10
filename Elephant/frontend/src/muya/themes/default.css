@@ -5,7 +5,8 @@
 
 /*
  * Open Sans
- * https://fonts.googleapis.com/css?family=Open+Sans:300,300i,400,400i,600,600i,700,700i&amp;subset=latin-ext
+ * The application does not ship the historical webfont files. Keep the
+ * original family and use installed equivalents without network requests.
  */
 @font-face {
   font-family: 'Open Sans';
@@ -13,8 +14,7 @@
   font-weight: 300;
   src:
     local('Open Sans Light'),
-    local('OpenSans-Light'),
-    url('./fonts/open-sans-v27-latin-ext_latin-300.woff') format('woff');
+    local('OpenSans-Light');
 }
 @font-face {
   font-family: 'Open Sans';
@@ -22,8 +22,7 @@
   font-weight: 300;
   src:
     local('Open Sans Light Italic'),
-    local('OpenSans-LightItalic'),
-    url('./fonts/open-sans-v27-latin-ext_latin-300italic.woff') format('woff');
+    local('OpenSans-LightItalic');
 }
 @font-face {
   font-family: 'Open Sans';
@@ -31,8 +30,7 @@
   font-weight: 400;
   src:
     local('Open Sans Regular'),
-    local('OpenSans-Regular'),
-    url('./fonts/open-sans-v27-latin-ext_latin-regular.woff') format('woff');
+    local('OpenSans-Regular');
 }
 @font-face {
   font-family: 'Open Sans';
@@ -40,8 +38,7 @@
   font-weight: 400;
   src:
     local('Open Sans Italic'),
-    local('OpenSans-Italic'),
-    url('./fonts/open-sans-v27-latin-ext_latin-italic.woff') format('woff');
+    local('OpenSans-Italic');
 }
 @font-face {
   font-family: 'Open Sans';
@@ -49,8 +46,7 @@
   font-weight: 600;
   src:
     local('Open Sans SemiBold'),
-    local('OpenSans-SemiBold'),
-    url('./fonts/open-sans-v27-latin-ext_latin-600.woff') format('woff');
+    local('OpenSans-SemiBold');
 }
 @font-face {
   font-family: 'Open Sans';
@@ -58,8 +54,7 @@
   font-weight: 600;
   src:
     local('Open Sans SemiBold Italic'),
-    local('OpenSans-SemiBoldItalic'),
-    url('./fonts/open-sans-v27-latin-ext_latin-600italic.woff') format('woff');
+    local('OpenSans-SemiBoldItalic');
 }
 @font-face {
   font-family: 'Open Sans';
@@ -67,8 +62,7 @@
   font-weight: 700;
   src:
     local('Open Sans Bold'),
-    local('OpenSans-Bold'),
-    url('./fonts/open-sans-v27-latin-ext_latin-700.woff') format('woff');
+    local('OpenSans-Bold');
 }
 @font-face {
   font-family: 'Open Sans';
@@ -76,8 +70,7 @@
   font-weight: 700;
   src:
     local('Open Sans Bold Italic'),
-    local('OpenSans-BoldItalic'),
-    url('./fonts/open-sans-v27-latin-ext_latin-700italic.woff') format('woff');
+    local('OpenSans-BoldItalic');
 }
 
 /*
@@ -85,34 +78,34 @@
  */
 @font-face {
   font-family: 'DejaVu Sans Mono';
-  src: local('DejaVu Sans Mono'), url('./fonts/DejaVuSansMono.ttf');
+  src: local('DejaVu Sans Mono');
 }
 @font-face {
   font-family: 'DejaVu Sans Mono';
   font-weight: bold;
-  src: url('./fonts/DejaVuSansMono-Bold.ttf');
+  src: local('DejaVu Sans Mono Bold');
 }
 @font-face {
   font-family: 'DejaVu Sans Mono';
   font-style: oblique;
   font-weight: bold;
-  src: url('./fonts/DejaVuSansMono-BoldOblique.ttf');
+  src: local('DejaVu Sans Mono Bold Oblique');
 }
 @font-face {
   font-family: 'DejaVu Sans Mono';
   font-style: italic;
   font-weight: bold;
-  src: url('./fonts/DejaVuSansMono-BoldOblique.ttf');
+  src: local('DejaVu Sans Mono Bold Oblique');
 }
 @font-face {
   font-family: 'DejaVu Sans Mono';
   font-style: italic;
-  src: url('./fonts/DejaVuSansMono-Oblique.ttf');
+  src: local('DejaVu Sans Mono Oblique');
 }
 @font-face {
   font-family: 'DejaVu Sans Mono';
   font-style: oblique;
-  src: url('./fonts/DejaVuSansMono-Oblique.ttf');
+  src: local('DejaVu Sans Mono Oblique');
 }
 
 html,
@@ -146,12 +139,13 @@ kbd {
 
 @media not print {
   #ag-editor-id {
-    max-width: var(--editorAreaWidth);
+    width: 100%;
+    max-width: none;
     min-width: 400px;
     min-height: 100%;
-    margin: 0 auto;
-    padding: 20px var(--en-note-editor-gutter-right, var(--en-note-editor-gutter, 50px)) 100px
-      var(--en-note-editor-gutter-left, var(--en-note-editor-gutter, 50px));
+    margin: 0;
+    padding: 20px var(--en-note-editor-gutter-right, var(--en-note-editor-gutter, 12px)) 100px
+      var(--en-note-editor-gutter-left, var(--en-note-editor-gutter, 12px));
     box-sizing: border-box;
     cursor: text;
   }

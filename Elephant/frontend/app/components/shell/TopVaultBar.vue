@@ -34,8 +34,14 @@
         :aria-label="isMaximized ? 'Restore window' : 'Maximize window'"
         @click.stop="handleMaximizeClick"
       >
-        <Copy v-if="isMaximized" class="en-window-control-icon en-window-control-restore" />
-        <Square v-else class="en-window-control-icon" />
+        <Copy
+          v-if="isMaximized"
+          class="en-window-control-icon en-window-control-restore"
+        />
+        <Square
+          v-else
+          class="en-window-control-icon"
+        />
       </button>
       <button
         class="en-window-control en-window-control-close"
@@ -134,26 +140,11 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-shrink: 0;
   -webkit-app-region: drag;
-  background:
-    linear-gradient(
-      to right,
-      var(--en-sidebar-bg, var(--en-bg)) 0,
-      var(--en-sidebar-bg, var(--en-bg)) calc(48px + var(--en-sidebar-width) + 1px),
-      var(--en-bg) calc(48px + var(--en-sidebar-width) + 1px),
-      var(--en-bg) 100%
-    );
+  background: var(--en-bg);
 }
 .en-topstrip-sidebar-hidden { background: var(--en-bg); }
 .en-topstrip::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(48px + var(--en-sidebar-width));
-  width: 1px;
-  background: var(--en-border);
-  z-index: 1;
-  pointer-events: none;
+  display: none;
 }
 .en-topstrip-sidebar-hidden::after { display: none; }
 .en-topstrip-nav {
@@ -168,7 +159,7 @@ onBeforeUnmount(() => {
 }
 .en-topstrip-nav-macos {
   left: 84px;
-  top: -8px;
+  top: 4px;
 }
 .en-topstrip-drag {
   flex: 1;

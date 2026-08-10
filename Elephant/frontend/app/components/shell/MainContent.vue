@@ -16,7 +16,10 @@
       <library-grid />
     </section>
     <template v-if="!hasOpenNote && !activeAddonViewId && store.activeWorkspaceView === 'notes'">
-      <template v-for="entry in workspacePanels" :key="entry.contribution.id">
+      <template
+        v-for="entry in workspacePanels"
+        :key="entry.contribution.id"
+      >
         <component
           :is="entry.contribution.component"
           v-if="isPanelVisible(entry)"
@@ -118,6 +121,7 @@ const isPanelVisible = (entry) => {
 }
 
 .en-library {
+  position: relative;
   min-height: 0;
   flex: 1;
   display: flex;

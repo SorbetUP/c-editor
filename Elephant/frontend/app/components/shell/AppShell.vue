@@ -11,12 +11,13 @@
       `en-theme-${themeMode}`,
       `en-theme-${themeClassId}`,
       {
-      'en-pinned-card-halo': preferences.pinnedCardHalo,
-      'en-mobile-shell': isMobileShell,
-      'en-mobile-drawer-open': isMobileShell && drawerProgress > 0,
-      'en-mobile-drawer-dragging': isMobileShell && drawerDragging,
-      'en-mobile-drawer-settling': isMobileShell && drawerSettling
-    }
+        'en-pinned-card-halo': preferences.pinnedCardHalo,
+        'en-floating-surfaces': preferences.floatingSurfaces,
+        'en-mobile-shell': isMobileShell,
+        'en-mobile-drawer-open': isMobileShell && drawerProgress > 0,
+        'en-mobile-drawer-dragging': isMobileShell && drawerDragging,
+        'en-mobile-drawer-settling': isMobileShell && drawerSettling
+      }
     ]"
     :style="shellStyle"
     @pointerdown="handleDrawerPointerDown"
@@ -26,38 +27,39 @@
   >
     <div class="en-shell-main">
       <top-vault-bar
-      v-if="!isMobileShell"
-      :sidebar-visible="sidebarVisible"
-    />
-    <header
-      v-else
-      class="en-mobile-topbar"
-    >
-      <button
-        class="en-mobile-icon-button"
-        type="button"
-        aria-label="Open navigation"
-        @click="openMobileSidebar"
+        v-if="!isMobileShell"
+        :sidebar-visible="sidebarVisible"
+      />
+      <header
+        v-else
+        class="en-mobile-topbar"
       >
-        <Menu class="en-mobile-icon" />
-      </button>
-      <button
-        class="en-mobile-search"
-        type="button"
-        @click="openSearch"
-      >
-        <Search class="en-mobile-icon" />
-        <span>Search notes</span>
-      </button>
-      <button
-        class="en-mobile-icon-button"
-        type="button"
-        aria-label="Settings"
-        @click="openSettings"
-      >
-        <Settings class="en-mobile-icon" />
-      </button>
-    </header>
+        <button
+          class="en-mobile-icon-button"
+          type="button"
+          :aria-label="drawerProgress > 0 ? 'Close navigation' : 'Open navigation'"
+          :title="drawerProgress > 0 ? 'Close navigation' : 'Open navigation'"
+          @click="toggleMobileSidebar"
+        >
+          <Menu class="en-mobile-icon" />
+        </button>
+        <button
+          class="en-mobile-search"
+          type="button"
+          @click="openSearch"
+        >
+          <Search class="en-mobile-icon" />
+          <span>Search notes</span>
+        </button>
+        <button
+          class="en-mobile-icon-button"
+          type="button"
+          aria-label="Settings"
+          @click="openSettings"
+        >
+          <Settings class="en-mobile-icon" />
+        </button>
+      </header>
       <div class="en-layout">
         <icon-rail
           v-if="!isMobileShell"
@@ -94,10 +96,16 @@
           <div
             v-if="sidebarVisible && !isMobileShell"
             class="en-sidebar-resizer"
+            data-sidebar-resizer
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize sidebar"
+            tabindex="0"
+            aria-valuemin="184"
+            aria-valuemax="320"
+            :aria-valuenow="sidebarWidth"
             @pointerdown="startResize"
+            @keydown="handleResizeKeydown"
           />
           <main-content
             class="en-body-main"
@@ -127,7 +135,10 @@
         </template>
       </CreateEntryMenu>
     </div>
-    <template v-for="entry in shellRightZones" :key="entry.contribution.id">
+    <template
+      v-for="entry in shellRightZones"
+      :key="entry.contribution.id"
+    >
       <component
         :is="entry.contribution.component"
         v-if="isLayoutZoneVisible(entry)"
@@ -157,6 +168,7 @@ import { useAddonsStore } from '@/store/addons'
 import { useEditorStore } from '@/store/editor'
 import { useSearchStore } from '../../stores/searchStore'
 import { useCanvasStore } from '../../stores/canvasStore'
+import bus from '../../../src/renderer/src/bus'
 import { elephantnoteClient } from '../../services/elephantnoteClient'
 import {
   ELEPHANTNOTE_THEME_STORAGE_KEY,
@@ -304,6 +316,11 @@ const openMobileSidebar = () => {
 
 const closeMobileSidebar = () => {
   if (isMobileShell.value) settleDrawer(false)
+}
+
+const toggleMobileSidebar = () => {
+  if (drawerProgress.value > 0) closeMobileSidebar()
+  else openMobileSidebar()
 }
 
 const handleDrawerPointerDown = (event) => {
@@ -503,6 +520,13 @@ const startResize = (event) => {
   window.addEventListener('pointerup', onUp)
 }
 
+const handleResizeKeydown = (event) => {
+  const delta = event.key === 'ArrowLeft' ? -16 : event.key === 'ArrowRight' ? 16 : 0
+  if (!delta) return
+  event.preventDefault()
+  setSidebarWidth(sidebarWidth.value + delta)
+}
+
 const handleShortcut = (event) => {
   const key = String(event.key || '')
   if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
@@ -523,6 +547,23 @@ const handleShortcut = (event) => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && key.toLowerCase() === 'r') {
     event.preventDefault()
     navigationStore.syncWorkspace(store.activeVault?.path)
+    return
+  }
+
+  const isFindShortcut =
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    key.toLowerCase() === 'f'
+
+  if (isFindShortcut && store.hasVault) {
+    if (isSettingsOpen.value) return
+    event.preventDefault()
+    if (store.openedNotePath) {
+      bus.emit('find', 'find')
+    } else {
+      openSearch()
+    }
     return
   }
 
@@ -632,7 +673,7 @@ onBeforeUnmount(() => {
 .en-body {
   flex: 1;
   display: grid;
-  grid-template-columns: var(--en-sidebar-width) 1px minmax(0, 1fr);
+  grid-template-columns: var(--en-sidebar-width) 0 minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -647,7 +688,9 @@ onBeforeUnmount(() => {
 .en-sidebar-resizer {
   position: relative;
   z-index: 9;
-  background: var(--en-border);
+  width: 0;
+  background: transparent;
+  border: 0;
   cursor: col-resize;
   touch-action: none;
 }
@@ -655,12 +698,52 @@ onBeforeUnmount(() => {
 .en-sidebar-resizer::before {
   content: '';
   position: absolute;
-  inset: 0 -5px;
+  top: 0;
+  right: -6px;
+  bottom: 0;
+  width: 12px;
+  z-index: 1;
+  background: transparent;
   cursor: col-resize;
 }
 
-.en-sidebar-resizer:hover {
+.en-sidebar-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 64px;
+  border-radius: 999px;
   background: var(--en-primary);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms ease;
+}
+
+.en-sidebar-resizer:hover::after,
+.en-sidebar-resizer:focus-visible::after,
+:global(.en-resizing-sidebar) .en-sidebar-resizer::after {
+  opacity: 1;
+}
+
+.en-floating-surfaces .en-sidebar-resizer {
+  width: 0;
+  background: transparent;
+  border: 0;
+}
+
+.en-floating-surfaces .en-sidebar {
+  border-right: 0 !important;
+}
+
+.en-floating-surfaces .en-body-main {
+  border-left: 0 !important;
+}
+
+.en-floating-surfaces .en-sidebar-resizer::after {
+  background: color-mix(in srgb, var(--en-primary) 72%, var(--en-border));
 }
 
 :global(.en-resizing-sidebar),

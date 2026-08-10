@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import bus from '../bus'
 import { setLanguage } from '../i18n'
+import log from '../platform/runtimeLogShim'
 import {
   hydratePortablePreferences,
   hydratePortableUserData,
@@ -14,10 +15,11 @@ export const usePreferencesStore = defineStore('preferences', {
     autoSave: false,
     autoSaveDelay: 5000,
     pinnedCardHalo: false,
+    floatingSurfaces: false,
     iconRailOrder: ['dashboard', 'wiki', 'graph', 'models', 'search', 'chat'],
     iconRailHidden: [],
     showTagHashInEditor: true,
-    noteEditorMargin: 24,
+    noteEditorMargin: 12,
     titleBarStyle: 'custom',
     openFilesInNewWindow: false,
     openFolderInNewWindow: false,
@@ -153,7 +155,17 @@ export const usePreferencesStore = defineStore('preferences', {
     },
     ASK_FOR_USER_PREFERENCE() {
       if (isPortableRuntime()) {
-        this.SET_USER_PREFERENCE(hydratePortablePreferences(this.$state))
+        const invoke = globalThis?.__TAURI__?.core?.invoke
+        if (typeof invoke === 'function') {
+          void invoke('tauri_prefs_all').then((preferences) => {
+            this.SET_USER_PREFERENCE(preferences && typeof preferences === 'object' ? preferences : {})
+          }).catch((error) => {
+            log.error('[preferences] persistent load failed', error)
+            this.SET_USER_PREFERENCE(hydratePortablePreferences(this.$state))
+          })
+        } else {
+          this.SET_USER_PREFERENCE(hydratePortablePreferences(this.$state))
+        }
         const portableUserData = hydratePortableUserData(this.$state)
         Object.entries(portableUserData).forEach(([type, value]) => {
           this.SET_USER_DATA({ type, value })
@@ -180,6 +192,12 @@ export const usePreferencesStore = defineStore('preferences', {
       // Persist to the runtime-backed preference store.
       persistPortablePreference(type, value)
       if (isPortableRuntime()) {
+        const invoke = globalThis?.__TAURI__?.core?.invoke
+        if (typeof invoke === 'function') {
+          void invoke('tauri_prefs_set', { key: type, value }).catch((error) => {
+            log.error('[preferences] persistent write failed', { key: type, error })
+          })
+        }
         return
       }
       window.tauri.ipcRenderer.send('mt::set-user-preference', { [type]: value })

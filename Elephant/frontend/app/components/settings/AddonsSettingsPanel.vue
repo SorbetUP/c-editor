@@ -1,27 +1,22 @@
 <template>
   <div class="en-addons-panel">
-    <Teleport defer to="#en-addons-title-actions">
+    <nav
+      class="en-addons-tabs"
+      aria-label="Addon settings pages"
+    >
       <button
-        class="en-community-title-check"
-        :class="{ active: communityAddonsEnabled }"
         type="button"
-        role="checkbox"
-        aria-label="Community addons"
-        :aria-checked="communityAddonsEnabled"
-        :title="communityAddonsEnabled ? 'Disable community addons' : 'Enable community addons'"
-        :disabled="!communityConsentLoaded || operationInProgress"
-        @click="toggleCommunityAddons"
+        :class="{ active: activePage === 'addons' }"
+        @click="activePage = 'addons'"
       >
-        <Check v-if="communityAddonsEnabled" aria-hidden="true" />
-      </button>
-    </Teleport>
-
-    <nav class="en-addons-tabs" aria-label="Addon settings pages">
-      <button type="button" :class="{ active: activePage === 'addons' }" @click="activePage = 'addons'">
         <Package aria-hidden="true" />
         <span>Addons</span>
       </button>
-      <button type="button" :class="{ active: activePage === 'packs' }" @click="activePage = 'packs'">
+      <button
+        type="button"
+        :class="{ active: activePage === 'packs' }"
+        @click="activePage = 'packs'"
+      >
         <Layers3 aria-hidden="true" />
         <span>Addon packs</span>
       </button>
@@ -46,7 +41,10 @@
         >
       </label>
 
-      <label v-if="activePage === 'addons'" class="en-installed-only-control">
+      <label
+        v-if="activePage === 'addons'"
+        class="en-installed-only-control"
+      >
         <button
           class="en-addon-installed-filter"
           type="button"
@@ -74,7 +72,7 @@
         type="button"
         :aria-label="activePage === 'addons' ? 'Install addon from file' : 'Add addon pack from file'"
         :title="activePage === 'addons' ? 'Install addon from file' : 'Add addon pack from file'"
-        :disabled="operationInProgress || (activePage === 'addons' && !communityAddonsEnabled)"
+        :disabled="operationInProgress"
         @click="addFromFile"
       >
         <Plus aria-hidden="true" />
@@ -82,10 +80,25 @@
     </div>
 
     <template v-if="activePage === 'addons'">
-      <p v-if="message" class="en-addons-feedback" :class="{ error: messageIsError }">{{ message }}</p>
-      <p v-if="lastError" class="en-addons-feedback error">{{ lastError }}</p>
+      <p
+        v-if="message"
+        class="en-addons-feedback"
+        :class="{ error: messageIsError }"
+      >
+        {{ message }}
+      </p>
+      <p
+        v-if="lastError"
+        class="en-addons-feedback error"
+      >
+        {{ lastError }}
+      </p>
 
-      <section v-if="!selectedEntry" class="en-addon-catalogue" aria-label="Addon catalogue">
+      <section
+        v-if="!selectedEntry"
+        class="en-addon-catalogue"
+        aria-label="Addon catalogue"
+      >
         <button
           v-for="entry in browserEntries"
           :key="entry.id"
@@ -107,21 +120,48 @@
           <ChevronRight aria-hidden="true" />
         </button>
 
-        <div v-if="communityAddonsEnabled && catalogLoading" class="en-addons-empty">Loading the addon catalogue…</div>
-        <div v-else-if="communityAddonsEnabled && catalogError" class="en-addons-empty error"><strong>Catalogue unavailable</strong><span>{{ catalogError }}</span></div>
-        <div v-else-if="!browserEntries.length" class="en-addons-empty">{{ query ? 'No addon matches this search.' : 'No addon is available.' }}</div>
+        <div
+          v-if="catalogLoading"
+          class="en-addons-empty"
+        >
+          Loading the addon catalogue…
+        </div>
+        <div
+          v-else-if="catalogError"
+          class="en-addons-empty error"
+        >
+          <strong>Catalogue unavailable</strong><span>{{ catalogError }}</span>
+        </div>
+        <div
+          v-else-if="!browserEntries.length"
+          class="en-addons-empty"
+        >
+          {{ query ? 'No addon matches this search.' : 'No addon is available.' }}
+        </div>
       </section>
 
-      <section v-else class="en-addon-browser" :class="{ 'en-addon-browser-detail-mode': true }">
+      <section
+        v-else
+        class="en-addon-browser"
+        :class="{ 'en-addon-browser-detail-mode': true }"
+      >
         <aside class="en-addon-browser-sidebar">
           <header class="en-addon-browser-sidebar-header">
-            <button class="en-addon-browser-back" type="button" @click="closeAddonDetails">
+            <button
+              class="en-addon-browser-back"
+              type="button"
+              @click="closeAddonDetails"
+            >
               <ArrowLeft aria-hidden="true" />
               <span>Catalogue</span>
             </button>
             <small>{{ browserEntries.length }} addon{{ browserEntries.length === 1 ? '' : 's' }}</small>
           </header>
-          <div class="en-addon-browser-list" role="listbox" aria-label="Addon catalogue">
+          <div
+            class="en-addon-browser-list"
+            role="listbox"
+            aria-label="Addon catalogue"
+          >
             <button
               v-for="entry in browserEntries"
               :key="entry.id"
@@ -143,7 +183,10 @@
           </div>
         </aside>
 
-        <main class="en-addon-browser-detail" :data-selected-addon-id="selectedEntry.id">
+        <main
+          class="en-addon-browser-detail"
+          :data-selected-addon-id="selectedEntry.id"
+        >
           <header class="en-addon-detail-header">
             <span class="en-addon-detail-logo"><AddonIcon :name="selectedEntry.manifest.icon" /></span>
             <div class="en-addon-detail-heading">
@@ -164,22 +207,48 @@
                   :class="{ active: selectedEntry.snapshot.enabled }"
                   :disabled="operationInProgress || isCommunityLocked(selectedEntry.snapshot)"
                   @click="toggleSelectedAddon"
-                ><span /></button>
-                <button class="en-danger-button" type="button" :disabled="operationInProgress" @click="uninstallSelectedAddon">Uninstall</button>
+                >
+                  <span />
+                </button>
+                <button
+                  class="en-danger-button"
+                  type="button"
+                  :disabled="operationInProgress"
+                  @click="uninstallSelectedAddon"
+                >
+                  Uninstall
+                </button>
               </template>
-              <button v-else class="en-primary-button" type="button" :disabled="operationInProgress" @click="installSelectedAddon">Install</button>
+              <button
+                v-else
+                class="en-primary-button"
+                type="button"
+                :disabled="operationInProgress"
+                @click="installSelectedAddon"
+              >
+                Install
+              </button>
             </div>
           </header>
 
-          <p class="en-addon-detail-description">{{ selectedEntry.manifest.description || 'No description.' }}</p>
+          <p class="en-addon-detail-description">
+            {{ selectedEntry.manifest.description || 'No description.' }}
+          </p>
 
-          <section v-if="selectedEntry.id === AI_PARENT_ID && aiModules.length" class="en-addon-detail-section">
+          <section
+            v-if="selectedEntry.id === AI_PARENT_ID && aiModules.length"
+            class="en-addon-detail-section"
+          >
             <header>
               <div><h3>AI modules</h3><p>Each module remains independently downloadable from the catalogue.</p></div>
               <span>{{ installedAiModuleCount }}/{{ aiModules.length }}</span>
             </header>
             <div class="en-ai-module-list">
-              <article v-for="module in aiModules" :key="module.id" class="en-ai-module-row">
+              <article
+                v-for="module in aiModules"
+                :key="module.id"
+                class="en-ai-module-row"
+              >
                 <span class="en-ai-module-icon"><AddonIcon :name="module.manifest.icon" /></span>
                 <div class="en-ai-module-copy">
                   <strong>{{ module.manifest.name }}</strong>
@@ -195,22 +264,48 @@
                     :class="{ active: module.snapshot.enabled }"
                     :disabled="operationInProgress"
                     @click="toggleAddon(module.snapshot)"
-                  ><span /></button>
-                  <button class="en-addon-module-remove" type="button" :disabled="operationInProgress" @click="uninstallAddon(module.snapshot)">Uninstall</button>
+                  >
+                    <span />
+                  </button>
+                  <button
+                    class="en-addon-module-remove"
+                    type="button"
+                    :disabled="operationInProgress"
+                    @click="uninstallAddon(module.snapshot)"
+                  >
+                    Uninstall
+                  </button>
                 </template>
-                <button v-else class="en-secondary-button" type="button" :disabled="operationInProgress" @click="installAiModule(module)">Install</button>
+                <button
+                  v-else
+                  class="en-secondary-button"
+                  type="button"
+                  :disabled="operationInProgress"
+                  @click="installAiModule(module)"
+                >
+                  Install
+                </button>
               </article>
             </div>
           </section>
 
-          <section v-if="selectedPermissions.length" class="en-addon-detail-section">
+          <section
+            v-if="selectedPermissions.length"
+            class="en-addon-detail-section"
+          >
             <header><div><h3>Capabilities</h3><p>Access requested by this addon.</p></div></header>
             <div class="en-addon-detail-permissions">
-              <span v-for="permission in selectedPermissions" :key="permission">{{ permission }}</span>
+              <span
+                v-for="permission in selectedPermissions"
+                :key="permission"
+              >{{ permission }}</span>
             </div>
           </section>
 
-          <section v-if="selectedActions.length" class="en-addon-detail-section">
+          <section
+            v-if="selectedActions.length"
+            class="en-addon-detail-section"
+          >
             <header><div><h3>Commands</h3><p>Actions exposed by this addon.</p></div></header>
             <div class="en-addon-detail-commands">
               <button
@@ -220,7 +315,9 @@
                 type="button"
                 :disabled="operationInProgress || !selectedEntry.snapshot?.enabled || !action.enabled"
                 @click="runAction(action)"
-              >{{ action.title }}</button>
+              >
+                {{ action.title }}
+              </button>
             </div>
           </section>
         </main>
@@ -228,7 +325,10 @@
     </template>
 
     <template v-else>
-      <div class="en-addon-packs-slot" data-elephant-addon-settings-slot="addons.packs" />
+      <div
+        class="en-addon-packs-slot"
+        data-elephant-addon-settings-slot="addons.packs"
+      />
     </template>
   </div>
 </template>
@@ -236,7 +336,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
-import { ArrowLeft, Check, ChevronRight, Layers3, Package, Plus, RefreshCw, Search } from '@lucide/vue'
+import { ArrowLeft, ChevronRight, Layers3, Package, Plus, RefreshCw, Search } from '@lucide/vue'
 import { useAddonsStore } from '@/store/addons'
 import AddonIcon from './AddonIcon.vue'
 import { useAddonsSettings } from './useAddonsSettings'
@@ -264,8 +364,6 @@ const {
   messageIsError,
   catalogLoading,
   catalogError,
-  communityAddonsEnabled,
-  communityConsentLoaded,
   operationInProgress,
   lastError,
   filteredInstalledAddons,
@@ -273,8 +371,6 @@ const {
   actionsForAddon,
   isCommunityLocked,
   refreshCatalog,
-  enableCommunityAddons,
-  disableCommunityAddons,
   installAvailableAddon,
   installAddonPackage,
   toggleAddon,
@@ -374,11 +470,6 @@ watch(activePage, async (page) => {
   await nextTick()
   if (page === 'packs') dispatchPackEvent(PACK_SEARCH_EVENT, { query: packQuery.value })
 })
-
-const toggleCommunityAddons = async () => {
-  if (communityAddonsEnabled.value) await disableCommunityAddons()
-  else await enableCommunityAddons()
-}
 
 const refreshActivePage = async () => {
   if (activePage.value === 'addons') await refreshCatalog()

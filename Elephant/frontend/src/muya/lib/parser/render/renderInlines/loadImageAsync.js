@@ -10,11 +10,18 @@ const MAX_DIAGNOSTIC_LOGS = 1000
 const removeQueryAndHash = (value = '') => String(value || '').split(/[?#]/)[0]
 
 const safeDecodeUri = (value = '') => {
-  try {
-    return decodeURI(value)
-  } catch {
-    return value
+  let decoded = String(value || '')
+  for (let pass = 0; pass < 64; pass += 1) {
+    let next = decoded
+    try {
+      next = decodeURI(decoded)
+    } catch {
+      break
+    }
+    if (next === decoded) break
+    decoded = next
   }
+  return decoded
 }
 
 const resolveLocalFilePath = (value = '') => {
@@ -230,8 +237,8 @@ export default function loadImageAsync(imageInfo, attrs, className, imageClass) 
     img.dataset.resolvedSrc = domsrc
     if (attrs.alt) img.alt = attrs.alt.replace(/[`*{}[\]()#+\-.!_>~:|<>$]/g, '')
     if (attrs.title) img.setAttribute('title', attrs.title)
-    if (attrs.width && typeof attrs.width === 'number') img.setAttribute('width', attrs.width)
-    if (attrs.height && typeof attrs.height === 'number') img.setAttribute('height', attrs.height)
+    if (attrs.width !== undefined && attrs.width !== '') img.setAttribute('width', attrs.width)
+    if (attrs.height !== undefined && attrs.height !== '') img.setAttribute('height', attrs.height)
     if (imageClass) img.classList.add(imageClass)
 
     if (this.urlMap.has(src)) this.urlMap.delete(src)

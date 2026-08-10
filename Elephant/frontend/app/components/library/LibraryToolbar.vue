@@ -2,6 +2,7 @@
   <div class="en-library-toolbar">
     <div class="en-library-toolbar-left">
       <CreateEntryMenu
+        :mobile="true"
         :disabled="isBusy || !store.hasVault"
         @select="handleCreateSelection"
       >
@@ -11,11 +12,16 @@
             type="button"
             :disabled="disabled"
             :aria-expanded="open"
+            aria-label="Create"
             aria-haspopup="menu"
+            title="Create"
+            :aria-busy="isBusy"
             @click="toggle"
           >
-            <Plus class="en-create-icon" />
-            <span>{{ isBusy ? 'Creating…' : 'Create' }}</span>
+            <Plus
+              class="en-create-icon"
+              aria-hidden="true"
+            />
           </button>
         </template>
       </CreateEntryMenu>
@@ -29,47 +35,46 @@
     </div>
 
     <div class="en-library-actions">
-      <select
-        v-model="store.sort"
-        class="en-select"
+      <button
+        class="en-sort-cycle"
+        type="button"
+        :title="`Sort: ${sortOption.label}`"
+        :aria-label="`Sort: ${sortOption.label}`"
+        :data-sort="currentSort"
+        @click="cycleSort"
       >
-        <option value="updated-newest">
-          Sort: Updated newest
-        </option>
-        <option value="updated-oldest">
-          Sort: Updated oldest
-        </option>
-        <option value="title">
-          Sort: Title A-Z
-        </option>
-      </select>
-      <div class="en-view-toggle">
-        <button
-          type="button"
-          :class="{ active: store.viewMode === 'grid' }"
-          title="Grid"
-          aria-label="Grid view"
-          @click="store.viewMode = 'grid'"
-        >
-          <Grid3x3 class="en-icon" />
-        </button>
-        <button
-          type="button"
-          :class="{ active: store.viewMode === 'list' }"
-          title="List"
-          aria-label="List view"
-          @click="store.viewMode = 'list'"
-        >
-          <List class="en-icon" />
-        </button>
-      </div>
+        <component
+          :is="sortOption.icon"
+          class="en-icon"
+          aria-hidden="true"
+        />
+      </button>
+      <button
+        class="en-view-cycle"
+        type="button"
+        :title="viewModeLabel"
+        :aria-label="viewModeLabel"
+        :data-view-mode="store.viewMode"
+        @click="cycleView"
+      >
+        <Grid3x3
+          v-if="store.viewMode === 'list'"
+          class="en-icon"
+          aria-hidden="true"
+        />
+        <List
+          v-else
+          class="en-icon"
+          aria-hidden="true"
+        />
+      </button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
-import { Grid3x3, List, Plus } from '@lucide/vue'
+import { ArrowDownAZ, ArrowDownNarrowWide, ArrowDownZA, ArrowUpNarrowWide, Grid3x3, List, Plus } from '@lucide/vue'
 import { useVaultStore } from '../../stores/vaultStore'
 import CreateEntryMenu from './CreateEntryMenu.vue'
 import { openNewDrawing } from './createEntryActions'
@@ -78,6 +83,24 @@ const store = useVaultStore()
 const busyAction = ref('')
 const actionError = ref('')
 const isBusy = computed(() => !!busyAction.value)
+const sortOptions = [
+  { value: 'updated-newest', label: 'Updated newest', icon: ArrowDownNarrowWide },
+  { value: 'updated-oldest', label: 'Updated oldest', icon: ArrowUpNarrowWide },
+  { value: 'title-az', label: 'Title A-Z', icon: ArrowDownAZ },
+  { value: 'title-za', label: 'Title Z-A', icon: ArrowDownZA }
+]
+const currentSort = computed(() => store.sort === 'title' ? 'title-az' : store.sort)
+const sortOption = computed(() => sortOptions.find((option) => option.value === currentSort.value) || sortOptions[0])
+const viewModeLabel = computed(() => store.viewMode === 'grid' ? 'Show notes as list' : 'Show notes as grid')
+
+const cycleSort = () => {
+  const index = sortOptions.findIndex((option) => option.value === currentSort.value)
+  store.sort = sortOptions[(index + 1) % sortOptions.length].value
+}
+
+const cycleView = () => {
+  store.viewMode = store.viewMode === 'grid' ? 'list' : 'grid'
+}
 
 const runCreateAction = async (action, callback) => {
   if (isBusy.value || !store.hasVault) return
@@ -106,12 +129,17 @@ const handleCreateSelection = (key) => {
 
 <style scoped>
 .en-library-toolbar {
-  min-height: 112px;
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 10;
+  isolation: isolate;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  padding: 0 34px;
+  padding: 10px 12px;
+  pointer-events: none;
 }
 
 .en-library-toolbar-left {
@@ -120,15 +148,16 @@ const handleCreateSelection = (key) => {
   display: flex;
   align-items: center;
   gap: 12px;
+  pointer-events: auto;
 }
 
 .en-create-button {
-  min-height: 44px;
+  width: 56px;
+  height: 56px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 9px;
-  padding: 0 16px;
+  padding: 0;
   border: 1px solid var(--en-border);
   border-radius: 11px;
   color: var(--en-text);
@@ -161,15 +190,15 @@ const handleCreateSelection = (key) => {
 }
 
 .en-create-button:focus-visible,
-.en-view-toggle button:focus-visible,
-.en-select:focus-visible {
+.en-sort-cycle:focus-visible,
+.en-view-cycle:focus-visible {
   outline: 2px solid var(--en-primary);
   outline-offset: 2px;
 }
 
 .en-create-icon {
-  width: 18px;
-  height: 18px;
+  width: 27px;
+  height: 27px;
   flex-shrink: 0;
 }
 
@@ -184,42 +213,39 @@ const handleCreateSelection = (key) => {
 }
 
 .en-library-actions {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 14px;
   margin-left: auto;
+  pointer-events: auto;
 }
 
-.en-select,
-.en-view-toggle {
+.en-sort-cycle,
+.en-view-cycle {
+  position: relative;
+  z-index: 1;
+  width: 52px;
   height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--en-border);
   border-radius: 12px;
   color: var(--en-text);
   background: color-mix(in srgb, var(--en-surface) 52%, transparent);
+  box-shadow: 0 8px 22px rgb(0 0 0 / 22%);
+  backdrop-filter: blur(12px);
   font: inherit;
   font-size: 18px;
-}
-
-.en-select {
-  min-width: 278px;
-  padding: 0 18px;
-}
-
-.en-view-toggle {
-  display: inline-flex;
-  overflow: hidden;
-}
-
-.en-view-toggle button {
-  width: 56px;
-  border: 0;
-  color: var(--en-muted);
-  background: transparent;
   cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 
-.en-view-toggle button.active {
+.en-sort-cycle:hover,
+.en-view-cycle:hover {
   color: var(--en-text);
   background: var(--en-soft);
 }
@@ -231,16 +257,16 @@ const handleCreateSelection = (key) => {
 
 @media (max-width: 980px) {
   .en-library-toolbar {
-    min-height: 132px;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    padding-top: 20px;
-    padding-bottom: 20px;
+    min-height: 0;
+    align-items: center;
+    flex-wrap: nowrap;
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
 
   .en-library-toolbar-left,
   .en-library-actions {
-    width: 100%;
+    width: auto;
   }
 
   .en-library-actions {

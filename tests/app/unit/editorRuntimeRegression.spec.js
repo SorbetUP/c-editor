@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { posix as path } from 'node:path'
 
 import {
   parseMarkdownTags,
   updateMarkdownTags
 } from '../../../Elephant/shared/markdownDocument.js'
+import { noteRelativeRootAssetPath } from '../../../Elephant/frontend/src/renderer/src/platform/storeDiagnostics.js'
 
 vi.mock('electron-log', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }
@@ -15,6 +17,7 @@ vi.mock('../../../Elephant/frontend/app/services/elephantnoteClient.js', () => (
     search: {
       initVault: vi.fn(async(vaultPath) => ({ status: 'ready', vaultPath, indexedDocuments: 0, totalDocuments: 0 })),
       query: vi.fn(async() => []),
+      concepts: vi.fn(async() => []),
       status: vi.fn(async() => ({ status: 'ready', vaultPath: '/vault', indexedDocuments: 0, totalDocuments: 0 })),
       inspect: vi.fn(async() => ({ documents: [], folders: [], semanticLinks: [], graph: null, generatedAt: '' })),
       rebuild: vi.fn(async() => ({ status: 'indexing' })),
@@ -33,6 +36,20 @@ beforeEach(() => {
 })
 
 describe('editor runtime regression build/coverage', () => {
+  it('does not double-encode an already URL-encoded Excalidraw asset path', () => {
+    window.path = {
+      join: path.join,
+      dirname: path.dirname,
+      relative: path.relative,
+      isAbsolute: path.isAbsolute
+    }
+    const tab = { pathname: '/vault/E2E Saved Drawing.md' }
+    const vaultStore = { activeVault: { path: '/vault' } }
+    const source = '.assets/excalidraw-E2E%20Saved%20Drawing.png'
+
+    expect(noteRelativeRootAssetPath(source, tab, vaultStore, {})).toBe(source)
+  })
+
   it('updates markdown tags when the UI sends a single tag string', () => {
     const markdown = ['---', 'title: "Alpha"', 'type: "note"', 'tags: []', '---', '', '# Alpha', '', 'Body'].join('\n')
     const next = updateMarkdownTags(markdown, 'urgent', 'Alpha')

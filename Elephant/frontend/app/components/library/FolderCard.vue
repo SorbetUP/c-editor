@@ -6,7 +6,7 @@
     @mouseenter="isHovering = true"
     @mouseleave="isHovering = false"
     @dragstart="handleDragStart"
-    @click="$emit('open', entry)"
+    @click="handleCardClick"
   >
     <div class="en-card-actions">
       <button
@@ -37,47 +37,88 @@
     >
       <button
         type="button"
-        @click="renameFolder"
+        title="Rename folder"
+        aria-label="Rename folder"
+        @click.stop.prevent="beginRename"
       >
         <PencilLine class="en-icon" />
-        Edit
       </button>
       <button
         type="button"
-        @click="toggleSidebarVisibility"
+        :title="isSidebarVisible ? 'Hide from sidebar' : 'Show in sidebar'"
+        :aria-label="isSidebarVisible ? 'Hide from sidebar' : 'Show in sidebar'"
+        @click.stop.prevent="toggleSidebarVisibility"
       >
         <component
           :is="isSidebarVisible ? EyeOff : Eye"
           class="en-icon"
         />
-        {{ isSidebarVisible ? 'Remove from sidebar' : 'Show in sidebar' }}
       </button>
       <button
         type="button"
         class="danger"
-        @click="deleteFolder"
+        title="Delete folder"
+        aria-label="Delete folder"
+        @click.stop.prevent="deleteFolder"
       >
-        Delete
+        <Trash2 class="en-icon" />
       </button>
     </div>
     <div class="en-card-topline">
       <div class="en-folder-icon" />
     </div>
+    <input
+      v-if="isRenaming"
+      ref="renameInput"
+      v-model="renameDraft"
+      class="en-folder-title-input"
+      data-entry-rename-input
+      type="text"
+      aria-label="Rename folder"
+      @click.stop
+      @keydown.enter.stop.prevent="commitRename"
+      @keydown.esc.stop.prevent="cancelRename"
+    >
     <h3
-      @dblclick.stop.prevent="renameFolder"
+      v-else
+      @dblclick.stop.prevent="beginRename"
     >
       {{ entry.title }}
     </h3>
     <p>{{ entry.noteCount }} notes</p>
-    <span class="en-updated">Updated {{ updated }}</span>
+    <div
+      v-if="previewItems.length"
+      class="en-folder-preview"
+      aria-label="Folder contents preview"
+    >
+      <span
+        v-for="item in previewItems"
+        :key="`${item.type}:${item.title}`"
+        class="en-folder-preview-item"
+        :title="previewItemTitle(item)"
+      >
+        <component
+          :is="previewItemIcon(item)"
+          class="en-folder-preview-icon"
+          aria-hidden="true"
+        />
+        <span>{{ previewItemTitle(item) }}</span>
+      </span>
+    </div>
+    <div
+      v-else
+      class="en-folder-preview is-empty"
+      aria-label="Empty folder"
+    >
+      <span>No items yet</span>
+    </div>
   </article>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Eye, EyeOff, MoreHorizontal, Pin, PencilLine } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Eye, EyeOff, FileText, Folder, MoreHorizontal, PenLine, Pin, PencilLine, Trash2 } from '@lucide/vue'
 import { useVaultStore } from '../../stores/vaultStore'
-import { formatShortDate } from '../../services/markdownMetaService'
 
 const props = defineProps({
   entry: {
@@ -88,18 +129,57 @@ const props = defineProps({
 const emit = defineEmits(['open', 'rename', 'delete'])
 const isMenuOpen = ref(false)
 const isHovering = ref(false)
+const isRenaming = ref(false)
+const renameDraft = ref('')
+const renameInput = ref(null)
 const store = useVaultStore()
-const updated = computed(() => formatShortDate(props.entry.updatedAt))
 const isPinned = computed(() => !!props.entry?.path && store.isEntryPinned(props.entry.path))
 const isSidebarVisible = computed(() => !!props.entry?.path && store.isFolderVisibleInSidebar(props.entry.path))
+const previewItems = computed(() => Array.isArray(props.entry?.childrenPreview)
+  ? props.entry.childrenPreview.slice(0, 3)
+  : [])
+
+const previewItemTitle = (item) => String(item?.title || 'Untitled')
+  .replace(/\.(?:md|excalidraw)$/i, '')
+
+const previewItemIcon = (item) => {
+  if (item?.type === 'folder') return Folder
+  if (item?.type === 'drawing' || /\.excalidraw(?:\.png)?$/i.test(String(item?.title || ''))) return PenLine
+  return FileText
+}
 
 const toggleMenu = () => {
   isMenuOpen.value = !isMenuOpen.value
 }
 
-const renameFolder = () => {
+const beginRename = async () => {
   isMenuOpen.value = false
-  emit('rename', props.entry)
+  isRenaming.value = true
+  renameDraft.value = props.entry?.title || ''
+  await nextTick()
+  renameInput.value?.focus?.()
+  renameInput.value?.select?.()
+}
+
+const cancelRename = () => {
+  isRenaming.value = false
+  renameDraft.value = ''
+}
+
+const commitRename = () => {
+  const title = renameDraft.value.trim()
+  const previousTitle = props.entry?.title || ''
+  cancelRename()
+  if (!title || title === previousTitle) return
+  emit('rename', { entry: props.entry, title })
+}
+
+const handleCardClick = () => {
+  if (isRenaming.value) {
+    cancelRename()
+    return
+  }
+  emit('open', props.entry)
 }
 
 const togglePin = () => {
@@ -110,8 +190,11 @@ const togglePin = () => {
 
 const toggleSidebarVisibility = async () => {
   if (!props.entry?.path) return
-  await store.toggleEntrySidebarVisibility(props.entry)
-  isMenuOpen.value = false
+  try {
+    await store.toggleEntrySidebarVisibility(props.entry)
+  } finally {
+    isMenuOpen.value = false
+  }
 }
 
 const handleDragStart = (event) => {
@@ -131,8 +214,12 @@ const deleteFolder = () => {
 }
 
 const closeMenu = (event) => {
+  const target = event?.target
+  if (isRenaming.value && !target?.closest?.('[data-entry-rename-input]')) {
+    cancelRename()
+  }
   if (!isMenuOpen.value) return
-  if (event?.target?.closest?.('.en-folder-card')) return
+  if (target?.closest?.('.en-folder-card')) return
   isMenuOpen.value = false
 }
 
@@ -148,12 +235,12 @@ onBeforeUnmount(() => {
 <style scoped>
 .en-card {
   position: relative;
-  min-height: 168px;
+  min-height: 176px;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--en-border);
   border-radius: 8px;
-  padding: 18px;
+  padding: 10px;
   color: var(--en-text);
   background: var(--en-bg);
   overflow: hidden;
@@ -165,10 +252,10 @@ onBeforeUnmount(() => {
 
 .en-card-actions {
   position: absolute;
-  top: 18px;
-  right: 18px;
+  top: 8px;
+  right: 8px;
   display: flex;
-  gap: 10px;
+  gap: 6px;
 }
 
 .en-card-pin-button,
@@ -203,28 +290,37 @@ onBeforeUnmount(() => {
 
 .en-card-popover {
   position: absolute;
-  top: 52px;
-  right: 18px;
+  top: 42px;
+  right: 8px;
   z-index: 5;
-  min-width: 210px;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 4px;
   border: 1px solid var(--en-border);
-  border-radius: 8px;
-  padding: 8px;
+  border-radius: 10px;
+  padding: 5px;
   background: var(--en-surface);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 24%);
 }
 
 .en-card-popover button {
-  min-height: 34px;
-  display: flex;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
   border: 0;
+  border-radius: 8px;
   color: var(--en-text);
   background: transparent;
-  text-align: left;
+  cursor: pointer;
+}
+
+.en-card-popover button:hover,
+.en-card-popover button:focus-visible {
+  background: var(--en-soft);
+  outline: none;
 }
 
 .en-card-popover .danger {
@@ -252,8 +348,8 @@ onBeforeUnmount(() => {
 }
 
 .en-folder-card h3 {
-  margin: 0 0 8px;
-  font-size: clamp(18px, 1.8vw, 28px);
+  margin: 0 0 6px;
+  font-size: clamp(17px, 1.6vw, 24px);
   line-height: 1.1;
   overflow-wrap: anywhere;
   display: -webkit-box;
@@ -263,20 +359,65 @@ onBeforeUnmount(() => {
 }
 
 .en-folder-card p {
-  margin: 0;
+  margin: 0 0 8px;
   color: color-mix(in srgb, var(--en-text) 90%, transparent);
-  font-size: 18px;
+  font-size: 15px;
 }
 
-.en-updated {
-  display: block;
+.en-folder-preview {
+  min-height: 42px;
+  display: grid;
+  gap: 4px;
   margin-top: auto;
-  padding-top: 14px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--en-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--en-surface) 55%, transparent);
+}
+
+.en-folder-preview.is-empty {
+  display: flex;
+  align-items: center;
   color: var(--en-muted);
-  font-weight: 700;
+  font-size: 13px;
+}
+
+.en-folder-preview-item {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--en-muted);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.en-folder-preview-item span {
+  min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.en-folder-preview-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.en-folder-title-input {
+  min-width: 0;
+  width: 100%;
+  margin: 0 0 6px;
+  border: 1px solid var(--en-primary);
+  border-radius: 7px;
+  padding: 4px 6px;
+  color: var(--en-text);
+  background: var(--en-input-bg, var(--en-surface));
+  font: inherit;
+  font-size: clamp(17px, 1.6vw, 24px);
+  font-weight: 800;
+  outline: none;
 }
 
 .en-icon {

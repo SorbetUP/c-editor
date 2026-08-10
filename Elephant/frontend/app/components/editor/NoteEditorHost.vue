@@ -1,12 +1,16 @@
 <template>
   <div class="en-editor-layer">
-    <section class="en-editor-panel" :style="editorLayoutStyle">
+    <section
+      class="en-editor-panel"
+      :style="editorLayoutStyle"
+    >
       <note-editor-top-bar
         :title="noteTitle"
         :note-date="noteDate"
         :tags="tags"
         :show-tag-hash="preferencesStore.showTagHashInEditor"
         :is-pinned="isPinned"
+        :compact="isEditorScrolled"
         :is-adding-tag="isAddingTag"
         :is-editing-tag="isEditingTag"
         :tag-draft="tagDraft"
@@ -21,7 +25,12 @@
         @cancel-tag="cancelTag"
       />
 
-      <div class="en-note-editor-shell">
+      <div
+        class="en-note-editor-shell"
+        data-entry-drop-target="note-editor"
+        @dragover.prevent="handleEditorDragOver"
+        @drop.prevent="handleEditorDrop"
+      >
         <div class="en-editor-host">
           <editor-with-tabs
             :markdown="markdown"
@@ -76,6 +85,7 @@ import {
 import { parseMarkdownTags, updateMarkdownTags } from '../../utils/markdownTags'
 import { getOppositeThemeVariant, getThemeMode } from 'common/elephantnote/appearance'
 import { useSearchStore } from '../../stores/searchStore'
+import { getEntryKind, parseDraggedEntry } from '../../utils/entryDragDrop'
 import { resolveLocalImageSource, toMarkdownImageSource } from 'elephant-shared/imageSource'
 import {
   ELEPHANTNOTE_ASSETS_DIR,
@@ -155,6 +165,11 @@ let lastSavedNotePath = ''
 let lastSavedMarkdown = ''
 let lastSeenNotePath = ''
 let lastSeenMarkdown = ''
+const isEditorScrolled = ref(false)
+let editorScrollElement = null
+const updateEditorScrollState = () => {
+  isEditorScrolled.value = Number(editorScrollElement?.scrollTop || 0) > 24
+}
 
 const editorExtensions = computed(() => addonsStore.getContributions('editor.extensions')
   .map((entry) => entry?.contribution)
@@ -224,12 +239,12 @@ const characterCount = computed(() => editorMarkdownStats.value.character)
 const showEditorFooter = computed(() => preferencesStore.showEditorFooter === true)
 const editorMarginPx = computed(() => {
   const value = Number(preferencesStore.noteEditorMargin)
-  if (!Number.isFinite(value)) return 24
-  return Math.max(8, Math.min(160, Math.round(value)))
+  if (!Number.isFinite(value)) return 12
+  return Math.max(8, Math.min(48, Math.round(value)))
 })
 const editorLayoutStyle = computed(() => ({
   '--en-note-editor-gutter': `${editorMarginPx.value}px`,
-  '--en-note-editor-gutter-left': `${Math.min(168, editorMarginPx.value + 8)}px`,
+  '--en-note-editor-gutter-left': `${editorMarginPx.value}px`,
   '--en-note-editor-gutter-right': `${editorMarginPx.value}px`
 }))
 const themeIcon = computed(() => (getThemeMode(shellTheme.value) === 'dark' ? SunMedium : Moon))
@@ -753,6 +768,68 @@ const updateCurrentFileMarkdown = (nextMarkdown, metadata = {}) => {
   }
 }
 
+const pointToEditorOffset = (source, point) => {
+  const lines = String(source || '').split('\n')
+  if (!Number.isInteger(point?.line) || !Number.isInteger(point?.ch)) return source.length
+  const line = Math.max(0, Math.min(lines.length - 1, point.line))
+  const ch = Math.max(0, Math.min(lines[line].length, point.ch))
+  return lines.slice(0, line).reduce((offset, value) => offset + value.length + 1, 0) + ch
+}
+
+const droppedEntryMarkdown = (entry) => {
+  const kind = getEntryKind(entry)
+  const title = String(entry?.title || entry?.name || entry?.path || 'Entry').trim()
+  const path = String(entry?.path || '').replaceAll('\\', '/').replace(/^\/+/, '')
+  if (!path) return ''
+  if (kind === 'drawing' || entry?.type === 'drawing') {
+    const preview = String(entry?.preview || entry?.markdown || '').trim()
+    if (preview.startsWith('![')) return preview
+    if (/^(?:\.\.?\/)*\.assets\/[^\s)]+\.(?:png|jpe?g|gif|webp|svg)$/i.test(preview)) {
+      return `![${title}](${preview})`
+    }
+    return `![${title}](/${path})`
+  }
+  const drawingPreview = String(entry?.preview || '').trim()
+  if (/^(?:\.\.?\/)*\.assets\/[^\s)]+\.(?:png|jpe?g|gif|webp|svg)$/i.test(drawingPreview)) {
+    return `![${title}](${drawingPreview})`
+  }
+  if (kind === 'folder') return `[${title}](elephant://entry/${encodeURIComponent(path)})`
+  return `[${title}](/${path})`
+}
+
+const handleEditorDragOver = (event) => {
+  const entry = parseDraggedEntry(event.dataTransfer)
+  if (!entry?.path) return
+  event.dataTransfer.dropEffect = 'copy'
+  event.currentTarget.dataset.entryDropReady = 'true'
+}
+
+const handleEditorDrop = (event) => {
+  const entry = parseDraggedEntry(event.dataTransfer)
+  const insert = droppedEntryMarkdown(entry)
+  event.currentTarget.dataset.entryDropReady = 'false'
+  if (!insert || !activeNoteFile.value) return
+  const editorSource = visibleMarkdown.value
+  const cursor = activeNoteFile.value.muyaIndexCursor || currentFile.value?.muyaIndexCursor
+  const anchor = pointToEditorOffset(editorSource, cursor?.anchor)
+  const focus = pointToEditorOffset(editorSource, cursor?.focus)
+  const start = Math.min(anchor, focus)
+  const end = Math.max(anchor, focus)
+  const before = editorSource.slice(0, start)
+  const after = editorSource.slice(end)
+  const prefix = before && !before.endsWith('\n') ? '\n\n' : ''
+  const suffix = after && !after.startsWith('\n') ? '\n' : ''
+  const nextEditorMarkdown = `${before}${prefix}${insert}\n${suffix}${after}`
+  updateCurrentFileMarkdown(editorToDocumentMarkdown(nextEditorMarkdown), {
+    droppedEntry: entry.path,
+    droppedKind: getEntryKind(entry)
+  })
+  pushEditorLog('info', '[elephantnote:editor] entry dropped into note', {
+    path: entry.path,
+    kind: getEntryKind(entry)
+  })
+}
+
 const updateTitle = (nextTitle) => {
   const title = String(nextTitle || '').trim() || fallbackTitle.value
   updateCurrentFileMarkdown(renameDocumentTitle(markdown.value, title, fallbackTitle.value), {
@@ -854,6 +931,9 @@ onMounted(() => {
   })
   pollActiveMarkdownSave('mount')
   noteSaveInterval = window.setInterval(() => pollActiveMarkdownSave('interval'), AUTOSAVE_POLL_MS)
+  editorScrollElement = document.querySelector('.en-editor-host .editor-component')
+  editorScrollElement?.addEventListener('scroll', updateEditorScrollState, { passive: true })
+  updateEditorScrollState()
 })
 onBeforeUnmount(() => {
   pushEditorLog('info', '[elephantnote:editor] before unmount', {
@@ -863,6 +943,8 @@ onBeforeUnmount(() => {
     window.clearInterval(noteSaveInterval)
     noteSaveInterval = null
   }
+  editorScrollElement?.removeEventListener('scroll', updateEditorScrollState)
+  editorScrollElement = null
   void flushActiveNoteSave('unmount')
 })
 </script>

@@ -20,7 +20,7 @@ const npmPackageAliases = Object.fromEntries(
     ...(packageJson.dependencies || {}),
     ...(packageJson.devDependencies || {})
   })
-    .filter((name) => !['vite', 'prismjs'].includes(name))
+    .filter((name) => !['vite', 'vitest', 'prismjs'].includes(name))
     .map((name) => [name, resolve(__dirname, 'Elephant/node_modules', name)])
 )
 

@@ -101,6 +101,13 @@
     color: var(--en-primary);
     font-size: 22px;
   }
+
+  .en-mobile-sort-sheet [data-sort] > svg {
+    width: 24px;
+    height: 24px;
+    grid-column: 2;
+    justify-self: start;
+  }
 }
 
 @media (max-width: 380px) {

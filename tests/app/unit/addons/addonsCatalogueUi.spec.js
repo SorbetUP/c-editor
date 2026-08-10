@@ -23,9 +23,9 @@ describe('addon catalogue interface', () => {
   it('renders clear tiles first and the persistent list/detail browser after selection', () => {
     const panel = read('Elephant/frontend/app/components/settings/AddonsSettingsPanel.vue')
 
-    expect(panel).toContain('v-if="!selectedEntry" class="en-addon-catalogue"')
+    expect(panel).toMatch(/v-if="!selectedEntry"\s+class="en-addon-catalogue"/)
     expect(panel).toContain('class="en-addon-tile"')
-    expect(panel).toContain('v-else class="en-addon-browser"')
+    expect(panel).toMatch(/v-else\s+class="en-addon-browser"/)
     expect(panel).toContain("'en-addon-browser-detail-mode': true")
     expect(panel).toContain('class="en-addon-browser-sidebar"')
     expect(panel).toContain('class="en-addon-browser-detail"')
