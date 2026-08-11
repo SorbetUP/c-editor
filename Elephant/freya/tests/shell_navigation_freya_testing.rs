@@ -105,13 +105,13 @@ fn navigation_history_updates_visible_controls_and_round_trips_back_forward() {
     click_label(&mut runner, "Projects");
     runner.sync_and_update();
     assert!(accessible_nodes(&runner, "Plan").len() >= 1);
-    assert_eq!(rect_opacity(&runner, "Retour"), None);
+    assert_eq!(rect_opacity(&runner, "Retour"), Some(1.0));
 
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
     assert!(accessible_nodes(&runner, "Alpha").len() >= 1);
     assert!(accessible_nodes(&runner, "Plan").is_empty());
-    assert_eq!(rect_opacity(&runner, "Avancer"), None);
+    assert_eq!(rect_opacity(&runner, "Avancer"), Some(1.0));
 
     click_label(&mut runner, "Avancer");
     runner.sync_and_update();

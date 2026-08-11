@@ -8,6 +8,9 @@ mod explorer;
 mod library;
 mod navigation;
 mod settings;
+mod shell_gestures;
+mod shell_history;
+mod shell_preferences;
 mod shell_runtime;
 
 use freya::prelude::*;
@@ -22,7 +25,8 @@ use crate::{
     vault_adapter::{PageRequest, VaultAdapter, VaultPage},
 };
 
-use shell_runtime::{NavigationTarget, RailDragState, SidebarResizeState};
+use shell_gestures::{RailDragState, SidebarResizeState};
+use shell_history::NavigationTarget;
 
 #[derive(Clone, Debug)]
 struct ShellState {
@@ -65,7 +69,7 @@ impl ShellState {
             error: None,
             navigation_history: Vec::new(),
             navigation_index: 0,
-            rail_order: shell_runtime::default_rail_order(),
+            rail_order: shell_preferences::default_rail_order(),
             rail_drag: None,
             rail_drop_target: None,
             sidebar_resize: None,

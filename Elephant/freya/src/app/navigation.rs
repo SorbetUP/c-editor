@@ -124,7 +124,7 @@ fn rail_action(
     item_id: &'static str,
     label_text: &'static str,
     icon: &'static str,
-    mut state: State<ShellState>,
+    state: State<ShellState>,
 ) -> Element {
     let hover_key = format!("rail:{label_text}");
     let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());

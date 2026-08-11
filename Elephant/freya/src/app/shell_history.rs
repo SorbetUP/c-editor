@@ -1,0 +1,141 @@
+//! Shell navigation history and production vault transitions.
+
+use crate::{
+    editor::EditorDocument, library_contract::RelativePath, navigation_contract::WorkspaceView,
+    vault_adapter::VaultEntry,
+};
+
+use super::ShellState;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum NavigationTarget {
+    Directory(String),
+    Note(String),
+}
+
+impl ShellState {
+    pub(super) fn open_directory(&mut self, path: String) {
+        self.open_directory_with_history(path, true);
+    }
+
+    fn open_directory_with_history(&mut self, path: String, record: bool) {
+        self.view = WorkspaceView::Notes;
+        self.editor = None;
+        self.library.current_path = RelativePath::from(path.as_str());
+        self.reload_directory(&path);
+        if record {
+            self.record_navigation(NavigationTarget::Directory(path));
+        }
+    }
+
+    pub(super) fn open_note(&mut self, entry: &VaultEntry) {
+        self.open_note_with_history(entry, true);
+    }
+
+    fn open_note_with_history(&mut self, entry: &VaultEntry, record: bool) {
+        eprintln!(
+            "[freya][editor] action:start action=open_note path={}",
+            entry.path
+        );
+        let Some(vault) = self.vault.as_ref() else {
+            self.error = Some("No vault selected.".to_string());
+            eprintln!("[freya][editor] action:failure action=open_note reason=no_vault");
+            return;
+        };
+        let path = vault.root().join(&entry.path);
+        match EditorDocument::load(&path) {
+            Ok(document) => {
+                self.editor = Some(document);
+                self.error = None;
+                if record {
+                    self.record_navigation(NavigationTarget::Note(entry.path.clone()));
+                }
+                eprintln!(
+                    "[freya][editor] action:complete action=open_note path={}",
+                    entry.path
+                );
+            }
+            Err(error) => {
+                eprintln!(
+                    "[freya][editor] action:failure action=open_note path={} error={error}",
+                    entry.path
+                );
+                self.error = Some(error.to_string());
+            }
+        }
+    }
+
+    fn record_navigation(&mut self, target: NavigationTarget) {
+        if self.navigation_history.get(self.navigation_index) == Some(&target) {
+            return;
+        }
+        self.navigation_history.truncate(self.navigation_index + 1);
+        self.navigation_history.push(target);
+        if self.navigation_history.len() > 100 {
+            self.navigation_history.drain(..20);
+        }
+        self.navigation_index = self.navigation_history.len().saturating_sub(1);
+        eprintln!(
+            "[freya][navigation] action:record index={} length={}",
+            self.navigation_index,
+            self.navigation_history.len()
+        );
+    }
+
+    pub(super) fn can_go_back(&self) -> bool {
+        self.navigation_index > 0
+    }
+
+    pub(super) fn can_go_forward(&self) -> bool {
+        self.navigation_index + 1 < self.navigation_history.len()
+    }
+
+    pub(super) fn navigate_back(&mut self) {
+        if !self.can_go_back() {
+            eprintln!("[freya][navigation] action:back-disabled");
+            return;
+        }
+        self.navigation_index -= 1;
+        self.open_navigation_target();
+    }
+
+    pub(super) fn navigate_forward(&mut self) {
+        if !self.can_go_forward() {
+            eprintln!("[freya][navigation] action:forward-disabled");
+            return;
+        }
+        self.navigation_index += 1;
+        self.open_navigation_target();
+    }
+
+    fn open_navigation_target(&mut self) {
+        let Some(target) = self.navigation_history.get(self.navigation_index).cloned() else {
+            return;
+        };
+        eprintln!(
+            "[freya][navigation] action:open index={} target={target:?}",
+            self.navigation_index
+        );
+        match target {
+            NavigationTarget::Directory(path) => self.open_directory_with_history(path, false),
+            NavigationTarget::Note(path) => {
+                let parent = path
+                    .rsplit_once('/')
+                    .map(|(parent, _)| parent)
+                    .unwrap_or("");
+                self.library.current_path = RelativePath::from(parent);
+                self.reload_directory(parent);
+                let entry = self
+                    .page
+                    .as_ref()
+                    .and_then(|page| page.entries.iter().find(|entry| entry.path == path))
+                    .cloned();
+                if let Some(entry) = entry {
+                    self.open_note_with_history(&entry, false);
+                } else {
+                    self.error = Some(format!("Navigation target is no longer present: {path}"));
+                }
+            }
+        }
+    }
+}
