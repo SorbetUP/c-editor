@@ -373,9 +373,12 @@
           "selector": ".en-note-editor-shell"
         },
         "freya": {
-          "status": "not-exposed",
-          "selector": null,
-          "reason": "the current Freya editor scrollable rect has no inspected accessibility label or test id"
+          "strategy": "accessibility-label",
+          "label": "Editor scroll",
+          "sourceLabel": "Editor scroll",
+          "source": "Elephant/freya/src/app/editor_view.rs#note_editor_host",
+          "test": "Elephant/freya/tests/editor_lifecycle_freya_testing.rs#scroll_compaction_and_restart_state_boundary_is_explicit",
+          "provenMapping": true
         }
       },
       "event": "scroll",
@@ -482,8 +485,10 @@
             "strategy": "accessibility-label",
             "label": "Hide sidebar"
           },
-          "status": "not-exposed",
-          "reason": "the current Freya navigation surface has click handlers for these labels but no drag-start/drag-over/drop handler"
+          "strategy": "accessibility-label",
+          "source": "Elephant/freya/src/app/navigation.rs#rail_action",
+          "test": "Elephant/freya/tests/shell_navigation_freya_testing.rs#rail_search_dragged_before_sidebar_toggle_persists_and_restores",
+          "provenMapping": true
         }
       },
       "event": "drag",
@@ -590,9 +595,6 @@
           "path": "Alpha.md",
           "mustContain": "Differential edit marker 2026-06-22."
         }
-      },
-      "freya": {
-        "expectedResult": "hard-mismatch-until-editable-target-exists"
       }
     },
     {
@@ -609,9 +611,6 @@
       "visual": {
         "compareFrames": true,
         "compareScrollPosition": true
-      },
-      "freya": {
-        "expectedResult": "hard-mismatch-until-scrollable-target-is-addressable"
       }
     },
     {
@@ -667,9 +666,6 @@
       "visual": {
         "compareFrames": true,
         "dragPhases": ["start", "over", "drop", "end"]
-      },
-      "freya": {
-        "expectedResult": "hard-mismatch-until-native-drag-adapter-exists"
       }
     }
   ],
