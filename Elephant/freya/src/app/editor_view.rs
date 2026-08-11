@@ -7,7 +7,7 @@
 
 use freya::{
     prelude::*,
-    text_edit::{use_editable, EditableConfig, EditableEvent, EditorLine, TextEditor},
+    text_edit::{use_editable, EditableConfig, EditableEvent, EditorLine, TextEditor, UseEditable},
 };
 use muya_core::{
     model::{BlockKind, InlineKind, InlineMarkKind, ListKind, NodeKind},
@@ -95,23 +95,116 @@ impl Component for EditableInlineBlock {
         let node_id = self.node_id;
         let previous_value = value.clone();
         let on_key_down = move |event: Event<KeyboardEventData>| {
-            editable.process_event(EditableEvent::KeyDown {
-                key: &event.key,
-                modifiers: event.modifiers,
-            });
-            let next_value = editable.editor().read().committed_text();
-            if next_value == previous_value {
+            if let Err(error) = sync_muya_selection(state, node_id, &editable) {
+                state.write().error = Some(error.clone());
+                eprintln!("[freya][editor] action:failure action=selection error={error}");
                 return;
             }
-            if let Err(error) = apply_inline_delta(state, node_id, &previous_value, &next_value) {
-                editable.editor_mut().write().set(&previous_value);
-                state.write().error = Some(error.clone());
-                eprintln!("[freya][editor] action:failure action=edit error={error}");
-            } else {
-                eprintln!(
-                    "[freya][editor] action:complete action=edit node={:?}",
-                    node_id
-                );
+
+            let result = match &event.key {
+                Key::Named(NamedKey::Enter) if event.modifiers.is_empty() => state
+                    .write()
+                    .editor
+                    .as_mut()
+                    .ok_or_else(|| "cannot split without an open note".to_string())
+                    .and_then(|editor| {
+                        editor
+                            .insert_paragraph()
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    }),
+                Key::Named(NamedKey::Backspace) if event.modifiers.is_empty() => state
+                    .write()
+                    .editor
+                    .as_mut()
+                    .ok_or_else(|| "cannot delete without an open note".to_string())
+                    .and_then(|editor| {
+                        editor
+                            .delete_backward()
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    }),
+                Key::Named(NamedKey::Delete) if event.modifiers.is_empty() => state
+                    .write()
+                    .editor
+                    .as_mut()
+                    .ok_or_else(|| "cannot delete without an open note".to_string())
+                    .and_then(|editor| {
+                        editor
+                            .delete_forward()
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    }),
+                Key::Character(character)
+                    if event.modifiers.contains(Modifiers::ctrl_or_meta())
+                        && character.eq_ignore_ascii_case("s") =>
+                {
+                    state
+                        .read()
+                        .editor
+                        .as_ref()
+                        .ok_or_else(|| "cannot save without an open note".to_string())
+                        .and_then(|editor| editor.save().map_err(|error| error.to_string()))
+                }
+                Key::Character(character)
+                    if event.modifiers.contains(Modifiers::ctrl_or_meta())
+                        && character.eq_ignore_ascii_case("z") =>
+                {
+                    let redo = event.modifiers.contains(Modifiers::SHIFT);
+                    state
+                        .write()
+                        .editor
+                        .as_mut()
+                        .ok_or_else(|| "cannot change history without an open note".to_string())
+                        .and_then(|editor| {
+                            if redo {
+                                editor.redo().map(|_| ()).map_err(|error| error.to_string())
+                            } else {
+                                editor.undo().map(|_| ()).map_err(|error| error.to_string())
+                            }
+                        })
+                }
+                Key::Character(character)
+                    if event.modifiers.contains(Modifiers::ctrl_or_meta())
+                        && character.eq_ignore_ascii_case("y") =>
+                {
+                    state
+                        .write()
+                        .editor
+                        .as_mut()
+                        .ok_or_else(|| "cannot change history without an open note".to_string())
+                        .and_then(|editor| {
+                            editor.redo().map(|_| ()).map_err(|error| error.to_string())
+                        })
+                }
+                _ => {
+                    editable.process_event(EditableEvent::KeyDown {
+                        key: &event.key,
+                        modifiers: event.modifiers,
+                    });
+                    let next_value = editable.editor().read().committed_text();
+                    if next_value == previous_value {
+                        sync_muya_selection(state, node_id, &editable)
+                    } else {
+                        apply_inline_delta(state, node_id, &previous_value, &next_value)
+                    }
+                }
+            };
+
+            match result {
+                Ok(()) => {
+                    sync_editable_from_muya(state, node_id, &mut editable);
+                    eprintln!(
+                        "[freya][editor] action:complete action=keyboard node={:?} key={}",
+                        node_id, event.key
+                    );
+                }
+                Err(error) => {
+                    let error = error.to_string();
+                    state.write().error = Some(error.clone());
+                    editable.editor_mut().write().set(&previous_value);
+                    eprintln!("[freya][editor] action:failure action=keyboard error={error}");
+                }
             }
         };
         let on_key_up = move |event: Event<KeyboardEventData>| {
@@ -222,7 +315,7 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
             eprintln!("[freya][editor] action:complete action=close");
             state.write().editor = None;
         })
-        .a11y_alt("Close")
+        .a11y_alt("Close note")
         .child(label().text("Close"));
 
     let document = editor.session().document();
@@ -249,8 +342,10 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
                 .padding(Gaps::new_all(18.))
                 .background(theme::color(theme::SURFACE))
                 .with_corner_radius(10.)
+                .a11y_alt("Editor scroll")
                 .child(document_view),
         )
+        .a11y_alt("NoteEditorHost")
         .into_element()
 }
 
@@ -469,6 +564,197 @@ fn editable_text_nodes(document: &Document, parent: NodeId, nodes: &mut Vec<(Nod
     }
 }
 
+fn sync_muya_selection(
+    mut state: State<ShellState>,
+    block_id: NodeId,
+    editable: &UseEditable,
+) -> Result<(), String> {
+    let (start, end) = {
+        let editor = editable.editor().read();
+        (
+            editor.selection().start() as u32,
+            editor.selection().end() as u32,
+        )
+    };
+    let desired = {
+        let snapshot = state.read();
+        let editor = snapshot
+            .editor
+            .as_ref()
+            .ok_or_else(|| "cannot update selection without an open note".to_string())?;
+        let mut nodes = Vec::new();
+        editable_text_nodes(editor.session().document(), block_id, &mut nodes);
+        let (start, end) =
+            normalize_selection_offsets(&nodes, start, end, editor.session().snapshot().selection);
+        let anchor = point_at_offset(&nodes, start, false)
+            .ok_or_else(|| "editable block has no Muya text target".to_string())?;
+        let focus = point_at_offset(&nodes, end, start != end)
+            .ok_or_else(|| "editable block has no Muya selection target".to_string())?;
+        Selection { anchor, focus }
+    };
+    let mut shell = state.write();
+    let editor = shell
+        .editor
+        .as_mut()
+        .ok_or_else(|| "cannot update selection without an open note".to_string())?;
+    editor
+        .set_selection(desired)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn sync_editable_from_muya(state: State<ShellState>, block_id: NodeId, editable: &mut UseEditable) {
+    let (value, selection) = {
+        let snapshot = state.read();
+        let Some(editor) = snapshot.editor.as_ref() else {
+            return;
+        };
+        let document = editor.session().document();
+        if document.node(block_id).is_none() {
+            return;
+        }
+        let mut spans = Vec::new();
+        collect_inline_children(document, block_id, InlineStyle::default(), &mut spans);
+        let value = spans
+            .iter()
+            .map(|span| span.text.as_ref())
+            .collect::<String>();
+        let mut nodes = Vec::new();
+        editable_text_nodes(document, block_id, &mut nodes);
+        let muya_selection = editor.session().snapshot().selection;
+        let selection = block_offset_for_selection(&nodes, muya_selection);
+        (value, selection)
+    };
+
+    let mut inner = editable.editor_mut().write();
+    if inner.committed_text() != value {
+        inner.set(&value);
+    }
+    if let Some((anchor, focus)) = selection {
+        if anchor == focus {
+            inner.move_cursor_to(anchor as usize);
+        } else {
+            inner.set_selection((anchor as usize, focus as usize));
+        }
+    } else {
+        inner.clear_selection();
+    }
+}
+
+fn point_at_offset(
+    nodes: &[(NodeId, String)],
+    offset_utf16: u32,
+    is_end: bool,
+) -> Option<SelectionPoint> {
+    let mut cursor = 0u32;
+    for (index, (node, value)) in nodes.iter().enumerate() {
+        let end = cursor + value.encode_utf16().count() as u32;
+        if offset_utf16 < end || (offset_utf16 == end && (!is_end || index + 1 == nodes.len())) {
+            let local = utf16_boundary_ceil(value, offset_utf16.saturating_sub(cursor));
+            return Some(SelectionPoint {
+                node: *node,
+                offset_utf16: local,
+            });
+        }
+        if offset_utf16 == end && is_end {
+            if let Some((next, _)) = nodes.get(index + 1) {
+                return Some(SelectionPoint {
+                    node: *next,
+                    offset_utf16: 0,
+                });
+            }
+        }
+        cursor = end;
+    }
+    nodes.last().map(|(node, value)| SelectionPoint {
+        node: *node,
+        offset_utf16: value.encode_utf16().count() as u32,
+    })
+}
+
+fn utf16_boundary_ceil(value: &str, offset_utf16: u32) -> u32 {
+    let mut cursor = 0u32;
+    for character in value.chars() {
+        if offset_utf16 <= cursor {
+            return cursor;
+        }
+        cursor += character.len_utf16() as u32;
+        if offset_utf16 <= cursor {
+            return cursor;
+        }
+    }
+    cursor
+}
+
+fn utf16_boundary_floor(value: &str, offset_utf16: u32) -> u32 {
+    let mut cursor = 0u32;
+    for character in value.chars() {
+        if offset_utf16 <= cursor {
+            return cursor;
+        }
+        let next = cursor + character.len_utf16() as u32;
+        if offset_utf16 < next {
+            return cursor;
+        }
+        cursor = next;
+    }
+    cursor
+}
+
+fn normalize_selection_offsets(
+    nodes: &[(NodeId, String)],
+    start: u32,
+    end: u32,
+    current: Selection,
+) -> (u32, u32) {
+    let value = nodes
+        .iter()
+        .map(|(_, value)| value.as_str())
+        .collect::<String>();
+    if start != end {
+        return (
+            utf16_boundary_floor(&value, start),
+            utf16_boundary_ceil(&value, end),
+        );
+    }
+
+    let floor = utf16_boundary_floor(&value, start);
+    let ceil = utf16_boundary_ceil(&value, start);
+    if floor == ceil {
+        return (start, end);
+    }
+
+    let current_offset = block_offset_for_selection(nodes, current)
+        .filter(|(anchor, focus)| anchor == focus)
+        .map(|(anchor, _)| anchor);
+    if current_offset.is_some_and(|offset| offset > start) {
+        (floor, floor)
+    } else {
+        (ceil, ceil)
+    }
+}
+
+fn block_offset_for_selection(
+    nodes: &[(NodeId, String)],
+    selection: Selection,
+) -> Option<(u32, u32)> {
+    Some((
+        block_offset_for_point(nodes, selection.anchor)?,
+        block_offset_for_point(nodes, selection.focus)?,
+    ))
+}
+
+fn block_offset_for_point(nodes: &[(NodeId, String)], point: SelectionPoint) -> Option<u32> {
+    let mut cursor = 0u32;
+    for (node, value) in nodes {
+        if *node == point.node {
+            return Some(cursor + point.offset_utf16);
+        }
+        cursor += value.encode_utf16().count() as u32;
+    }
+    None
+}
+
 fn apply_inline_delta(
     mut state: State<ShellState>,
     block_id: NodeId,
@@ -494,21 +780,16 @@ fn apply_inline_delta(
         .ok_or_else(|| "editor selection has no Muya text target".to_string())?;
     let (end_node_index, end_offset) = segment_at_offset(&nodes, delta.end_utf16)
         .ok_or_else(|| "editor selection has no Muya text target".to_string())?;
-    if start_node_index != end_node_index {
-        return Err(format!(
-            "selection crosses Muya inline nodes in block {:?}",
-            block_id
-        ));
-    }
-    let (node, _current) = &nodes[start_node_index];
+    let (start_node, _current) = &nodes[start_node_index];
+    let (end_node, _current) = &nodes[end_node_index];
     editor
         .set_selection(Selection {
             anchor: SelectionPoint {
-                node: *node,
+                node: *start_node,
                 offset_utf16: start_offset,
             },
             focus: SelectionPoint {
-                node: *node,
+                node: *end_node,
                 offset_utf16: end_offset,
             },
         })

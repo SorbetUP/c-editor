@@ -12,14 +12,18 @@ use std::{
 };
 
 use muya_core::{
-    Command, EditError, EditorSession as MuyaEditorSession, Selection, SessionCommand,
-    SessionSnapshot, SessionUpdate, ViewPatch,
+    model::{InlineKind, NodeKind},
+    Command, EditError, EditorSession as MuyaEditorSession, GraphemeCommand,
+    ParagraphBoundaryCommand, Selection, SelectionPoint, SessionCommand, SessionSnapshot,
+    SessionUpdate, ViewPatch,
 };
 
 /// Actions emitted by a Freya editor surface.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditorAction {
     InsertText(String),
+    InsertParagraph,
+    DeleteBackward,
     Undo,
     Redo,
 }
@@ -139,11 +143,14 @@ impl EditorSession {
     ) -> Result<EditorUpdate, EditorError> {
         let command = match action {
             EditorAction::InsertText(text) => SessionCommand::Core(Command::InsertText(text)),
+            EditorAction::InsertParagraph => SessionCommand::Core(Command::InsertParagraph),
+            EditorAction::DeleteBackward => {
+                SessionCommand::Grapheme(GraphemeCommand::DeleteBackward)
+            }
             EditorAction::Undo => SessionCommand::Undo,
             EditorAction::Redo => SessionCommand::Redo,
         };
-        let update = self.inner.dispatch(expected_revision, command)?;
-        Ok(EditorUpdate::from_session(self.markdown(), update))
+        self.dispatch_session_command(expected_revision, command)
     }
 
     pub fn dispatch_current(&mut self, action: EditorAction) -> Result<EditorUpdate, EditorError> {
@@ -160,6 +167,15 @@ impl EditorSession {
 
     pub fn redo(&mut self) -> Result<EditorUpdate, EditorError> {
         self.dispatch_current(EditorAction::Redo)
+    }
+
+    fn dispatch_session_command(
+        &mut self,
+        expected_revision: u64,
+        command: SessionCommand,
+    ) -> Result<EditorUpdate, EditorError> {
+        let update = self.inner.dispatch(expected_revision, command)?;
+        Ok(EditorUpdate::from_session(self.markdown(), update))
     }
 }
 
@@ -222,6 +238,75 @@ impl EditorDocument {
         self.session.set_selection(revision, selection)
     }
 
+    pub fn insert_paragraph(&mut self) -> Result<EditorUpdate, EditorError> {
+        let revision = self.session.revision();
+        match self
+            .session
+            .dispatch_session_command(revision, SessionCommand::Core(Command::InsertParagraph))
+        {
+            Err(EditorError::Edit(EditError::UnsupportedStructure(_))) => {
+                self.session.dispatch_session_command(
+                    revision,
+                    SessionCommand::ParagraphBoundary(ParagraphBoundaryCommand::InsertParagraph),
+                )
+            }
+            result => result,
+        }
+    }
+
+    pub fn delete_backward(&mut self) -> Result<EditorUpdate, EditorError> {
+        self.session.dispatch_current(EditorAction::DeleteBackward)
+    }
+
+    pub fn delete_forward(&mut self) -> Result<EditorUpdate, EditorError> {
+        let snapshot = self.session.snapshot();
+        if !snapshot.selection.is_collapsed() {
+            return self.session.dispatch_session_command(
+                snapshot.revision,
+                SessionCommand::Core(Command::InsertText(String::new())),
+            );
+        }
+
+        let caret = snapshot
+            .selection
+            .caret()
+            .expect("a collapsed Muya selection must expose its caret");
+        let (next_same_node, next_block_text) = {
+            let document = self.session.document();
+            let next_same_node = text_value(document, caret.node).and_then(|value| {
+                next_utf16_boundary(value, caret.offset_utf16).map(|end| Selection {
+                    anchor: caret,
+                    focus: SelectionPoint {
+                        node: caret.node,
+                        offset_utf16: end,
+                    },
+                })
+            });
+            (next_same_node, next_block_text_node(document, caret.node))
+        };
+
+        if let Some(selection) = next_same_node {
+            self.set_selection(selection)?;
+            return self.session.dispatch_session_command(
+                snapshot.revision,
+                SessionCommand::Core(Command::InsertText(String::new())),
+            );
+        }
+
+        if let Some(next_text) = next_block_text {
+            self.set_selection(Selection::collapsed(SelectionPoint {
+                node: next_text,
+                offset_utf16: 0,
+            }))?;
+            return self.session.dispatch_session_command(
+                snapshot.revision,
+                SessionCommand::Grapheme(GraphemeCommand::DeleteBackward),
+            );
+        }
+
+        Ok(snapshot)
+    }
+
     pub fn undo(&mut self) -> Result<EditorUpdate, EditorError> {
         self.session.undo()
     }
@@ -241,6 +326,58 @@ fn io_error(path: &Path, error: io::Error) -> EditorError {
         path: path.to_path_buf(),
         message: error.to_string(),
     }
+}
+
+fn text_value(document: &muya_core::Document, node_id: muya_core::NodeId) -> Option<&str> {
+    match &document.node(node_id)?.kind {
+        NodeKind::Inline(InlineKind::Text { value }) => Some(value),
+        _ => None,
+    }
+}
+
+fn next_utf16_boundary(value: &str, offset: u32) -> Option<u32> {
+    let mut cursor = 0u32;
+    for character in value.chars() {
+        if cursor == offset {
+            return Some(offset + character.len_utf16() as u32);
+        }
+        cursor += character.len_utf16() as u32;
+    }
+    None
+}
+
+fn next_block_text_node(
+    document: &muya_core::Document,
+    node_id: muya_core::NodeId,
+) -> Option<muya_core::NodeId> {
+    let mut block = node_id;
+    while let Some(parent) = document.node(block).and_then(|node| node.parent) {
+        if parent == document.root {
+            break;
+        }
+        block = parent;
+    }
+    let root_children = document.node(document.root)?.children.as_slice();
+    let index = root_children
+        .iter()
+        .position(|candidate| *candidate == block)?;
+    root_children
+        .get(index + 1)
+        .copied()
+        .and_then(|next| first_text_node(document, next))
+}
+
+fn first_text_node(
+    document: &muya_core::Document,
+    node_id: muya_core::NodeId,
+) -> Option<muya_core::NodeId> {
+    let node = document.node(node_id)?;
+    if matches!(node.kind, NodeKind::Inline(InlineKind::Text { .. })) {
+        return Some(node_id);
+    }
+    node.children
+        .iter()
+        .find_map(|child| first_text_node(document, *child))
 }
 
 #[cfg(test)]
@@ -309,5 +446,33 @@ mod tests {
             })
         );
         assert_eq!(session.markdown(), "alpha");
+    }
+
+    #[test]
+    fn selection_update_keeps_revision_for_the_following_dispatch() {
+        let mut session = EditorSession::from_markdown("alpha");
+        let paragraph = session
+            .document()
+            .children(session.document().root)
+            .next()
+            .unwrap();
+        let text = session.document().children(paragraph.id).next().unwrap();
+        let before = session.snapshot();
+
+        let selected = session
+            .set_selection(
+                before.revision,
+                Selection::collapsed(SelectionPoint {
+                    node: text.id,
+                    offset_utf16: 1,
+                }),
+            )
+            .expect("selection update must use the current revision");
+        assert_eq!(selected.revision, before.revision);
+
+        let inserted = session
+            .dispatch(before.revision, EditorAction::InsertText("X".into()))
+            .expect("the edit after selection must use the unchanged revision");
+        assert_eq!(inserted.markdown, "aXlpha");
     }
 }
