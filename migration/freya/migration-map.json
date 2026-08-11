@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "sourceBaseline": {
+    "branch": "develop",
+    "commit": "62a606c145fe930682efbe491980c20ffeade14c",
+    "oracle": "Elephant/frontend/app and Elephant/backend/tauri remain intact during parity work"
+  },
+  "target": "Elephant/freya",
+  "surfaces": [
+    {
+      "source": "Elephant/frontend/app/components/shell/AppShell.vue",
+      "target": "Elephant/freya/src/app.rs",
+      "status": "PARITY_PENDING",
+      "sourceProvenance": ["AppShell.vue", "app-shell.css", "app-shell-runtime-fixes.css"],
+      "behaviorProof": ["freya-testing semantic Create -> Note -> disk test"],
+      "remainingWebDependencies": ["search modal", "settings panel", "addon zones", "mobile drawer gesture", "vault picker"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/navigation/IconRail.vue",
+      "target": "Elephant/freya/src/app.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["semantic rail labels are rendered", "sidebar toggle state is exercised by source contract tests"],
+      "remainingWebDependencies": ["vault switcher persistence", "addon rail contributions", "rail drag ordering"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/navigation/SidebarNav.vue",
+      "target": "Elephant/freya/src/app.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["root directory is loaded through the production Tauri entries helper"],
+      "remainingWebDependencies": ["recursive lazy tree", "recently edited", "sidebar detach and move interactions"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/library/LibraryToolbar.vue",
+      "target": "Elephant/freya/src/app.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["sort/view controls are rendered", "create note reaches the production vault helper"],
+      "remainingWebDependencies": ["full sort/view interaction acceptance"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/library/LibraryGrid.vue",
+      "target": "Elephant/freya/src/app.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["typed page/window contract tests", "production directory listing adapter tests"],
+      "remainingWebDependencies": ["scroll prefetch event", "drag/drop", "rename/delete UI"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/library/NoteCard.vue",
+      "target": "Elephant/freya/src/app.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["typed card fields and geometry contract tests"],
+      "remainingWebDependencies": ["pin/menu/rename/delete actions", "drawing preview image loading", "drag/drop"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/shell/NoteEditorHost.vue",
+      "target": "Elephant/freya/src/editor.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["real muya-core load/serialize/undo/redo/save adapter tests"],
+      "remainingWebDependencies": ["rich text layout/input parity", "selection/IME/clipboard", "live Markdown rendering"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/settings/SettingsPanel.vue",
+      "target": "Elephant/freya/src/settings_contract.rs",
+      "status": "ANALYZED",
+      "behaviorProof": ["8 focused settings contract tests"],
+      "remainingWebDependencies": ["preference host/persistence", "real settings Freya interactions"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/search/SearchModal.vue and views/AtomicGraphView.vue",
+      "target": "Elephant/freya/src/search_graph_contract.rs",
+      "status": "ANALYZED",
+      "behaviorProof": ["5 focused search/graph contract tests"],
+      "remainingWebDependencies": ["real search service adapter", "native graph renderer", "keyboard and pointer acceptance"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/library/CreateEntryMenu.vue",
+      "target": "Elephant/freya/src/app.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["freya-testing opens semantic Note/Drawing/Folder menu and creates Note on disk"],
+      "remainingWebDependencies": ["isolated Excalidraw web island boundary"]
+    },
+    {
+      "source": "Elephant/frontend/app/components/editor/ExcalidrawDialog.vue",
+      "target": "Elephant/web_islands/excalidraw (not yet present)",
+      "status": "WEB_ISLAND",
+      "behaviorProof": [],
+      "remainingWebDependencies": ["existing Excalidraw integration must be isolated before native switch"]
+    }
+  ],
+  "generatedInventory": "migration/freya/components.json",
+  "manualPortReport": "migration/freya/manual-port-required.json"
+}

@@ -1,0 +1,7 @@
+{
+  "macos_arm64": {"crateCheck": "PROVEN", "headlessFreya": "PROVEN", "nativeWindow": "PROVEN (debug cargo run)", "packaged": "NOT_PROVEN"},
+  "linux": {"crateCheck": "NOT_PROVEN", "headlessFreya": "NOT_PROVEN", "nativeWindow": "NOT_PROVEN", "packaged": "NOT_PROVEN"},
+  "windows": {"crateCheck": "NOT_PROVEN", "headlessFreya": "NOT_PROVEN", "nativeWindow": "NOT_PROVEN", "packaged": "NOT_PROVEN"},
+  "android": {"build": "NOT_PROVEN", "install": "NOT_PROVEN", "userJourney": "NOT_PROVEN"},
+  "ios": {"build": "NOT_PROVEN", "userJourney": "NOT_PROVEN"}
+}

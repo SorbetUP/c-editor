@@ -1,0 +1,10 @@
+{
+  "scenario": "real Freya desktop startup with a temporary vault",
+  "platform": "macOS arm64",
+  "command": "ELEPHANT_FREYA_VAULT=/private/tmp/elephant-freya-runtime cargo run --manifest-path Elephant/freya/Cargo.toml",
+  "window": {"observed": true, "title": "Elephant", "native": true},
+  "visibleSurfaces": ["TopVaultBar", "IconRail", "SidebarNav", "LibraryToolbar", "LibraryGrid", "NoteCard"],
+  "artifact": "freya-shell.png",
+  "status": "PARTIALLY_PROVEN",
+  "limitations": ["no old Vue screenshot at identical fixture/window", "settings/search/editor parity not yet proven", "no packaged artifact"]
+}

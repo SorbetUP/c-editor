@@ -1,0 +1,16 @@
+{
+  "baseline": "develop@62a606c145fe930682efbe491980c20ffeade14c",
+  "sources": [
+    {"source": "Elephant/frontend/app/components/shell/AppShell.vue", "target": "Elephant/freya/src/app.rs", "reuse": "state/event/layout contract"},
+    {"source": "Elephant/frontend/app/components/navigation/IconRail.vue", "target": "Elephant/freya/src/navigation_contract.rs", "reuse": "rail IDs, labels, commands, order"},
+    {"source": "Elephant/frontend/app/components/navigation/SidebarNav.vue", "target": "Elephant/freya/src/navigation_contract.rs", "reuse": "root/tree labels and directory commands"},
+    {"source": "Elephant/frontend/app/components/library/LibraryGrid.vue", "target": "Elephant/freya/src/library_contract.rs", "reuse": "page, render chunk, prefetch and open semantics"},
+    {"source": "Elephant/frontend/app/components/library/NoteCard.vue", "target": "Elephant/freya/src/library_contract.rs", "reuse": "entry fields, kind and card geometry"},
+    {"source": "Elephant/backend/tauri/src/vault/entries.rs", "target": "Elephant/freya/src/vault_adapter.rs", "reuse": "direct path inclusion and production CRUD/list/trash calls"},
+    {"source": "Elephant/backend/tauri/src/vault/types.rs", "target": "Elephant/freya/src/vault_adapter.rs", "reuse": "VaultDescriptor and backend schema"},
+    {"source": "Elephant/crates/muya-core", "target": "Elephant/freya/src/editor.rs", "reuse": "direct EditorSession adapter"}
+  ],
+  "retracted": [
+    {"commit": "6a1e5b754", "reason": "manual shell was not sufficiently grounded in the source conversion and was reverted"}
+  ]
+}

@@ -1,0 +1,19 @@
+[package]
+name = "elephant-freya"
+version = "0.1.0"
+description = "Freya editor adapter for Elephant"
+license = "MIT"
+edition = "2021"
+rust-version = "1.91"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+freya = "0.4.1"
+muya-core = { path = "../crates/muya-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+freya-testing = "0.4.1"
