@@ -1,20 +1,24 @@
-//! Native Freya read/selection view for the existing SettingsPanel surface.
+//! Native Freya rendering for the existing SettingsPanel surface.
 //!
-//! This module intentionally owns no preferences, dialogs, addon manager, or
-//! Tauri calls.  It renders the section/navigation contracts and lets the
-//! eventual host decide how to wire persistence and section-owned controls.
-//! The labels and descriptions come from `settings_contract`, which in turn
-//! records the production Vue sources.
+//! Persistence and preference transforms live in `settings_runtime`; this
+//! module keeps the visible settings layout, controls, and state transitions.
 
 use freya::prelude::*;
+use std::path::PathBuf;
 
 use crate::{
     settings_contract::{
-        search_core_settings, SectionTransition, SettingIndexEntry, SettingsState, CORE_SECTIONS,
-        CORE_SETTINGS_INDEX,
+        search_core_settings, SectionTransition, SettingIndexEntry, SettingsState,
     },
     theme,
 };
+
+#[path = "settings_controls.rs"]
+mod settings_controls;
+#[path = "settings_runtime.rs"]
+mod settings_runtime;
+
+use settings_runtime::SettingsRuntimeState;
 
 /// Visible state supplied by the host while a section-owned surface loads.
 ///
@@ -61,23 +65,68 @@ impl Default for SettingsSurfaceState {
     }
 }
 
-/// State boundary for the native view.
-///
-/// `SettingsState` is the already-typed contract state.  This wrapper adds
-/// only the render status needed to keep loading/error/empty states visible.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+/// State boundary for the native view and its real vault/profile persistence.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SettingsViewState {
     pub settings: SettingsState,
     pub surface: SettingsSurfaceState,
+    pub runtime: SettingsRuntimeState,
 }
 
 impl SettingsViewState {
+    pub fn load_from(path: impl Into<PathBuf>) -> Self {
+        let runtime = SettingsRuntimeState::load_from(path);
+        let mut state = Self {
+            settings: SettingsState::default(),
+            surface: SettingsSurfaceState::Ready,
+            runtime,
+        };
+        if let Some(error) = state.runtime.load_error.clone() {
+            state.surface = SettingsSurfaceState::Error {
+                title: "Settings could not be loaded".to_owned(),
+                detail: error,
+            };
+        }
+        state
+    }
+
     pub fn select_section(&mut self, section: &str) -> SectionTransition {
         self.settings.select_section(section)
     }
 
     pub fn set_surface_state(&mut self, surface: SettingsSurfaceState) {
         self.surface = surface;
+    }
+
+    pub fn toggle_bool(&mut self, key: &str) {
+        self.runtime.toggle_bool(key);
+    }
+
+    pub fn set_text_preference(&mut self, key: &str, value: String) {
+        self.runtime.set_text_preference(key, value);
+    }
+
+    pub fn cycle_auto_save_delay(&mut self) {
+        self.runtime.cycle_auto_save_delay();
+    }
+}
+
+impl Default for SettingsViewState {
+    fn default() -> Self {
+        let runtime = SettingsRuntimeState::default();
+        let surface = runtime
+            .load_error
+            .clone()
+            .map(|detail| SettingsSurfaceState::Error {
+                title: "Settings could not be loaded".to_owned(),
+                detail,
+            })
+            .unwrap_or_default();
+        Self {
+            settings: SettingsState::default(),
+            surface,
+            runtime,
+        }
     }
 }
 
@@ -89,6 +138,14 @@ impl SettingsViewState {
 pub fn settings_panel(state: State<SettingsViewState>) -> Element {
     let snapshot = state.read().clone();
     let active_section = snapshot.settings.active_section.clone();
+    let search_value = State::create(snapshot.settings.query.clone());
+    let mut search_state = state;
+    let search = Input::new(search_value)
+        .width(Size::px(220.))
+        .placeholder("Search all settings")
+        .on_submit(move |query: String| {
+            search_state.write().settings.set_query(&query);
+        });
 
     rect()
         .width(Size::fill())
@@ -98,218 +155,31 @@ pub fn settings_panel(state: State<SettingsViewState>) -> Element {
         .padding(Gaps::new_all(16.))
         .spacing(14.)
         .a11y_alt("ElephantNote settings")
-        .child(settings_header())
+        .child(settings_controls::settings_header(search))
+        .maybe_child(snapshot.runtime.feedback.clone().map(|message| {
+            rect()
+                .width(Size::fill())
+                .padding(Gaps::new(6., 10., 6., 10.))
+                .a11y_alt("Settings feedback")
+                .child(label().color(theme::color(theme::MUTED)).text(message))
+                .into_element()
+        }))
         .child(
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
                 .horizontal()
                 .spacing(14.)
-                .child(section_navigation(&active_section, state))
-                .child(section_content(&active_section, &snapshot.surface)),
-        )
-        .into_element()
-}
-
-fn settings_header() -> Element {
-    rect()
-        .width(Size::fill())
-        .height(Size::px(48.))
-        .horizontal()
-        .main_align(Alignment::SpaceBetween)
-        .cross_align(Alignment::Center)
-        .child(
-            label()
-                .font_size(20.)
-                .font_weight(FontWeight::BOLD)
-                .text("Settings"),
-        )
-        .child(
-            rect()
-                .width(Size::px(220.))
-                .height(Size::px(34.))
-                .padding(Gaps::new(8., 12., 8., 12.))
-                .background(theme::color(theme::SURFACE))
-                .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
-                .with_corner_radius(8.)
-                .a11y_alt("Search all settings")
-                .child(
-                    label()
-                        .color(theme::color(theme::MUTED))
-                        .text("Search all settings"),
-                ),
-        )
-        .into_element()
-}
-
-fn section_navigation(active_section: &str, state: State<SettingsViewState>) -> Element {
-    let items = CORE_SECTIONS
-        .iter()
-        .map(|section| section_button(section.id, section.label, active_section, state))
-        .collect::<Vec<_>>();
-
-    rect()
-        .width(Size::px(196.))
-        .height(Size::fill())
-        .padding(Gaps::new_all(8.))
-        .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
-        .with_corner_radius(10.)
-        .spacing(3.)
-        .a11y_alt("Settings sections")
-        .children(items)
-        .child(
-            rect()
-                .height(Size::fill())
-                .main_align(Alignment::End)
-                .horizontal()
-                .main_align(Alignment::SpaceBetween)
-                .child(
-                    label()
-                        .font_size(11.)
-                        .color(theme::color(theme::MUTED))
-                        .text("Local-first"),
-                )
-                .child(
-                    label()
-                        .font_size(11.)
-                        .color(theme::color(theme::MUTED))
-                        .text("v0.1.0"),
-                ),
-        )
-        .into_element()
-}
-
-fn section_button(
-    id: &'static str,
-    label_text: &'static str,
-    active_section: &str,
-    state: State<SettingsViewState>,
-) -> Element {
-    let selected = active_section == id;
-    let mut state = state;
-    rect()
-        .width(Size::fill())
-        .height(Size::px(38.))
-        .padding(Gaps::new(8., 10., 8., 10.))
-        .background(if selected {
-            theme::color(theme::SOFT)
-        } else {
-            theme::color(theme::SURFACE)
-        })
-        .with_corner_radius(7.)
-        .horizontal()
-        .cross_align(Alignment::Center)
-        .on_mouse_up(move |_| {
-            state.write().select_section(id);
-        })
-        .a11y_alt(format!("Select {label_text} settings"))
-        .child(label().text(label_text))
-        .child(label().color(theme::color(theme::MUTED)).text("›"))
-        .into_element()
-}
-
-fn section_content(active_section: &str, surface: &SettingsSurfaceState) -> Element {
-    let title = CORE_SECTIONS
-        .iter()
-        .find(|section| section.id == active_section)
-        .map(|section| section.label.to_owned())
-        .unwrap_or_else(|| active_section.to_owned());
-
-    let content = rect()
-        .width(Size::fill())
-        .height(Size::fill())
-        .padding(Gaps::new_all(14.))
-        .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
-        .with_corner_radius(10.)
-        .spacing(12.)
-        .a11y_alt(format!("Settings section {active_section}"))
-        .child(
-            label()
-                .font_size(18.)
-                .font_weight(FontWeight::BOLD)
-                .text(title.clone()),
-        );
-
-    if !matches!(surface, SettingsSurfaceState::Ready) {
-        return content.child(surface_state(surface)).into_element();
-    }
-
-    let entries = CORE_SETTINGS_INDEX
-        .iter()
-        .filter(|entry| entry.section == active_section)
-        .map(setting_row)
-        .collect::<Vec<_>>();
-
-    if entries.is_empty() {
-        return content.child(unavailable_section(&title)).into_element();
-    }
-
-    content.children(entries).into_element()
-}
-
-fn setting_row(entry: &SettingIndexEntry) -> Element {
-    rect()
-        .width(Size::fill())
-        .padding(Gaps::new(10., 12., 10., 12.))
-        .background(theme::color(theme::BG))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
-        .with_corner_radius(8.)
-        .spacing(4.)
-        .a11y_alt(entry.label)
-        .child(label().font_weight(FontWeight::BOLD).text(entry.label))
-        .child(
-            label()
-                .color(theme::color(theme::MUTED))
-                .text(entry.description),
-        )
-        .into_element()
-}
-
-fn surface_state(surface: &SettingsSurfaceState) -> Element {
-    let (title, detail, alt) = match surface {
-        SettingsSurfaceState::Loading { title, detail } => {
-            (title.clone(), detail.clone(), "Settings loading")
-        }
-        SettingsSurfaceState::Error { title, detail } => {
-            (title.clone(), detail.clone(), "Settings error")
-        }
-        SettingsSurfaceState::Empty { title, detail } => {
-            (title.clone(), detail.clone(), "Settings empty")
-        }
-        SettingsSurfaceState::Ready => return rect().into_element(),
-    };
-
-    rect()
-        .width(Size::fill())
-        .padding(Gaps::new_all(24.))
-        .background(theme::color(theme::BG))
-        .with_corner_radius(8.)
-        .spacing(8.)
-        .a11y_alt(alt)
-        .child(label().font_weight(FontWeight::BOLD).text(title))
-        .child(label().color(theme::color(theme::MUTED)).text(detail))
-        .into_element()
-}
-
-fn unavailable_section(section_label: &str) -> Element {
-    rect()
-        .width(Size::fill())
-        .padding(Gaps::new_all(24.))
-        .background(theme::color(theme::BG))
-        .with_corner_radius(8.)
-        .spacing(8.)
-        .a11y_alt(format!("{section_label} is unavailable"))
-        .child(
-            label()
-                .font_weight(FontWeight::BOLD)
-                .text(format!("{section_label} is unavailable")),
-        )
-        .child(
-            label()
-                .color(theme::color(theme::MUTED))
-                .text("The addon is being reloaded or has been disabled. Elephant keeps this page selected instead of moving you to another menu."),
+                .child(settings_controls::section_navigation(
+                    &active_section,
+                    state,
+                ))
+                .child(settings_controls::section_content(
+                    state,
+                    &active_section,
+                    &snapshot.surface,
+                    &snapshot.settings.query,
+                )),
         )
         .into_element()
 }
@@ -325,6 +195,7 @@ pub fn search_labels(query: &str) -> Vec<&'static SettingIndexEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings_contract::{CORE_SECTIONS, CORE_SETTINGS_INDEX};
 
     #[test]
     fn selection_uses_the_existing_contract_transition() {

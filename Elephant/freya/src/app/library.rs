@@ -14,6 +14,10 @@ use crate::{
 
 use super::{editor_view, route_notice, ShellState};
 
+#[path = "library_actions.rs"]
+mod library_actions;
+use library_actions::{card_action_menu, CardMenuState};
+
 pub(super) fn main_content(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
     let body = if snapshot.editor.is_some() {
@@ -41,9 +45,25 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
             snapshot
                 .error
                 .clone()
-                .map(|error| route_notice("Library error", &error)),
+                .map(|error| library_error_notice(&error)),
         )
         .child(body)
+        .into_element()
+}
+
+fn library_error_notice(error: &str) -> Element {
+    rect()
+        .width(Size::fill())
+        .padding(Gaps::new_all(10.))
+        .background(theme::color(theme::BG))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(8.)
+        .a11y_alt("Library error")
+        .child(
+            label()
+                .color(theme::color(theme::MUTED))
+                .text(error.to_owned()),
+        )
         .into_element()
 }
 
@@ -239,10 +259,23 @@ fn library_grid(state: State<ShellState>) -> Element {
         .library
         .visible_entries()
         .into_iter()
-        .map(|entry| library_card(entry, snapshot.library.view_mode, state))
+        .map(|entry| {
+            LibraryCard {
+                entry: entry.clone(),
+                mode: snapshot.library.view_mode,
+                state,
+            }
+            .into_element()
+        })
         .collect::<Vec<_>>();
     if entries.is_empty() {
-        return route_notice("LibraryGrid", "No visible notes");
+        return rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .padding(Gaps::new(72., 12., 12., 12.))
+            .a11y_alt("No visible notes")
+            .child(label().font_size(18.).text("No visible notes"))
+            .into_element();
     }
     let surface = if snapshot.library.view_mode == ViewMode::Grid {
         rect()
@@ -261,7 +294,38 @@ fn library_grid(state: State<ShellState>) -> Element {
         .into_element()
 }
 
-fn library_card(entry: &LibraryEntry, mode: ViewMode, state: State<ShellState>) -> Element {
+#[derive(PartialEq)]
+struct LibraryCard {
+    entry: LibraryEntry,
+    mode: ViewMode,
+    state: State<ShellState>,
+}
+
+impl Component for LibraryCard {
+    fn render_key(&self) -> DiffKey {
+        DiffKey::from(&self.entry.path)
+    }
+
+    fn render(&self) -> impl IntoElement {
+        let card_menu_state = use_state(CardMenuState::default);
+        let rename_value = use_state(String::new);
+        render_library_card(
+            &self.entry,
+            self.mode,
+            self.state,
+            card_menu_state,
+            rename_value,
+        )
+    }
+}
+
+fn render_library_card(
+    entry: &LibraryEntry,
+    mode: ViewMode,
+    state: State<ShellState>,
+    mut card_menu_state: State<CardMenuState>,
+    rename_value: State<String>,
+) -> Element {
     let path = entry.path.as_str().to_string();
     let title = entry.title.as_str().to_string();
     let is_folder = matches!(entry.effective_kind(), ContractKind::Folder);
@@ -278,6 +342,47 @@ fn library_card(entry: &LibraryEntry, mode: ViewMode, state: State<ShellState>) 
     let mut leave_state = state;
     let mut state_for_open = state;
     let path_for_open = path.clone();
+    let menu_snapshot = card_menu_state.read().clone();
+    let card_menu = if menu_snapshot.open {
+        Some(card_action_menu(
+            path.clone(),
+            title.clone(),
+            is_folder,
+            state,
+            card_menu_state,
+            rename_value,
+            menu_snapshot.renaming,
+        ))
+    } else {
+        None
+    };
+    let menu_trigger = if hovered || menu_snapshot.open {
+        let mut trigger_state = card_menu_state;
+        Some(
+            rect()
+                .position(Position::new_absolute().top(8.).right(8.))
+                .width(Size::px(30.))
+                .height(Size::px(30.))
+                .center()
+                .background(theme::color(theme::BG))
+                .with_corner_radius(6.)
+                .a11y_alt(if is_folder {
+                    "Folder actions"
+                } else {
+                    "Note actions"
+                })
+                .on_mouse_up(move |event: Event<MouseEventData>| {
+                    event.stop_propagation();
+                    let mut menu = trigger_state.write();
+                    menu.open = true;
+                    menu.renaming = false;
+                })
+                .child(label().text("⋯")),
+        )
+    } else {
+        None
+    };
+    let mut menu_state_for_secondary = card_menu_state;
     rect()
         .width(if mode == ViewMode::Grid {
             Size::px(240.)
@@ -303,18 +408,41 @@ fn library_card(entry: &LibraryEntry, mode: ViewMode, state: State<ShellState>) 
         .with_corner_radius(10.)
         .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
         .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
-        .on_mouse_up(move |_| {
+        .on_secondary_down(move |_| {
+            let mut menu = menu_state_for_secondary.write();
+            menu.open = true;
+            menu.renaming = false;
+        })
+        .on_mouse_up(move |event: Event<MouseEventData>| {
+            if event.button == Some(MouseButton::Right) {
+                return;
+            }
+            let mut menu = card_menu_state.write();
+            menu.open = false;
+            menu.renaming = false;
+            drop(menu);
             if is_folder {
                 state_for_open.write().open_directory(path_for_open.clone());
-            } else if let Some(vault) = state_for_open.read().vault.clone() {
-                let full = vault.root().join(&path_for_open);
-                match EditorDocument::load(full) {
-                    Ok(document) => state_for_open.write().editor = Some(document),
-                    Err(error) => state_for_open.write().error = Some(error.to_string()),
+            } else {
+                let root = {
+                    let snapshot = state_for_open.read();
+                    snapshot
+                        .vault
+                        .as_ref()
+                        .map(|vault| vault.root().to_path_buf())
+                };
+                if let Some(root) = root {
+                    let full = root.join(&path_for_open);
+                    match EditorDocument::load(full) {
+                        Ok(document) => state_for_open.write().editor = Some(document),
+                        Err(error) => state_for_open.write().error = Some(error.to_string()),
+                    }
                 }
             }
         })
         .a11y_alt(title.clone())
+        .maybe_child(menu_trigger)
+        .maybe_child(card_menu)
         .child(
             label()
                 .font_size(14.)
