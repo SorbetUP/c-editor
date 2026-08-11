@@ -14,6 +14,9 @@ use crate::{
 
 use super::{editor_view, route_notice, ShellState};
 
+#[path = "drawing.rs"]
+mod drawing;
+
 #[path = "library_actions.rs"]
 mod library_actions;
 use library_actions::{card_action_menu, CardMenuState};
@@ -52,13 +55,14 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
 }
 
 fn library_error_notice(error: &str) -> Element {
+    let accessibility_label = drawing::error_accessibility_label(error);
     rect()
         .width(Size::fill())
         .padding(Gaps::new_all(10.))
         .background(theme::color(theme::BG))
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
         .with_corner_radius(8.)
-        .a11y_alt("Library error")
+        .a11y_alt(accessibility_label)
         .child(
             label()
                 .color(theme::color(theme::MUTED))
@@ -191,7 +195,11 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
             }))
             .on_mouse_up(move |_| {
                 state.write().menu_open = false;
-                state.write().create(action);
+                if action == crate::library_contract::CreateAction::Drawing {
+                    drawing::request_create(state);
+                } else {
+                    state.write().create(action);
+                }
             })
             .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
             .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
@@ -327,7 +335,9 @@ fn render_library_card(
     rename_value: State<String>,
 ) -> Element {
     let path = entry.path.as_str().to_string();
-    let title = entry.title.as_str().to_string();
+    let is_drawing =
+        is_drawing_path(&path) || matches!(entry.effective_kind(), ContractKind::Drawing);
+    let title = display_title(entry.title.as_str(), is_drawing);
     let is_folder = matches!(entry.effective_kind(), ContractKind::Folder);
     let height = if mode == ViewMode::Grid {
         theme::CARD_HEIGHT
@@ -421,7 +431,9 @@ fn render_library_card(
             menu.open = false;
             menu.renaming = false;
             drop(menu);
-            if is_folder {
+            if is_drawing {
+                drawing::open_existing(state_for_open, &path_for_open);
+            } else if is_folder {
                 state_for_open.write().open_directory(path_for_open.clone());
             } else {
                 let root = {
@@ -447,7 +459,16 @@ fn render_library_card(
             label()
                 .font_size(14.)
                 .font_weight(FontWeight::BOLD)
-                .text(format!("{}  {title}", if is_folder { "▱" } else { "▤" })),
+                .text(format!(
+                    "{}  {title}",
+                    if is_folder {
+                        "▱"
+                    } else if is_drawing {
+                        "✎"
+                    } else {
+                        "▤"
+                    }
+                )),
         )
         .child(if mode == ViewMode::Grid {
             rect()
@@ -465,6 +486,8 @@ fn render_library_card(
                                 .map(|child| child.title.as_str())
                                 .collect::<Vec<_>>()
                                 .join("  ·  ")
+                        } else if is_drawing {
+                            "Excalidraw preview unavailable in native Freya".to_string()
                         } else {
                             entry.excerpt.clone()
                         }),
@@ -477,24 +500,33 @@ fn render_library_card(
 }
 
 pub(super) fn to_library_entry(entry: &VaultEntry) -> LibraryEntry {
-    let entry_type = match &entry.entry_type {
-        EntryKind::Note => EntryType::Note,
-        EntryKind::Folder => EntryType::Folder,
-        EntryKind::Drawing => EntryType::Drawing,
-        EntryKind::File => EntryType::File,
-        EntryKind::Other(_) => EntryType::Custom(entry.entry_type.as_str().to_string()),
+    let drawing_path = is_drawing_path(&entry.path);
+    let entry_type = if drawing_path {
+        EntryType::Drawing
+    } else {
+        match &entry.entry_type {
+            EntryKind::Note => EntryType::Note,
+            EntryKind::Folder => EntryType::Folder,
+            EntryKind::Drawing => EntryType::Drawing,
+            EntryKind::File => EntryType::File,
+            EntryKind::Other(_) => EntryType::Custom(entry.entry_type.as_str().to_string()),
+        }
     };
-    let kind = Some(match &entry.kind {
-        EntryKind::Note => ContractKind::Note,
-        EntryKind::Folder => ContractKind::Folder,
-        EntryKind::Drawing => ContractKind::Drawing,
-        EntryKind::File => ContractKind::File,
-        EntryKind::Other(value) => ContractKind::Custom(value.clone()),
+    let kind = Some(if drawing_path {
+        ContractKind::Drawing
+    } else {
+        match &entry.kind {
+            EntryKind::Note => ContractKind::Note,
+            EntryKind::Folder => ContractKind::Folder,
+            EntryKind::Drawing => ContractKind::Drawing,
+            EntryKind::File => ContractKind::File,
+            EntryKind::Other(value) => ContractKind::Custom(value.clone()),
+        }
     });
     LibraryEntry::new(
         entry_type,
         kind,
-        EntryTitle::new(entry.title.clone()),
+        EntryTitle::new(display_title(&entry.title, drawing_path)),
         RelativePath::new(entry.path.clone()),
         entry
             .children_preview
@@ -514,4 +546,20 @@ pub(super) fn to_library_entry(entry: &VaultEntry) -> LibraryEntry {
         entry.tags.clone(),
         crate::library_contract::UpdatedAt::new(entry.updated_at.clone()),
     )
+}
+
+fn is_drawing_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".excalidraw") || lower.ends_with(".excalidraw.png")
+}
+
+fn display_title(title: &str, drawing: bool) -> String {
+    if !drawing {
+        return title.to_owned();
+    }
+    title
+        .strip_suffix(".excalidraw")
+        .or_else(|| title.strip_suffix(".excalidraw.png"))
+        .unwrap_or(title)
+        .to_owned()
 }
