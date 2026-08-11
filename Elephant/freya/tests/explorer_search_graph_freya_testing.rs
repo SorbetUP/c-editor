@@ -57,7 +57,7 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
 }
 
 #[test]
-fn search_input_escape_and_graph_refresh_follow_source_states() {
+fn search_input_escape_and_graph_refresh_expose_real_graph_boundary() {
     let fixture = FixtureVault::new();
     let root = fixture.path().to_path_buf();
     let (mut runner, ()) = TestingRunner::new(
@@ -99,7 +99,25 @@ fn search_input_escape_and_graph_refresh_follow_source_states() {
     click_label(&mut runner, "Refresh graph");
     runner.sync_and_update();
     assert!(
-        !labeled_nodes(&runner, "Building the semantic graph…").is_empty(),
-        "refresh must expose the graph loading state"
+        !labeled_nodes(&runner, "Graph service unavailable.").is_empty(),
+        "refresh must expose the production Graph service error when no native adapter exists"
     );
+
+    // The source Graph view never treats an unavailable service as an empty
+    // successful graph.  Keep this assertion strict so a future adapter must
+    // provide real nodes/edges before this scenario can become a data proof.
+    assert!(labeled_nodes(&runner, "Nodes").is_empty());
+    assert!(labeled_nodes(&runner, "Edges").is_empty());
+
+    // These are still real Freya input/button actions. They must not turn the
+    // explicit service error into fabricated filtered or recentered data.
+    click_label(&mut runner, "Graph filter input");
+    runner.write_text("alpha");
+    runner.press_key(Key::Named(NamedKey::Enter));
+    runner.sync_and_update();
+    assert!(!labeled_nodes(&runner, "Graph service unavailable.").is_empty());
+
+    click_label(&mut runner, "Reset graph filter");
+    runner.sync_and_update();
+    assert!(!labeled_nodes(&runner, "Graph service unavailable.").is_empty());
 }
