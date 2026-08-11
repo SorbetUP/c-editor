@@ -36,4 +36,18 @@ jobs:
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
       - name: Test Freya shell
-        run: cargo test --manifest-path Elephant/freya/Cargo.toml -- --test-threads=1
+        shell: bash
+        run: |
+          set +e
+          cargo test --manifest-path Elephant/freya/Cargo.toml -- --test-threads=1 2>&1 | tee /tmp/freya-tests.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          text = Path('/tmp/freya-tests.log').read_text(errors='replace')
+          tail = '\n'.join(text.splitlines()[-120:])
+          escaped = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=Freya test failure::{escaped}')
+          PY
+          fi
+          exit "$status"
