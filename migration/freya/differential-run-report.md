@@ -43,6 +43,11 @@ node tools/freya-differential/compare.mjs \
 Result: `ok`; 64/64 images compared, 0 missing, 0 extra, 0 changed pixels.
 This proves the capture and comparator, not cross-runtime parity.
 
+The comparator's red-path was also exercised by removing one temporal PNG from
+a copied candidate sequence. It exited with code 1 and reported
+`sequence-missing` for `create-menu/frames/frame-004.png`; the missing frame was
+not treated as a pass.
+
 The retained Freya artifacts are under
 `test-results/freya-differential/latest/freya/`.
 
