@@ -18,6 +18,12 @@ use freya::prelude::State;
 #[path = "drawing_storage.rs"]
 mod storage;
 
+// The native renderer is compiled into the production Freya crate here. The
+// shell still owns the route switch; this module deliberately exposes the
+// renderer/state boundary without changing library or app ownership.
+#[path = "drawing_canvas.rs"]
+pub(super) mod canvas;
+
 pub(crate) const RENDERER_ERROR_LABEL: &str = "Native drawing renderer unavailable";
 const RENDERER_ERROR_PREFIX: &str = "Native drawing renderer unavailable";
 
