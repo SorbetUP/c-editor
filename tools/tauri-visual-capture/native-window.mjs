@@ -99,7 +99,7 @@ export const descendantProcessIds = (launcherPid, table = readProcessTable()) =>
   return descendants
 }
 
-export const selectTauriChildProcess = ({ launcherPid, appPath = '', table = readProcessTable() } = {}) => {
+export const selectTauriChildProcess = ({ launcherPid, appPath = '', includeLauncher = false, table = readProcessTable() } = {}) => {
   const descendants = descendantProcessIds(launcherPid, table)
   const appNeedles = [
     'target/debug/elephant',
@@ -108,7 +108,7 @@ export const selectTauriChildProcess = ({ launcherPid, appPath = '', table = rea
     appPath && appPath.toLowerCase().endsWith('/elephant') ? appPath.toLowerCase() : ''
   ].filter(Boolean)
   const candidates = table.filter((process) => {
-    if (!descendants.has(process.pid)) return false
+    if (!descendants.has(process.pid) && !(includeLauncher && process.pid === Number(launcherPid))) return false
     const haystack = `${process.comm} ${process.args}`.toLowerCase()
     const basename = process.comm.split('/').pop()?.toLowerCase()
     const executableArgument = process.args.trim().split(/\s+/)[0]?.split('/').pop()?.toLowerCase()
@@ -118,7 +118,8 @@ export const selectTauriChildProcess = ({ launcherPid, appPath = '', table = rea
   if (candidates.length !== 1) {
     throw new Error(`expected exactly one actual Tauri child of launcher ${launcherPid}, found ${candidates.map((candidate) => `${candidate.pid}:${candidate.comm}`).join(', ') || '<none>'}`)
   }
-  return { ...candidates[0], launcherPid, descendant: true, selection: 'process-tree+tauri-executable' }
+  const selected = candidates[0]
+  return { ...selected, launcherPid, descendant: descendants.has(selected.pid), selection: descendants.has(selected.pid) ? 'process-tree+tauri-executable' : 'launcher-process+tauri-executable' }
 }
 
 export const listNativeWindows = (pids = []) => {

@@ -1,6 +1,6 @@
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
-export const waitForAcceptanceEndpoint = async (child, { timeoutMs = 120000, onOutput = () => {} } = {}) => {
+export const waitForAcceptanceEndpoint = async (child, { timeoutMs = 120000, expectedPort = null, onOutput = () => {} } = {}) => {
   let output = ''
   const append = (stream, chunk) => {
     const text = chunk.toString()
@@ -11,6 +11,15 @@ export const waitForAcceptanceEndpoint = async (child, { timeoutMs = 120000, onO
   child.stderr?.on('data', (chunk) => append('stderr', chunk))
   const deadline = Date.now() + timeoutMs
   while (Date.now() <= deadline) {
+    if (expectedPort) {
+      const endpoint = `http://127.0.0.1:${expectedPort}`
+      try {
+        const response = await fetch(`${endpoint}/health`)
+        if (response.ok) return { endpoint, output, source: 'reserved-acceptance-port' }
+      } catch {
+        // The child may still be between setup and listener bind.
+      }
+    }
     const match = output.match(/ELEPHANT_ACCEPTANCE_TAURI_PORT=(\d+)/)
     if (match) return { endpoint: `http://127.0.0.1:${Number(match[1])}`, output }
     if (child.exitCode !== null) throw new Error(`Tauri exited before acceptance server started (${child.exitCode})`)

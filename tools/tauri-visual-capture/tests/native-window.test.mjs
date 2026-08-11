@@ -63,5 +63,17 @@ test('rejects a launcher-only match as insufficient Tauri identity proof', () =>
     launcherPid: 10,
     appPath: '/repo/build/scripts/build_dev.sh',
     table: [{ pid: 10, ppid: 1, comm: '/bin/bash', args: '/repo/build/scripts/build_dev.sh' }]
-  }), /actual Tauri child/i)
+}), /actual Tauri child/i)
+})
+
+test('proves a direct Tauri binary when it is explicitly the launched process', () => {
+  const result = selectTauriChildProcess({
+    launcherPid: 10,
+    appPath: '/tmp/Elephant',
+    includeLauncher: true,
+    table: [{ pid: 10, ppid: 1, comm: '/tmp/Elephant', args: '/tmp/Elephant' }]
+  })
+  assert.equal(result.pid, 10)
+  assert.equal(result.descendant, false)
+  assert.equal(result.selection, 'launcher-process+tauri-executable')
 })

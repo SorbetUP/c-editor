@@ -24,6 +24,7 @@ pub mod vault;
 pub mod vault_layout;
 
 mod android_vault_commands;
+mod acceptance_profile;
 mod debug_commands;
 mod acceptance_server;
 #[cfg(mobile)]

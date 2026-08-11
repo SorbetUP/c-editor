@@ -49,10 +49,10 @@ is Chromium-only. Official Tauri guidance for macOS now requires
 `tauri-plugin-wdio-webdriver`; neither is present in this repository, so this
 write set does not label the native CGEvent adapter as a WebDriver session.
 
-The current product source also does not consume the requested
-`ELEPHANTNOTE_CONFIG_DIR`, `ELEPHANTNOTE_USER_DATA_DIR`, or
-`ELEPHANTNOTE_PROFILE_DIR` overrides when resolving Tauri `app_config_dir` and
-`app_data_dir`. The adapter preserves the inherited `HOME`, materializes the
-shared fixture explicitly, records those app-specific variables, and marks the
-real run `NOT PROVEN`/blocked until the product exposes a supported profile
-override or the embedded WDIO route is installed.
+The acceptance contract enables the smallest product hook through
+`ELEPHANT_ACCEPTANCE_TAURI_PORT` plus the explicit absolute
+`ELEPHANT_ACCEPTANCE_PROFILE_DIR`. That hook redirects only Tauri config and
+user-data roots for the acceptance process; normal launches keep their normal
+directories. The adapter preserves the inherited `HOME`, materializes the
+shared fixture explicitly, and proves the active vault, config file, and
+user-data marker against that temporary root before allowing `launch` to pass.

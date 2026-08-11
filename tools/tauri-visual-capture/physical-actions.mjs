@@ -58,46 +58,51 @@ const dragPoints = (source, drop) => {
 
 const dispatch = (request, requestDir, events) => {
   const filename = path.join(requestDir, `${String(events.length).padStart(3, '0')}-${request.operation}.json`)
-  writeFileSync(filename, `${JSON.stringify(request, null, 2)}\n`, 'utf8')
+  const nativePoints = (request.points || []).map((point) => [Number(point.x), Number(point.y)])
+  const nativeRequest = request.points ? { ...request, points: nativePoints } : request
+  writeFileSync(filename, `${JSON.stringify(nativeRequest, null, 2)}\n`, 'utf8')
   const startedAt = Date.now()
   const result = dispatchNativeAction({ requestFile: filename })
   const endedAt = Date.now()
-  events.push({ operation: request.operation, request: { ...request, requestFile: filename }, startedAt, endedAt, result })
+  events.push({ operation: request.operation, request: { ...request, requestFile: filename, nativePoints }, startedAt, endedAt, result })
 }
 
 export const observeAccessibility = (pid) => inspectAccessibility({ pid })
+
+export const resolvePhysicalEvent = (action) => action.event || (action.target ? 'move-pointer' : null)
 
 export const executePhysicalAction = ({ action, pid, requestDir }) => {
   const report = inspectAccessibility({ pid })
   if (!report.accessibilityTrusted) throw new MissingPhysicalTargetError(action.id, 'macOS Accessibility trust is unavailable; bridge control is forbidden')
   const events = []
-  const target = action.target?.tauri
-  if (action.event === 'press-key') {
+  const target = action.target
+  const event = resolvePhysicalEvent(action)
+  if (event === 'press-key') {
     dispatch({ operation: 'press-key', key: action.key, repeatCount: action.repeat || 1 }, requestDir, events)
-  } else if (action.event === 'write-text') {
+  } else if (event === 'write-text' || event === 'focus-write-text') {
     const element = elementsFor(report, target, action.id)
     dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
     for (const key of action.keysBeforeText || []) {
       dispatch({ operation: 'press-key', key, control: key.startsWith('Control+') }, requestDir, events)
     }
     dispatch({ operation: 'write-text', text: action.input || action.text || '' }, requestDir, events)
-  } else if (action.event === 'drag') {
+  } else if (event === 'drag') {
     const source = elementsFor(report, target?.source, action.id)
     const dropTarget = elementsFor(report, target?.dropTarget, action.id)
     dispatch({ operation: 'drag', points: dragPoints(source.rect, dropTarget.rect) }, requestDir, events)
-  } else if (action.event === 'scroll') {
+  } else if (event === 'scroll') {
     const element = elementsFor(report, target, action.id)
     const points = pointPath(element.rect, action.pointerPath || ['center'])
     dispatch({ operation: 'move-pointer', points }, requestDir, events)
     dispatch({ operation: 'scroll', points: [points.at(-1)], deltaY: action.delta?.y || 0 }, requestDir, events)
-  } else if (action.event === 'move-pointer') {
+  } else if (event === 'move-pointer') {
     const element = elementsFor(report, target, action.id)
     dispatch({ operation: 'move-pointer', points: pointPath(element.rect, action.pointerPath || ['center']) }, requestDir, events)
-  } else if (action.event === 'click') {
+  } else if (event === 'click') {
     const element = elementsFor(report, target, action.id)
     dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
-  } else if (action.event) {
-    throw new MissingPhysicalTargetError(action.id, `unsupported shared physical event ${action.event}`)
+  } else if (event) {
+    throw new MissingPhysicalTargetError(action.id, `unsupported shared physical event ${event}`)
   }
   return {
     accessibilityTrusted: report.accessibilityTrusted,

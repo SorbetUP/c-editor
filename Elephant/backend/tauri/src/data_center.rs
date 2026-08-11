@@ -15,7 +15,7 @@ pub struct DataCenter {
 
 impl DataCenter {
   fn path_of(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_data_dir().ok().map(|dir| dir.join("userData.json"))
+    crate::acceptance_profile::app_data_dir(app).ok().map(|dir| dir.join("userData.json"))
   }
 
   pub fn load(app: &AppHandle) -> Option<Self> {
@@ -71,7 +71,7 @@ impl DataCenter {
 }
 
 fn ensure_defaults(data: &mut Map<String, Value>, app: &AppHandle) {
-  let user_data = app.path().app_data_dir().ok();
+  let user_data = crate::acceptance_profile::app_data_dir(app).ok();
   if let Some(dir) = user_data {
     let images = dir.join("images").to_string_lossy().to_string();
     let screenshot = dir.join("screenshot").to_string_lossy().to_string();

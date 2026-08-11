@@ -32,7 +32,7 @@ pub fn normalize_absolute_path(path: impl AsRef<str>) -> String {
 }
 
 pub fn config_path(app: &AppHandle) -> R<PathBuf> {
-  let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+  let dir = crate::acceptance_profile::app_config_dir(app).map_err(|e| e.to_string())?;
   fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
   Ok(dir.join(CONFIG_FILE))
 }
