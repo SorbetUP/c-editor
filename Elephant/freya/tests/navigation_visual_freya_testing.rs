@@ -19,15 +19,23 @@ const VIEWPORT: (f32, f32) = (1280., 840.);
 const TOPBAR_HEIGHT: f32 = 32.;
 const NAV_BUTTON_SIZE: f32 = 24.;
 const NAV_BUTTON_TOP: f32 = 4.;
-const NAV_LEFT_MACOS: f32 = 84.;
 const NAV_GAP: f32 = 2.;
 const RAIL_WIDTH: f32 = 48.;
 const RAIL_ACTION_SIZE: f32 = 34.;
-const RAIL_PADDING_TOP_MACOS: f32 = 36.;
 const RAIL_GAP: f32 = 2.;
 const SIDEBAR_WIDTH: f32 = 232.;
 const SIDEBAR_RESIZER_HIT_WIDTH: f32 = 12.;
 const SIDEBAR_ALL_NOTES_HEIGHT: f32 = 38.;
+
+#[cfg(target_os = "macos")]
+const NAV_LEFT: f32 = 84.;
+#[cfg(not(target_os = "macos"))]
+const NAV_LEFT: f32 = 56.;
+
+#[cfg(target_os = "macos")]
+const RAIL_PADDING_TOP: f32 = 36.;
+#[cfg(not(target_os = "macos"))]
+const RAIL_PADDING_TOP: f32 = 8.;
 
 struct FixtureVault {
     root: PathBuf,
@@ -157,10 +165,10 @@ fn source_navigation_geometry_labels_and_order_are_exact_at_shared_viewport() {
         area(&forward),
         Size2D::new(NAV_BUTTON_SIZE, NAV_BUTTON_SIZE)
     );
-    assert_eq!(origin(&back), (NAV_LEFT_MACOS, NAV_BUTTON_TOP));
+    assert_eq!(origin(&back), (NAV_LEFT, NAV_BUTTON_TOP));
     assert_eq!(
         origin(&forward),
-        (NAV_LEFT_MACOS + NAV_BUTTON_SIZE + NAV_GAP, NAV_BUTTON_TOP)
+        (NAV_LEFT + NAV_BUTTON_SIZE + NAV_GAP, NAV_BUTTON_TOP)
     );
     assert!(origin(&back).0 < origin(&forward).0);
 
@@ -179,10 +187,7 @@ fn source_navigation_geometry_labels_and_order_are_exact_at_shared_viewport() {
         assert_eq!(area(node), Size2D::new(RAIL_ACTION_SIZE, RAIL_ACTION_SIZE));
         assert_eq!(origin(node).0, (RAIL_WIDTH - RAIL_ACTION_SIZE) / 2.);
     }
-    assert_eq!(
-        origin(&hide_sidebar).1,
-        TOPBAR_HEIGHT + RAIL_PADDING_TOP_MACOS
-    );
+    assert_eq!(origin(&hide_sidebar).1, TOPBAR_HEIGHT + RAIL_PADDING_TOP);
     assert_eq!(
         origin(&search).1,
         origin(&hide_sidebar).1 + RAIL_ACTION_SIZE + RAIL_GAP
