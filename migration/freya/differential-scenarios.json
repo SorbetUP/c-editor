@@ -350,9 +350,11 @@
           "value": "muya-runtime-editor"
         },
         "freya": {
-          "status": "not-exposed",
-          "selector": null,
-          "reason": "editor_view.rs renders the Muya document and exposes Undo/Save, but no editable input or existing accessibility target was found"
+          "strategy": "accessibility-label",
+          "label": "Paragraph",
+          "sourceLabel": "Paragraph",
+          "source": "Elephant/freya/src/app/editor_view.rs#EditableInlineBlock",
+          "test": "Elephant/freya/tests/shell_freya_testing.rs#editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault"
         }
       },
       "event": "focus-write-text",
@@ -399,8 +401,10 @@
         },
         "freya": {
           "strategy": "accessibility-label",
-          "label": "Save",
-          "note": "No existing Close note label was found in the inspected Freya editor surface; do not substitute a coordinate or invent one."
+          "label": "Close note",
+          "sourceLabel": "Close note",
+          "source": "Elephant/freya/src/app/editor_view.rs#note_editor_host",
+          "test": "Elephant/freya/tests/shell_freya_testing.rs#editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault"
         }
       },
       "event": "click",
