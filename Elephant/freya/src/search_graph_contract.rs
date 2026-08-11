@@ -544,6 +544,9 @@ pub struct GraphStats {
 pub enum GraphDataSource {
     SearchInspection,
     AtomicGraphService,
+    /// Native graph projection produced by the transplanted Rust knowledge
+    /// core (`rebuild_vault` + `KnowledgeStore::graph_projection`).
+    KnowledgeCore,
     VaultEntriesFallback,
 }
 

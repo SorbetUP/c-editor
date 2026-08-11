@@ -21,9 +21,14 @@ impl FixtureVault {
         fs::create_dir_all(&root).expect("create fixture vault");
         fs::write(
             root.join("Alpha.md"),
-            "# Alpha\n\nA searchable fixture note.\n",
+            "# Alpha\n\nA searchable fixture note linking [[Beta]].\n",
         )
         .expect("write fixture note");
+        fs::write(
+            root.join("Beta.md"),
+            "# Beta\n\nThe linked destination fixture note.\n",
+        )
+        .expect("write linked fixture note");
         Self { root }
     }
 
@@ -44,6 +49,17 @@ fn labeled_nodes(runner: &TestingRunner, label: &str) -> Vec<TestingNode> {
     })
 }
 
+fn labeled_nodes_containing(runner: &TestingRunner, fragment: &str) -> Vec<TestingNode> {
+    runner.find_many(|node, element| {
+        element
+            .accessibility()
+            .builder
+            .label()
+            .filter(|label| label.contains(fragment))
+            .map(|_| node)
+    })
+}
+
 fn click_label(runner: &mut TestingRunner, label: &str) {
     let node = labeled_nodes(runner, label)
         .into_iter()
@@ -60,8 +76,9 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
 fn search_input_escape_and_graph_refresh_expose_real_graph_boundary() {
     let fixture = FixtureVault::new();
     let root = fixture.path().to_path_buf();
+    let app_root = root.clone();
     let (mut runner, ()) = TestingRunner::new(
-        move || app_with_vault(root.clone()),
+        move || app_with_vault(app_root.clone()),
         (1280., 840.).into(),
         |_| (),
         1.,
@@ -98,26 +115,57 @@ fn search_input_escape_and_graph_refresh_expose_real_graph_boundary() {
 
     click_label(&mut runner, "Refresh graph");
     runner.sync_and_update();
-    assert!(
-        !labeled_nodes(&runner, "Graph service unavailable.").is_empty(),
-        "refresh must expose the production Graph service error when no native adapter exists"
+    assert_eq!(labeled_nodes(&runner, "Nodes").len(), 1);
+    assert_eq!(labeled_nodes(&runner, "Edges").len(), 1);
+    assert_eq!(labeled_nodes(&runner, "Select graph node Alpha").len(), 1);
+    assert_eq!(labeled_nodes(&runner, "Select graph node Beta").len(), 1);
+    assert_eq!(
+        labeled_nodes(&runner, "Graph edge Alpha.md to Beta.md").len(),
+        1,
+        "the native projection must expose the real wikilink edge"
+    );
+    assert_eq!(
+        labeled_nodes(&runner, "2 nœuds · 1 liens visibles").len(),
+        1
     );
 
-    // The source Graph view never treats an unavailable service as an empty
-    // successful graph.  Keep this assertion strict so a future adapter must
-    // provide real nodes/edges before this scenario can become a data proof.
-    assert!(labeled_nodes(&runner, "Nodes").is_empty());
-    assert!(labeled_nodes(&runner, "Edges").is_empty());
-
-    // These are still real Freya input/button actions. They must not turn the
-    // explicit service error into fabricated filtered or recentered data.
+    // Filtering is the same title/tag predicate as AtomicGraphView, exercised
+    // through the actual Freya input and submit action.
     click_label(&mut runner, "Graph filter input");
-    runner.write_text("alpha");
+    runner.write_text("beta");
     runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
-    assert!(!labeled_nodes(&runner, "Graph service unavailable.").is_empty());
+    assert!(labeled_nodes(&runner, "Select graph node Alpha").is_empty());
+    assert_eq!(labeled_nodes(&runner, "Select graph node Beta").len(), 1);
+    assert_eq!(
+        labeled_nodes(&runner, "1 nœuds · 0 liens visibles").len(),
+        1
+    );
 
     click_label(&mut runner, "Reset graph filter");
     runner.sync_and_update();
-    assert!(!labeled_nodes(&runner, "Graph service unavailable.").is_empty());
+    assert_eq!(labeled_nodes(&runner, "Select graph node Alpha").len(), 1);
+    assert_eq!(labeled_nodes(&runner, "Select graph node Beta").len(), 1);
+
+    click_label(&mut runner, "Select graph node Alpha");
+    runner.sync_and_update();
+    assert_eq!(labeled_nodes(&runner, "Graph node selected Alpha").len(), 1);
+
+    click_label(&mut runner, "Recenter graph");
+    runner.sync_and_update();
+    assert_eq!(
+        labeled_nodes(&runner, "Graph viewport centered on Alpha").len(),
+        1,
+        "recenter must produce an observable completed graph-view effect"
+    );
+
+    // Exercise the production failure path after real data was shown. The
+    // adapter must surface the actual rebuild failure, never retain a stale
+    // successful graph as if refresh had succeeded.
+    fs::remove_dir_all(&root).expect("remove fixture vault for error path");
+    click_label(&mut runner, "Refresh graph");
+    runner.sync_and_update();
+    assert_eq!(labeled_nodes_containing(&runner, "Graph failed:").len(), 1);
+    assert!(labeled_nodes(&runner, "Nodes").is_empty());
+    assert!(labeled_nodes(&runner, "Edges").is_empty());
 }

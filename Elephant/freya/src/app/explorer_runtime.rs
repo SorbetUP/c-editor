@@ -15,6 +15,9 @@ use crate::{
 use super::{explorer, ShellState};
 use freya::prelude::State;
 
+#[path = "graph_runtime.rs"]
+mod graph_runtime;
+
 pub(super) fn drain_explorer_actions(
     shell: State<ShellState>,
     mut explorer: State<explorer::ExplorerState>,
@@ -178,22 +181,76 @@ fn open_search_note(
 }
 
 fn dispatch_graph_command(
-    _shell: State<ShellState>,
+    shell: State<ShellState>,
     mut explorer: State<explorer::ExplorerState>,
     command: crate::search_graph_contract::GraphCommand,
 ) {
     use crate::search_graph_contract::{GraphCommand, SurfaceError};
 
     match command {
-        GraphCommand::SetFilterQuery(_) => {}
-        GraphCommand::SelectNode(_) => {}
-        GraphCommand::Refresh | GraphCommand::RebuildIndex | GraphCommand::OpenSelectedNode => {
-            eprintln!("[freya][graph] action=failure error=Atomic graph host path unavailable");
-            explorer
-                .write()
-                .apply_graph_error(SurfaceError::GraphUnavailable);
+        GraphCommand::Refresh | GraphCommand::RebuildIndex => {
+            let action = match command {
+                GraphCommand::Refresh => "refresh",
+                GraphCommand::RebuildIndex => "rebuild",
+                _ => unreachable!("graph action already matched"),
+            };
+            let vault = shell.read().vault.clone();
+            match graph_runtime::refresh(vault.as_ref(), false) {
+                Ok(execution) => {
+                    let nodes = execution.snapshot.nodes.len();
+                    let edges = execution.snapshot.edges.len();
+                    eprintln!(
+                        "[freya][graph] action={action}:complete nodes={nodes} edges={edges}"
+                    );
+                    explorer.write().apply_graph_snapshot(execution.snapshot);
+                }
+                Err(error) => {
+                    let message = format!("Graph failed: {}", error.message());
+                    eprintln!("[freya][graph] action={action}:failure error={message}");
+                    explorer
+                        .write()
+                        .apply_graph_error(SurfaceError::Unknown(message));
+                }
+            }
         }
-        _ => eprintln!("[freya][graph] action=unsupported error=Graph host path unavailable"),
+        GraphCommand::SetFilterQuery(query) => eprintln!(
+            "[freya][graph] action=filter:complete query_len={}",
+            query.chars().count()
+        ),
+        GraphCommand::SelectNode(id) => {
+            eprintln!("[freya][graph] action=select:complete id={id}");
+        }
+        GraphCommand::ResetView => {
+            eprintln!("[freya][graph] action=reset-view:complete");
+        }
+        GraphCommand::OpenSelectedNode => {
+            let selection = {
+                let state = explorer.read();
+                state
+                    .graph
+                    .selected_node_id
+                    .as_ref()
+                    .and_then(|selected_id| {
+                        state
+                            .graph
+                            .snapshot
+                            .as_ref()?
+                            .nodes
+                            .iter()
+                            .find(|node| &node.id == selected_id)
+                            .map(|node| (node.relative_path.clone(), node.title.clone()))
+                    })
+            };
+            if let Some((relative_path, title)) = selection {
+                open_search_note(shell, explorer, relative_path, title);
+            } else {
+                eprintln!("[freya][graph] action=open-selected:failure reason=no_selection");
+                explorer.write().apply_graph_error(SurfaceError::Unknown(
+                    "Graph failed: no selected node.".to_string(),
+                ));
+            }
+        }
+        _ => eprintln!("[freya][graph] action=unsupported error=graph command not converted"),
     }
 }
 

@@ -1007,6 +1007,17 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 [[package]]
 name = "elephantnote-knowledge-core"
 version = "0.1.0"
+dependencies = [
+ "blake3",
+ "pulldown-cmark",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "elephantnote-knowledge-core"
+version = "0.1.0"
 source = "git+https://github.com/SorbetUP/Elephant-Addons?rev=8458c1cc9ed074148697e6edc5ffc0f05bbf05ab#8458c1cc9ed074148697e6edc5ffc0f05bbf05ab"
 dependencies = [
  "blake3",
@@ -1024,7 +1035,8 @@ dependencies = [
  "blake3",
  "chardetng",
  "chrono",
- "elephantnote-knowledge-core",
+ "elephantnote-knowledge-core 0.1.0",
+ "elephantnote-knowledge-core 0.1.0 (git+https://github.com/SorbetUP/Elephant-Addons?rev=8458c1cc9ed074148697e6edc5ffc0f05bbf05ab)",
  "encoding_rs",
  "futures-util",
  "fuzzy-matcher",

@@ -40,6 +40,7 @@ pub mod filesystem;
 pub mod fts;
 pub mod infra;
 pub mod keybindings;
+pub mod knowledge_relations;
 pub mod preferences;
 pub mod recents;
 pub mod state;
@@ -177,6 +178,12 @@ pub fn run() {
             state::tauri_atomic_features_get,
             state::tauri_atomic_features_toggle,
             state::tauri_atomic_features_set,
+            knowledge_relations::tauri_knowledge_graph,
+            knowledge_relations::tauri_knowledge_relation_save,
+            knowledge_relations::tauri_knowledge_relation_status_set,
+            knowledge_relations::tauri_knowledge_relation_get,
+            knowledge_relations::tauri_knowledge_relations_for_node,
+            knowledge_relations::tauri_knowledge_relations_list,
             vault::commands::tauri_vaults_get,
             vault::commands::tauri_vaults_select_path,
             vault::commands::tauri_vaults_set_active,

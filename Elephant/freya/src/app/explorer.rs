@@ -94,6 +94,10 @@ pub struct ExplorerGraphState {
     pub snapshot: Option<GraphSnapshot>,
     pub filters: GraphFilterState,
     pub selected_node_id: Option<String>,
+    /// Monotonic observable for the source graph's camera reset action. The
+    /// native renderer keeps the action in the typed command queue instead of
+    /// fabricating coordinates for nodes that the service did not provide.
+    pub view_generation: u64,
     pub error: Option<SurfaceError>,
 }
 
@@ -105,6 +109,7 @@ impl ExplorerGraphState {
             snapshot: None,
             filters: GraphFilterState::default(),
             selected_node_id: None,
+            view_generation: 0,
             error: None,
         }
     }
@@ -364,6 +369,7 @@ impl ExplorerState {
         };
         self.graph.error = None;
         self.graph.selected_node_id = None;
+        self.graph.view_generation = 0;
         self.graph.refresh_phase();
     }
 
@@ -447,6 +453,18 @@ impl ExplorerState {
             self.pending
                 .push(ExplorerAction::Graph(GraphCommand::OpenSelectedNode));
         }
+    }
+
+    /// Reproduces the source `resetView` action without inventing a layout.
+    /// The runtime consumes the typed command; the generation makes the
+    /// completed camera action observable to Freya Testing.
+    pub fn reset_graph_view(&mut self) {
+        if self.graph.selected_node_id.is_none() {
+            return;
+        }
+        self.graph.view_generation = self.graph.view_generation.saturating_add(1);
+        self.pending
+            .push(ExplorerAction::Graph(GraphCommand::ResetView));
     }
 
     pub fn take_pending(&mut self) -> Vec<ExplorerAction> {
@@ -785,13 +803,23 @@ fn graph_surface(
         .on_mouse_up(move |_| state.write().reset_graph_filter())
         .a11y_alt("Reset graph filter")
         .child(label().text("Reset"));
+    let recenter = rect()
+        .height(Size::px(30.))
+        .padding(Gaps::new(0., 10., 0., 10.))
+        .center()
+        .background(theme::color(theme::SURFACE))
+        .with_corner_radius(7.)
+        .on_mouse_up(move |_| state.write().reset_graph_view())
+        .a11y_alt("Recenter graph")
+        .child(label().text("Recenter"));
     let toolbar = rect()
         .width(Size::fill())
         .horizontal()
         .spacing(8.)
         .child(rect().a11y_alt("Graph filter input").child(input))
         .child(refresh)
-        .child(reset);
+        .child(reset)
+        .child(recenter);
     rect()
         .width(Size::fill())
         .height(Size::fill())
@@ -832,11 +860,11 @@ fn graph_results(mut state: State<ExplorerState>, snapshot: &ExplorerState) -> E
     let nodes = snapshot.visible_graph_nodes();
     let edges = snapshot.visible_graph_edges();
     let stats = snapshot.graph.snapshot.as_ref().map(|_| {
-        label().color(theme::color(theme::MUTED)).text(format!(
-            "{} nœuds · {} liens visibles",
-            nodes.len(),
-            edges.len()
-        ))
+        let text = format!("{} nœuds · {} liens visibles", nodes.len(), edges.len());
+        label()
+            .a11y_alt(text.clone())
+            .color(theme::color(theme::MUTED))
+            .text(text)
     });
     let node_list = rect()
         .width(Size::fill())
@@ -857,11 +885,17 @@ fn graph_results(mut state: State<ExplorerState>, snapshot: &ExplorerState) -> E
         .as_deref()
         .and_then(|id| nodes.iter().find(|node| node.id == id));
     let selected_card = selected.map(|node| {
+        let centered_label = if snapshot.graph.view_generation > 0 {
+            format!("Graph viewport centered on {}", node.title)
+        } else {
+            format!("Graph node selected {}", node.title)
+        };
         rect()
             .width(Size::fill())
             .padding(Gaps::new_all(10.))
             .background(theme::color(theme::SOFT))
             .with_corner_radius(10.)
+            .a11y_alt(centered_label)
             .child(
                 label()
                     .font_weight(FontWeight::BOLD)
@@ -934,6 +968,7 @@ fn graph_edge_row(edge: &GraphEdge) -> Element {
         .padding(Gaps::new(6., 9., 6., 9.))
         .background(theme::color(theme::BG))
         .with_corner_radius(7.)
+        .a11y_alt(format!("Graph edge {} to {}", edge.source, edge.target))
         .child(
             label()
                 .font_size(12.)
@@ -971,6 +1006,7 @@ fn state_message(message: &str, loading: bool) -> Element {
 
 fn section_title(title: &'static str) -> Element {
     label()
+        .a11y_alt(title)
         .font_size(11.)
         .font_weight(FontWeight::BOLD)
         .color(theme::color(theme::MUTED))
