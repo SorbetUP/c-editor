@@ -9,8 +9,14 @@ use super::ShellState;
 pub(super) fn top_vault_bar(state: State<ShellState>) -> Element {
     let can_go_back = state.read().can_go_back();
     let can_go_forward = state.read().can_go_forward();
+    let back_hovered = state.read().hovered_target.as_deref() == Some("topnav:Retour");
+    let forward_hovered = state.read().hovered_target.as_deref() == Some("topnav:Avancer");
     let mut back_state = state;
     let mut forward_state = state;
+    let mut back_enter_state = state;
+    let mut back_leave_state = state;
+    let mut forward_enter_state = state;
+    let mut forward_leave_state = state;
     rect()
         .height(Size::px(theme::TOPBAR_HEIGHT))
         .width(Size::fill())
@@ -20,31 +26,79 @@ pub(super) fn top_vault_bar(state: State<ShellState>) -> Element {
                 .position(
                     Position::new_absolute()
                         .left(if cfg!(target_os = "macos") { 84. } else { 56. })
-                        .top(4.),
+                        .top(theme::TOPBAR_NAV_TOP),
                 )
                 .width(Size::px(76.))
-                .height(Size::px(24.))
+                .height(Size::px(theme::TOPBAR_NAV_BUTTON_SIZE))
                 .horizontal()
-                .spacing(2.)
+                .spacing(theme::RAIL_GAP)
                 .child(
                     rect()
-                        .width(Size::px(24.))
-                        .height(Size::px(24.))
+                        .width(Size::px(theme::TOPBAR_NAV_BUTTON_SIZE))
+                        .height(Size::px(theme::TOPBAR_NAV_BUTTON_SIZE))
                         .center()
+                        .background(theme::color(if can_go_back && back_hovered {
+                            theme::SOFT
+                        } else {
+                            theme::BG
+                        }))
+                        .with_corner_radius(5.)
                         .opacity(if can_go_back { 1. } else { 0.3 })
                         .on_mouse_up(move |_| back_state.write().navigate_back())
+                        .on_pointer_enter(move |_| {
+                            back_enter_state.write().set_hovered_target("topnav:Retour")
+                        })
+                        .on_pointer_leave(move |_| {
+                            back_leave_state
+                                .write()
+                                .clear_hovered_target("topnav:Retour")
+                        })
                         .a11y_alt("Retour")
-                        .child(label().font_size(18.).text("‹")),
+                        .child(
+                            label()
+                                .font_size(18.)
+                                .color(theme::color(if can_go_back && back_hovered {
+                                    theme::TEXT
+                                } else {
+                                    theme::MUTED
+                                }))
+                                .text("‹"),
+                        ),
                 )
                 .child(
                     rect()
-                        .width(Size::px(24.))
-                        .height(Size::px(24.))
+                        .width(Size::px(theme::TOPBAR_NAV_BUTTON_SIZE))
+                        .height(Size::px(theme::TOPBAR_NAV_BUTTON_SIZE))
                         .center()
+                        .background(theme::color(if can_go_forward && forward_hovered {
+                            theme::SOFT
+                        } else {
+                            theme::BG
+                        }))
+                        .with_corner_radius(5.)
                         .opacity(if can_go_forward { 1. } else { 0.3 })
                         .on_mouse_up(move |_| forward_state.write().navigate_forward())
+                        .on_pointer_enter(move |_| {
+                            forward_enter_state
+                                .write()
+                                .set_hovered_target("topnav:Avancer")
+                        })
+                        .on_pointer_leave(move |_| {
+                            forward_leave_state
+                                .write()
+                                .clear_hovered_target("topnav:Avancer")
+                        })
                         .a11y_alt("Avancer")
-                        .child(label().font_size(18.).text("›")),
+                        .child(
+                            label()
+                                .font_size(18.)
+                                .color(theme::color(if can_go_forward && forward_hovered {
+                                    theme::TEXT
+                                } else {
+                                    theme::MUTED
+                                }))
+                                .text("›"),
+                        ),
                 ),
         )
         .child(
@@ -59,37 +113,59 @@ pub(super) fn top_vault_bar(state: State<ShellState>) -> Element {
 
 pub(super) fn icon_rail(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
-    let mut rail = rect()
+    let rail_padding_top = if cfg!(target_os = "macos") {
+        theme::RAIL_PADDING_TOP_MACOS
+    } else {
+        theme::RAIL_PADDING_TOP_DESKTOP
+    };
+    let nav = rect()
+        .width(Size::fill())
+        .expanded()
+        .cross_align(Alignment::Center)
+        .spacing(theme::RAIL_GAP)
+        .children(
+            snapshot
+                .rail_order
+                .iter()
+                .filter_map(|item| match item.as_str() {
+                    "sidebar-toggle" => Some((
+                        "sidebar-toggle",
+                        if snapshot.sidebar_visible {
+                            "Hide sidebar"
+                        } else {
+                            "Show sidebar"
+                        },
+                        "◧",
+                    )),
+                    "search" => Some(("search", "Search", "⌕")),
+                    _ => None,
+                })
+                .map(|(item_id, label_text, icon)| rail_action(item_id, label_text, icon, state))
+                .collect::<Vec<_>>(),
+        )
+        .child(rect().expanded());
+    let bottom = rect()
+        .width(Size::fill())
+        .cross_align(Alignment::Center)
+        .spacing(theme::RAIL_GAP)
+        .padding(Gaps::new(
+            theme::RAIL_BOTTOM_PADDING_TOP,
+            0.,
+            theme::RAIL_BOTTOM_PADDING_BOTTOM,
+            0.,
+        ))
+        .child(vault_action(state))
+        .child(rail_action("settings", "Settings", "⚙", state));
+    rect()
         .width(Size::px(theme::RAIL_WIDTH))
         .height(Size::fill())
-        .background(theme::color(theme::SURFACE))
-        .padding(Gaps::new_all(7.))
-        .spacing(6.);
-    let actions = snapshot
-        .rail_order
-        .iter()
-        .filter_map(|item| match item.as_str() {
-            "sidebar-toggle" => Some((
-                "sidebar-toggle",
-                if snapshot.sidebar_visible {
-                    "Hide sidebar"
-                } else {
-                    "Show sidebar"
-                },
-                "◧",
-            )),
-            "search" => Some(("search", "Search", "⌕")),
-            _ => None,
-        })
-        .map(|(item_id, label_text, icon)| rail_action(item_id, label_text, icon, state))
-        .collect::<Vec<_>>();
-    rail = rail
-        .children(actions)
-        .child(rect().expanded())
-        .child(vault_action(state))
-        .child(rail_action("settings", "Settings", "⚙", state))
-        .maybe_child(state.read().vault_menu_open.then(|| vault_switcher(state)));
-    rail.into_element()
+        .background(theme::color(theme::BG))
+        .padding(Gaps::new(rail_padding_top, 0., 0., 0.))
+        .a11y_alt("Workspace navigation")
+        .child(nav)
+        .child(bottom)
+        .maybe_child(state.read().vault_menu_open.then(|| vault_switcher(state)))
+        .into_element()
 }
 
 fn vault_action(mut state: State<ShellState>) -> Element {
@@ -103,14 +179,11 @@ fn vault_action(mut state: State<ShellState>) -> Element {
     let mut enter_state = state;
     let mut leave_state = state;
     rect()
-        .width(Size::fill())
-        .height(Size::px(34.))
+        .width(Size::px(theme::RAIL_ACTION_SIZE))
+        .height(Size::px(theme::RAIL_ACTION_SIZE))
         .center()
-        .background(theme::color(if hovered {
-            theme::BORDER_STRONG
-        } else {
-            theme::SOFT
-        }))
+        .background(theme::color(theme::SOFT))
+        .opacity(if hovered { 0.85 } else { 1. })
         .with_corner_radius(7.)
         .on_mouse_up(move |_| state.write().vault_menu_open = true)
         .on_pointer_enter(move |_| enter_state.write().set_hovered_target("rail:vault"))
@@ -143,15 +216,15 @@ fn rail_action(
     let mut release_state = state;
     let mut focus_state = state;
     rect()
-        .width(Size::fill())
-        .height(Size::px(34.))
+        .width(Size::px(theme::RAIL_ACTION_SIZE))
+        .height(Size::px(theme::RAIL_ACTION_SIZE))
         .center()
         .background(theme::color(if drop_target {
             theme::BORDER_STRONG
         } else if hovered {
             theme::SOFT
         } else {
-            theme::SURFACE
+            theme::BG
         }))
         .with_corner_radius(7.)
         .opacity(if dragging { 0.55 } else { 1. })
@@ -277,12 +350,12 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
             .into_element();
     }
     let all_notes_hovered = snapshot.hovered_target.as_deref() == Some("sidebar:all");
+    let sidebar_width = f32::from(snapshot.sidebar_width.get());
     let mut all_notes_enter = state;
     let mut all_notes_leave = state;
     let all_notes = rect()
-        .width(Size::fill())
-        .height(Size::px(38.))
-        .margin(Gaps::new_all(8.))
+        .width(Size::px(sidebar_width - 16.))
+        .height(Size::px(theme::SIDEBAR_ALL_NOTES_HEIGHT))
         .padding(Gaps::new(0., 12., 0., 12.))
         .horizontal()
         .cross_align(Alignment::Center)
@@ -321,7 +394,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
     let mut resize_enter_state = state;
     let mut resize_leave_state = state;
     let resizer = rect()
-        .width(Size::px(12.))
+        .width(Size::px(theme::SIDEBAR_RESIZER_WIDTH))
         .height(Size::fill())
         .center()
         .background(theme::color(theme::BG))
@@ -377,14 +450,22 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
             Key::Named(NamedKey::ArrowRight) => resize_key_state.write().resize_sidebar_by(16.),
             _ => {}
         });
-    let sidebar = rect()
-        .width(Size::px(f32::from(snapshot.sidebar_width.get())))
+    let entries = rect()
+        .width(Size::fill())
         .height(Size::fill())
-        .background(theme::color(theme::BG))
-        .a11y_alt("Sidebar")
+        .padding(Gaps::new(0., 6., 0., 6.))
+        .spacing(theme::RAIL_GAP)
+        .children(entries);
+    let sidebar_scroll = rect()
+        .width(Size::fill())
+        .height(Size::fill())
+        .cross_align(Alignment::Center)
+        .padding(Gaps::new(theme::SIDEBAR_SCROLL_PADDING_TOP, 0., 0., 0.))
         .child(all_notes)
+        .child(rect().height(Size::px(8.)))
         .child(
             rect()
+                .width(Size::fill())
                 .height(Size::px(28.))
                 .padding(Gaps::new(4., 14., 8., 14.))
                 .horizontal()
@@ -394,7 +475,8 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
                         .font_size(11.)
                         .font_weight(FontWeight::BOLD)
                         .color(theme::color(theme::MUTED))
-                        .text("NOTES"),
+                        .a11y_alt("Notes")
+                        .text("Notes"),
                 )
                 .child(
                     label()
@@ -404,14 +486,17 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
                         .text("⌕"),
                 ),
         )
-        .child(
-            rect()
-                .width(Size::fill())
-                .height(Size::fill())
-                .children(entries),
-        );
+        .child(entries);
+    let sidebar = rect()
+        .width(Size::px(sidebar_width))
+        .height(Size::fill())
+        .background(theme::color(theme::BG))
+        .a11y_alt("Sidebar")
+        .child(sidebar_scroll);
     rect()
-        .width(Size::px(f32::from(snapshot.sidebar_width.get()) + 12.))
+        .width(Size::px(
+            f32::from(snapshot.sidebar_width.get()) + theme::SIDEBAR_RESIZER_WIDTH,
+        ))
         .height(Size::fill())
         .horizontal()
         .child(sidebar)
