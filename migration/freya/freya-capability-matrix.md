@@ -10,7 +10,8 @@ This matrix records what has been exercised locally, not what merely exists in a
 | Pointer event dispatch | `TestingRunner.click_cursor` on semantic node | PROVEN |
 | Keyboard/text editing primitives | not wired into converted editor surface | NOT PROVEN |
 | Virtual scrolling | typed 120/72/720 contract only | NOT PROVEN |
-| Rich text/Markdown editing | muya-core adapter only; no Freya input surface | NOT PROVEN |
+| Rich text/Markdown editing | real muya-core adapter plus structured Freya block/inline renderer; no editing input/selection bridge | PARTIALLY_PROVEN |
+| Settings/Search/Graph native surfaces | Freya views integrated with source-derived typed contracts; no production host bridge/persistence proof | PARTIALLY_PROVEN |
 | Images/SVG | no native card image renderer yet | NOT PROVEN |
 | Isolated WebView/Excalidraw | no Freya island target | NOT PROVEN |
 | Desktop packaged Freya app | no package target | NOT PROVEN |

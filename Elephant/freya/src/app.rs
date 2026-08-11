@@ -4,8 +4,10 @@
 //! component ownership they convert: navigation, library, and editor view.
 
 mod editor_view;
+mod explorer;
 mod library;
 mod navigation;
+mod settings;
 
 use freya::prelude::*;
 use std::{env, path::PathBuf};
@@ -200,12 +202,23 @@ pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
 }
 
 fn app_shell(state: State<ShellState>) -> Element {
+    let settings_state = use_state(settings::SettingsViewState::default);
+    let explorer_state = use_state(explorer::ExplorerState::new);
+    let explorer_query = use_state(String::new);
+    let explorer_graph_query = use_state(String::new);
     let snapshot = state.read().clone();
     if snapshot.vault.is_none() {
         return empty_vault_picker(snapshot.error.as_deref());
     }
     let contract = source_contracts::contract(ComponentId::AppShell)
         .expect("AppShell source contract must remain registered");
+    let content = if snapshot.settings_open {
+        settings::settings_panel(settings_state)
+    } else if snapshot.search_open || snapshot.view == WorkspaceView::Graph {
+        explorer::explorer_view(explorer_state, explorer_query, explorer_graph_query)
+    } else {
+        library::main_content(state)
+    };
     let shell = rect()
         .width(Size::fill())
         .height(Size::fill())
@@ -219,7 +232,7 @@ fn app_shell(state: State<ShellState>) -> Element {
                 .horizontal()
                 .child(navigation::icon_rail(state))
                 .child(navigation::sidebar_nav(state))
-                .child(library::main_content(state)),
+                .child(content),
         )
         .a11y_alt(contract.provenance.component.source_name());
 

@@ -106,8 +106,16 @@ fn rail_action(
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
         .on_mouse_up(move |_| match label_text {
-            "Search" => state.write().search_open = true,
-            "Settings" => state.write().settings_open = true,
+            "Search" => {
+                let mut shell = state.write();
+                shell.search_open = !shell.search_open;
+                shell.settings_open = false;
+            }
+            "Settings" => {
+                let mut shell = state.write();
+                shell.settings_open = !shell.settings_open;
+                shell.search_open = false;
+            }
             _ => {
                 let visible = state.read().sidebar_visible;
                 state.write().sidebar_visible = !visible;

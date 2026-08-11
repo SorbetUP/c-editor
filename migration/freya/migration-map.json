@@ -13,7 +13,7 @@
       "status": "PARITY_PENDING",
       "sourceProvenance": ["AppShell.vue", "app-shell.css", "app-shell-runtime-fixes.css"],
       "behaviorProof": ["freya-testing semantic Create -> Note -> disk test"],
-      "remainingWebDependencies": ["search modal", "settings panel", "addon zones", "mobile drawer gesture", "vault picker"]
+      "remainingWebDependencies": ["addon zones", "mobile drawer gesture", "vault picker"]
     },
     {
       "source": "Elephant/frontend/app/components/navigation/IconRail.vue",
@@ -59,17 +59,17 @@
     },
     {
       "source": "Elephant/frontend/app/components/settings/SettingsPanel.vue",
-      "target": "Elephant/freya/src/settings_contract.rs",
-      "status": "ANALYZED",
-      "behaviorProof": ["8 focused settings contract tests"],
-      "remainingWebDependencies": ["preference host/persistence", "real settings Freya interactions"]
+      "target": "Elephant/freya/src/app/settings.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["11 settings contract/view tests", "native Settings surface is integrated in the shell"],
+      "remainingWebDependencies": ["preference host/persistence", "addon settings contributions", "real settings interaction acceptance"]
     },
     {
       "source": "Elephant/frontend/app/components/search/SearchModal.vue and views/AtomicGraphView.vue",
-      "target": "Elephant/freya/src/search_graph_contract.rs",
-      "status": "ANALYZED",
-      "behaviorProof": ["5 focused search/graph contract tests"],
-      "remainingWebDependencies": ["real search service adapter", "native graph renderer", "keyboard and pointer acceptance"]
+      "target": "Elephant/freya/src/app/explorer.rs",
+      "status": "PARITY_PENDING",
+      "behaviorProof": ["explorer state tests", "native Search/Graph surface is integrated in the shell"],
+      "remainingWebDependencies": ["real search service adapter", "host bridge command draining", "keyboard and pointer acceptance"]
     },
     {
       "source": "Elephant/frontend/app/components/library/CreateEntryMenu.vue",

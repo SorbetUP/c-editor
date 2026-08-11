@@ -115,3 +115,42 @@ fn converted_shell_exposes_vue_source_contracts_through_freya_accessibility() {
     click_label(&mut runner, "Projects");
     assert!(accessible_nodes(&runner, "Plan").len() >= 1);
 }
+
+#[test]
+fn converted_settings_search_graph_and_editor_surfaces_are_reachable() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Settings");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "ElephantNote settings").len() >= 1);
+    assert!(accessible_nodes(&runner, "Settings sections").len() >= 1);
+    assert!(accessible_nodes(&runner, "Settings section appearance").len() >= 1);
+    click_label(&mut runner, "Select Editor settings");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Settings section editor").len() >= 1);
+
+    click_label(&mut runner, "Settings");
+    runner.sync_and_update();
+    click_label(&mut runner, "Search");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Search workspace").len() >= 1);
+    assert!(accessible_nodes(&runner, "Graph workspace").len() >= 1);
+    click_label(&mut runner, "Graph workspace");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Graph not loaded").len() >= 1);
+    assert!(accessible_nodes(&runner, "Refresh graph").len() >= 1);
+
+    click_label(&mut runner, "Search");
+    runner.sync_and_update();
+    click_label(&mut runner, "Alpha");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Heading 1").len() >= 1);
+    assert!(accessible_nodes(&runner, "Paragraph").len() >= 1);
+}

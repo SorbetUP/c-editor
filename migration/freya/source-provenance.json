@@ -9,6 +9,9 @@
     {"source": "Elephant/backend/tauri/src/vault/entries.rs", "target": "Elephant/freya/src/vault_adapter.rs", "reuse": "direct path inclusion and production CRUD/list/trash calls"},
     {"source": "Elephant/backend/tauri/src/vault/types.rs", "target": "Elephant/freya/src/vault_adapter.rs", "reuse": "VaultDescriptor and backend schema"},
     {"source": "Elephant/crates/muya-core", "target": "Elephant/freya/src/editor.rs", "reuse": "direct EditorSession adapter"}
+    ,{"source": "Elephant/frontend/app/components/settings/SettingsPanel.vue", "target": "Elephant/freya/src/app/settings.rs", "reuse": "section labels, search index and visible loading/error/empty states"}
+    ,{"source": "Elephant/frontend/app/search/SearchModal.vue", "target": "Elephant/freya/src/app/explorer.rs", "reuse": "typed search request/result/status state and commands"}
+    ,{"source": "Elephant/frontend/app/components/views/AtomicGraphView.vue", "target": "Elephant/freya/src/app/explorer.rs", "reuse": "typed graph snapshot/filter/selection state and commands"}
   ],
   "retracted": [
     {"commit": "6a1e5b754", "reason": "manual shell was not sufficiently grounded in the source conversion and was reverted"}
