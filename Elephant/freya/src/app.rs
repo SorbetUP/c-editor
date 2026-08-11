@@ -115,7 +115,7 @@ impl ShellState {
             "[freya][vault] action:open-start path={}",
             root.display()
         );
-        let mut next = shell_runtime::load_from_root(root);
+        let mut next = shell_runtime::select_root(root);
         if let Some(canonical_root) = next
             .vault
             .as_ref()
