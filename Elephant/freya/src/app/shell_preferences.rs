@@ -129,7 +129,6 @@ fn write_shell_preferences(
     } else {
         json!({
             "version": 1,
-            "schemaVersion": vault_layout::SCHEMA_VERSION,
         })
     };
     let object = document.as_object_mut().ok_or_else(|| {

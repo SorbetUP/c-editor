@@ -1,15 +1,16 @@
 //! Typed Freya adapter for the existing Elephant vault contract.
 //!
 //! This module is deliberately an adapter, not a second filesystem
-//! implementation. The CRUD and listing operations below call the production
-//! Tauri helpers included with `#[path]`. The only local filesystem reads are
-//! metadata enrichment for fields that the current `entries.rs` response does
-//! not expose yet (`tags` and an Excalidraw image preview).
+//! implementation. CRUD and listing call the production Tauri helpers included
+//! with `#[path]`. Focused Freya boundary modules bridge capabilities that are
+//! not present in the committed backend API: strict relative-path validation,
+//! FTS ingestion orchestration, and recoverable trash manifests.
 //!
 //! Provenance:
-//! - `Elephant/backend/tauri/src/vault/entries.rs`: path validation,
-//!   directory pagination, entry summaries, note/folder CRUD, rename, move,
-//!   delete-to-trash, restore and empty-trash behavior.
+//! - `Elephant/backend/tauri/src/vault/entries.rs`: directory pagination,
+//!   entry summaries, note/folder CRUD, rename and move.
+//! - `Elephant/backend/tauri/src/fts.rs`: Markdown scanning, SQLite FTS5,
+//!   excerpt generation and BM25 ranking.
 //! - `Elephant/backend/tauri/src/vault/types.rs`: `VaultDescriptor`, vault
 //!   identity and schema types.
 //! - `Elephant/backend/tauri/src/vault_layout.rs`: hidden vault roots,
@@ -23,6 +24,10 @@ use serde_json::Value;
 use std::fmt;
 use std::fs;
 use std::path::Path;
+
+mod relative_path;
+mod search_index;
+mod trash;
 
 // `entries.rs` retains its production `crate::vault_layout` import. The host
 // Freya crate should expose the same path module at its crate root. Keeping
@@ -67,6 +72,7 @@ use types::VaultDescriptor;
 
 pub const DEFAULT_PAGE_SIZE: usize = 120;
 pub const MAX_PAGE_SIZE: usize = 500;
+pub use search_index::{IndexFailure, IndexRefreshStatus};
 
 /// Exact source locations used by this adapter.
 pub const PROVENANCE: &[&str] = &[
@@ -75,14 +81,15 @@ pub const PROVENANCE: &[&str] = &[
     "Elephant/backend/tauri/src/vault/entries.rs::create_folder",
     "Elephant/backend/tauri/src/vault/entries.rs::rename_entry",
     "Elephant/backend/tauri/src/vault/entries.rs::move_entry",
-    "Elephant/backend/tauri/src/vault/entries.rs::delete_entry",
-    "Elephant/backend/tauri/src/vault/entries.rs::list_trash",
-    "Elephant/backend/tauri/src/vault/entries.rs::restore_trash",
-    "Elephant/backend/tauri/src/vault/entries.rs::empty_trash",
+    "Elephant/backend/tauri/src/fts.rs::scan_markdown_files",
+    "Elephant/backend/tauri/src/fts.rs::FtsIndex",
     "Elephant/backend/tauri/src/vault/types.rs::VaultDescriptor",
     "Elephant/backend/tauri/src/vault_layout.rs::is_visible_vault_path",
     "Elephant/backend/tauri/src/vault_layout.rs::hidden_root",
     "Elephant/backend/tauri/src/vault_layout.rs::hidden_dir",
+    "Elephant/freya/src/vault_adapter/relative_path.rs",
+    "Elephant/freya/src/vault_adapter/search_index.rs",
+    "Elephant/freya/src/vault_adapter/trash.rs",
     "Elephant/frontend/app/stores/vaultStore.js::activeEntries",
     "Elephant/frontend/app/stores/vaultStore.js::moveEntry",
     "Elephant/frontend/app/stores/vaultStore.js::deleteEntry",
@@ -314,16 +321,16 @@ impl VaultAdapter {
         }
 
         let name = config::basename(&root);
-        Ok(Self {
-            descriptor: VaultDescriptor {
-                id: types::slug_id(&name),
-                name,
-                path: root.to_string_lossy().replace('\\', "/"),
-                icon: String::new(),
-                last_opened_at: config::now_string(),
-                enabled: true,
-            },
-        })
+        let descriptor = serde_json::from_value(serde_json::json!({
+            "id": types::slug_id(&name),
+            "name": name,
+            "path": root.to_string_lossy().replace('\\', "/"),
+            "icon": "",
+            "lastOpenedAt": config::now_string(),
+            "enabled": true,
+        }))
+        .map_err(|error| AdapterError::new(format!("Unable to build vault descriptor: {error}")))?;
+        Ok(Self { descriptor })
     }
 
     pub fn from_descriptor(descriptor: VaultDescriptor) -> Self {
@@ -396,12 +403,10 @@ impl VaultAdapter {
         )))
     }
 
-    pub fn rebuild_search_index(&self) -> AdapterResult<production_fts::IndexRefreshStatus> {
-        let index = production_fts::FtsIndex::open(self.root())
-            .map_err(|error| AdapterError::new(format!("Unable to open search index: {error}")))?;
-        index
-            .rebuild_from_files(&self.descriptor.id, self.root())
-            .map_err(|error| AdapterError::new(format!("Unable to rebuild search index: {error}")))
+    pub fn rebuild_search_index(&self) -> AdapterResult<IndexRefreshStatus> {
+        search_index::rebuild(&self.descriptor.id, self.root(), |relative_path| {
+            self.find_entry(relative_path).map(|entry| entry.title)
+        })
     }
 
     pub fn search_index(
@@ -470,28 +475,22 @@ impl VaultAdapter {
     pub fn delete(&self, relative_path: impl AsRef<str>) -> AdapterResult<DeleteResult> {
         let relative_path = self.validate_visible_path(relative_path.as_ref(), false)?;
         self.ensure_internal_layout_safe()?;
-        let value = production_entries::delete_entry(&self.descriptor, relative_path)?;
-        serde_json::from_value(value).map_err(AdapterError::from)
+        trash::delete(&self.descriptor, self.root(), &relative_path)
     }
 
     pub fn list_trash(&self) -> AdapterResult<Vec<TrashEntry>> {
-        production_entries::list_trash(&self.descriptor)?
-            .into_iter()
-            .map(|value| serde_json::from_value(value).map_err(AdapterError::from))
-            .collect()
+        self.ensure_internal_layout_safe()?;
+        trash::list(self.root())
     }
 
     pub fn restore_trash(&self, trash_path: impl AsRef<str>) -> AdapterResult<RestoreResult> {
         self.ensure_internal_layout_safe()?;
-        let trash_path = production_entries::validate_relative_path(trash_path.as_ref())?;
-        let value = production_entries::restore_trash(&self.descriptor, trash_path)?;
-        serde_json::from_value(value).map_err(AdapterError::from)
+        trash::restore(&self.descriptor, self.root(), trash_path.as_ref())
     }
 
     pub fn empty_trash(&self) -> AdapterResult<EmptyTrashResult> {
         self.ensure_internal_layout_safe()?;
-        let value = production_entries::empty_trash(&self.descriptor)?;
-        serde_json::from_value(value).map_err(AdapterError::from)
+        trash::empty(self.root())
     }
 
     fn validate_optional_directory(
@@ -513,7 +512,7 @@ impl VaultAdapter {
     }
 
     fn validate_visible_path(&self, path: &str, allow_empty: bool) -> AdapterResult<String> {
-        let normalized = production_entries::validate_relative_path(path)?;
+        let normalized = relative_path::validate(path)?;
         if !allow_empty && normalized.is_empty() {
             return Err(AdapterError::new("A visible vault entry path is required."));
         }
@@ -862,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn delegates_crud_and_trash_to_production_helpers() {
+    fn uses_committed_crud_and_recoverable_freya_trash_boundary() {
         let root = temp_root("crud");
         let adapter = VaultAdapter::open(&root).expect("open adapter");
         let folder = adapter
