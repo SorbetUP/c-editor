@@ -9,6 +9,7 @@
 use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 use muya_core::{
@@ -17,6 +18,17 @@ use muya_core::{
     ParagraphBoundaryCommand, Selection, SelectionPoint, SessionCommand, SessionSnapshot,
     SessionUpdate, ViewPatch,
 };
+
+#[path = "app/editor_lifecycle.rs"]
+mod editor_lifecycle;
+pub(crate) use editor_lifecycle::Delay;
+pub use editor_lifecycle::EditorPreferences;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
+pub struct EditorViewState {
+    pub scroll_top: i32,
+    pub topbar_compact: bool,
+}
 
 /// Actions emitted by a Freya editor surface.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -184,22 +196,42 @@ impl EditorSession {
 pub struct EditorDocument {
     path: Option<PathBuf>,
     session: EditorSession,
+    saved_markdown: String,
+    dirty: bool,
+    last_edit_at: Option<Instant>,
+    preferences: EditorPreferences,
+    view_state: EditorViewState,
+    autosave_failure_revision: Option<u64>,
 }
 
 impl EditorDocument {
     pub fn from_markdown(markdown: &str) -> Self {
+        let session = EditorSession::from_markdown(markdown);
         Self {
             path: None,
-            session: EditorSession::from_markdown(markdown),
+            saved_markdown: session.markdown(),
+            session,
+            dirty: false,
+            last_edit_at: None,
+            preferences: editor_lifecycle::load_preferences(),
+            view_state: EditorViewState::default(),
+            autosave_failure_revision: None,
         }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, EditorError> {
         let path = path.as_ref().to_path_buf();
         let markdown = fs::read_to_string(&path).map_err(|error| io_error(&path, error))?;
+        let session = EditorSession::from_markdown(&markdown);
         Ok(Self {
             path: Some(path),
-            session: EditorSession::from_markdown(&markdown),
+            saved_markdown: session.markdown(),
+            session,
+            dirty: false,
+            last_edit_at: None,
+            preferences: editor_lifecycle::load_preferences(),
+            view_state: EditorViewState::default(),
+            autosave_failure_revision: None,
         })
     }
 
@@ -219,6 +251,40 @@ impl EditorDocument {
         self.session.snapshot()
     }
 
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn autosave_enabled(&self) -> bool {
+        self.preferences.auto_save
+    }
+
+    pub fn autosave_delay(&self) -> Duration {
+        Duration::from_millis(self.preferences.auto_save_delay_ms)
+    }
+
+    pub fn scroll_top(&self) -> i32 {
+        self.view_state.scroll_top
+    }
+
+    pub fn topbar_compact(&self) -> bool {
+        self.view_state.topbar_compact
+    }
+
+    pub fn set_scroll_top(&mut self, scroll_top: i32) {
+        self.view_state.scroll_top = scroll_top.max(0);
+        self.view_state.topbar_compact = self.view_state.scroll_top > 24;
+    }
+
+    pub fn autosave_due(&self) -> bool {
+        self.autosave_enabled()
+            && self.dirty
+            && self.autosave_failure_revision != Some(self.session.revision())
+            && self
+                .last_edit_at
+                .is_some_and(|at| at.elapsed() >= self.autosave_delay())
+    }
+
     /// Serializes the current Muya document; this is the Markdown payload used
     /// by NoteEditorHost's save path, not a cached copy of the input file.
     pub fn serialize(&self) -> String {
@@ -226,11 +292,17 @@ impl EditorDocument {
     }
 
     pub fn dispatch(&mut self, action: EditorAction) -> Result<EditorUpdate, EditorError> {
-        self.session.dispatch_current(action)
+        let before = self.serialize();
+        self.session
+            .dispatch_current(action)
+            .map(|update| self.record_mutation(before, update))
     }
 
     pub fn dispatch_text(&mut self, text: impl Into<String>) -> Result<EditorUpdate, EditorError> {
-        self.session.dispatch_text(text)
+        let before = self.serialize();
+        self.session
+            .dispatch_text(text)
+            .map(|update| self.record_mutation(before, update))
     }
 
     pub fn set_selection(&mut self, selection: Selection) -> Result<EditorUpdate, EditorError> {
@@ -239,6 +311,7 @@ impl EditorDocument {
     }
 
     pub fn insert_paragraph(&mut self) -> Result<EditorUpdate, EditorError> {
+        let before = self.serialize();
         let revision = self.session.revision();
         match self
             .session
@@ -252,19 +325,24 @@ impl EditorDocument {
             }
             result => result,
         }
+        .map(|update| self.record_mutation(before, update))
     }
 
     pub fn delete_backward(&mut self) -> Result<EditorUpdate, EditorError> {
-        self.session.dispatch_current(EditorAction::DeleteBackward)
+        self.dispatch(EditorAction::DeleteBackward)
     }
 
     pub fn delete_forward(&mut self) -> Result<EditorUpdate, EditorError> {
+        let before = self.serialize();
         let snapshot = self.session.snapshot();
         if !snapshot.selection.is_collapsed() {
-            return self.session.dispatch_session_command(
-                snapshot.revision,
-                SessionCommand::Core(Command::InsertText(String::new())),
-            );
+            return self
+                .session
+                .dispatch_session_command(
+                    snapshot.revision,
+                    SessionCommand::Core(Command::InsertText(String::new())),
+                )
+                .map(|update| self.record_mutation(before, update));
         }
 
         let caret = snapshot
@@ -287,10 +365,13 @@ impl EditorDocument {
 
         if let Some(selection) = next_same_node {
             self.set_selection(selection)?;
-            return self.session.dispatch_session_command(
-                snapshot.revision,
-                SessionCommand::Core(Command::InsertText(String::new())),
-            );
+            return self
+                .session
+                .dispatch_session_command(
+                    snapshot.revision,
+                    SessionCommand::Core(Command::InsertText(String::new())),
+                )
+                .map(|update| self.record_mutation(before, update));
         }
 
         if let Some(next_text) = next_block_text {
@@ -298,26 +379,102 @@ impl EditorDocument {
                 node: next_text,
                 offset_utf16: 0,
             }))?;
-            return self.session.dispatch_session_command(
-                snapshot.revision,
-                SessionCommand::Grapheme(GraphemeCommand::DeleteBackward),
-            );
+            return self
+                .session
+                .dispatch_session_command(
+                    snapshot.revision,
+                    SessionCommand::Grapheme(GraphemeCommand::DeleteBackward),
+                )
+                .map(|update| self.record_mutation(before, update));
         }
 
         Ok(snapshot)
     }
 
     pub fn undo(&mut self) -> Result<EditorUpdate, EditorError> {
-        self.session.undo()
+        let before = self.serialize();
+        self.session
+            .undo()
+            .map(|update| self.record_mutation(before, update))
     }
 
     pub fn redo(&mut self) -> Result<EditorUpdate, EditorError> {
-        self.session.redo()
+        let before = self.serialize();
+        self.session
+            .redo()
+            .map(|update| self.record_mutation(before, update))
     }
 
-    pub fn save(&self) -> Result<(), EditorError> {
-        let path = self.path.as_ref().ok_or(EditorError::MissingPath)?;
-        fs::write(path, self.serialize()).map_err(|error| io_error(path, error))
+    pub fn save(&mut self) -> Result<(), EditorError> {
+        let path = self.path.clone().ok_or(EditorError::MissingPath)?;
+        let revision = self.session.revision();
+        let started = Instant::now();
+        eprintln!(
+            "[freya][editor] action:start action=save path={} revision={revision}",
+            path.display()
+        );
+        let markdown = self.serialize();
+        match fs::write(&path, &markdown) {
+            Ok(()) => {
+                self.saved_markdown = markdown;
+                self.dirty = false;
+                self.last_edit_at = None;
+                self.autosave_failure_revision = None;
+                eprintln!(
+                    "[freya][editor] action:complete action=save path={} revision={revision} duration_ms={}",
+                    path.display(),
+                    started.elapsed().as_millis()
+                );
+                Ok(())
+            }
+            Err(error) => {
+                self.autosave_failure_revision = Some(revision);
+                eprintln!(
+                    "[freya][editor] action:failure action=save path={} revision={revision} duration_ms={} error={error}",
+                    path.display(),
+                    started.elapsed().as_millis()
+                );
+                Err(io_error(&path, error))
+            }
+        }
+    }
+
+    pub fn close(&mut self) -> Result<(), EditorError> {
+        let path = self.path.clone().ok_or(EditorError::MissingPath)?;
+        let revision = self.session.revision();
+        let started = Instant::now();
+        eprintln!(
+            "[freya][editor] action:start action=close path={} revision={revision} dirty={}",
+            path.display(),
+            self.dirty
+        );
+        if self.dirty {
+            self.save()?;
+        }
+        eprintln!(
+            "[freya][editor] action:complete action=close path={} revision={revision} duration_ms={}",
+            path.display(),
+            started.elapsed().as_millis()
+        );
+        Ok(())
+    }
+
+    fn record_mutation(&mut self, before: String, update: EditorUpdate) -> EditorUpdate {
+        self.dirty = self.saved_markdown != update.markdown;
+        if before != update.markdown {
+            self.last_edit_at = Some(Instant::now());
+            self.autosave_failure_revision = None;
+            eprintln!(
+                "[freya][editor] action:complete action=mutation path={} revision={} dirty={}",
+                self.path
+                    .as_deref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<memory>".to_string()),
+                update.revision,
+                self.dirty
+            );
+        }
+        update
     }
 }
 
@@ -423,12 +580,48 @@ mod tests {
         document
             .dispatch_text("!")
             .expect("text dispatch must succeed");
+        assert!(
+            document.is_dirty(),
+            "a Muya mutation must mark the document dirty"
+        );
         document
             .save()
             .expect("serialized Markdown must save to disk");
+        assert!(
+            !document.is_dirty(),
+            "save must clear dirty only after fs::write succeeds"
+        );
         assert_eq!(fs::read_to_string(&path).unwrap(), "# !Title\n\nBody");
 
         fs::remove_file(path).expect("test fixture must be removed");
+    }
+
+    #[test]
+    fn failed_save_keeps_the_real_document_dirty() {
+        let parent = std::env::temp_dir().join(format!(
+            "elephant-freya-editor-failure-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&parent).expect("fixture directory must be writable");
+        let path = parent.join("note.md");
+        fs::write(&path, "alpha").expect("fixture must be writable");
+        let mut document = EditorDocument::load(&path).expect("fixture must load");
+        document
+            .dispatch_text("!")
+            .expect("mutation must use the real Muya session");
+        fs::remove_dir_all(&parent).expect("remove fixture to inject a save failure");
+
+        assert!(
+            document.save().is_err(),
+            "the real write must report the filesystem error"
+        );
+        assert!(
+            document.is_dirty(),
+            "a failed write must not clear dirty state"
+        );
     }
 
     #[test]

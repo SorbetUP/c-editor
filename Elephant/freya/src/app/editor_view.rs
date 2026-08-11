@@ -15,7 +15,7 @@ use muya_core::{
     Document, NodeId,
 };
 
-use crate::theme;
+use crate::{editor::Delay, theme};
 
 use super::{route_notice, ShellState};
 
@@ -50,6 +50,7 @@ struct BlockTextStyle {
 #[derive(Clone, PartialEq)]
 struct EditableInlineBlock {
     state: State<ShellState>,
+    autosave_generation: State<u64>,
     node_id: NodeId,
     accessibility_label: String,
     style: BlockTextStyle,
@@ -58,17 +59,15 @@ struct EditableInlineBlock {
 impl Component for EditableInlineBlock {
     fn render(&self) -> impl IntoElement {
         let snapshot = self.state.read().clone();
-        let Some(editor) = snapshot.editor.as_ref() else {
-            return route_notice("NoteEditorHost", "No note open").into_element();
-        };
-
         let mut spans = Vec::new();
-        collect_inline_children(
-            editor.session().document(),
-            self.node_id,
-            InlineStyle::default(),
-            &mut spans,
-        );
+        if let Some(editor) = snapshot.editor.as_ref() {
+            collect_inline_children(
+                editor.session().document(),
+                self.node_id,
+                InlineStyle::default(),
+                &mut spans,
+            );
+        }
         if spans.is_empty() {
             spans.push(styled_span(String::new(), InlineStyle::default()));
         }
@@ -79,6 +78,10 @@ impl Component for EditableInlineBlock {
         let mut editable = use_editable(|| value.clone(), EditableConfig::new);
         let a11y_id = use_a11y();
         let holder = use_state(ParagraphHolder::default);
+
+        if snapshot.editor.is_none() {
+            return route_notice("NoteEditorHost", "No note open").into_element();
+        }
 
         if editable.editor().read().committed_text() != value {
             let mut inner = editable.editor_mut().write();
@@ -92,6 +95,7 @@ impl Component for EditableInlineBlock {
             .read()
             .get_visible_selection(EditorLine::SingleParagraph);
         let mut state = self.state;
+        let mut autosave_generation = self.autosave_generation;
         let node_id = self.node_id;
         let previous_value = value.clone();
         let on_key_down = move |event: Event<KeyboardEventData>| {
@@ -140,9 +144,9 @@ impl Component for EditableInlineBlock {
                         && character.eq_ignore_ascii_case("s") =>
                 {
                     state
-                        .read()
+                        .write()
                         .editor
-                        .as_ref()
+                        .as_mut()
                         .ok_or_else(|| "cannot save without an open note".to_string())
                         .and_then(|editor| editor.save().map_err(|error| error.to_string()))
                 }
@@ -193,6 +197,7 @@ impl Component for EditableInlineBlock {
 
             match result {
                 Ok(()) => {
+                    *autosave_generation.write() += 1;
                     sync_editable_from_muya(state, node_id, &mut editable);
                     eprintln!(
                         "[freya][editor] action:complete action=keyboard node={:?} key={}",
@@ -255,7 +260,103 @@ impl Component for EditableInlineBlock {
     }
 }
 
-pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
+pub(super) fn note_editor_host(state: State<ShellState>) -> Element {
+    NoteEditorHost { state }.into_element()
+}
+
+#[derive(PartialEq)]
+struct NoteEditorHost {
+    state: State<ShellState>,
+}
+
+impl Component for NoteEditorHost {
+    fn render(&self) -> impl IntoElement {
+        render_note_editor_host(self.state)
+    }
+}
+
+fn render_note_editor_host(mut state: State<ShellState>) -> Element {
+    let autosave_generation = use_state(|| 0_u64);
+    let generation_for_effect = autosave_generation;
+    let state_for_effect = state;
+    use_side_effect(move || {
+        let generation = *generation_for_effect.read();
+        let (autosave_enabled, dirty, delay) = {
+            let shell = state_for_effect.read();
+            let Some(editor) = shell.editor.as_ref() else {
+                return;
+            };
+            (
+                editor.autosave_enabled(),
+                editor.is_dirty(),
+                editor.autosave_delay(),
+            )
+        };
+        if !autosave_enabled || !dirty {
+            return;
+        }
+        let mut state_for_save = state_for_effect;
+        let generation_for_save = generation_for_effect;
+        spawn(async move {
+            Delay::new(delay).await;
+            if *generation_for_save.read() != generation {
+                return;
+            }
+            let result = {
+                let mut shell = state_for_save.write();
+                shell
+                    .editor
+                    .as_mut()
+                    .filter(|editor| editor.autosave_due())
+                    .map_or(Ok(()), |editor| editor.save())
+            };
+            if let Err(error) = result {
+                eprintln!("[freya][editor] action:failure action=autosave error={error}");
+                state_for_save.write().error = Some(error.to_string());
+            }
+        });
+    });
+
+    let initial_scroll_top = state
+        .read()
+        .editor
+        .as_ref()
+        .map_or(0, |editor| editor.scroll_top());
+    let scroll_position = use_state(|| (0_i32, initial_scroll_top));
+    let scroll_notifier = use_state(|| ());
+    let scroll_requests = use_state(Vec::<ScrollRequest>::new);
+    let on_scroll = use_state(|| {
+        let mut scroll_position = scroll_position;
+        let mut scroll_notifier = scroll_notifier;
+        let mut state = state;
+        Callback::new(move |event: ScrollEvent| {
+            let (changed, y) = {
+                let mut position = scroll_position.write();
+                let previous = *position;
+                match event {
+                    ScrollEvent::X(x) => position.0 = x,
+                    ScrollEvent::Y(y) => position.1 = y,
+                }
+                (previous != *position, position.1)
+            };
+            if changed {
+                let scroll_top = y.saturating_neg();
+                if let Some(editor) = state.write().editor.as_mut() {
+                    editor.set_scroll_top(scroll_top);
+                }
+                eprintln!("[freya][editor] action:complete action=scroll scroll_top={scroll_top}");
+                scroll_notifier.write();
+            }
+            changed
+        })
+    });
+    let get_scroll = use_state(|| {
+        let scroll_position = scroll_position;
+        Callback::new(move |_| *scroll_position.read())
+    });
+    let scroll_controller =
+        ScrollController::managed(scroll_notifier, scroll_requests, on_scroll, get_scroll);
+
     let snapshot = state.read().clone();
     let Some(editor) = snapshot.editor else {
         return route_notice("NoteEditorHost", "No note open");
@@ -291,9 +392,9 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
         .with_corner_radius(8.)
         .on_mouse_up(move |_| {
             let error = state
-                .read()
+                .write()
                 .editor
-                .as_ref()
+                .as_mut()
                 .and_then(|editor| editor.save().err())
                 .map(|error| error.to_string());
             if let Some(error) = error {
@@ -312,14 +413,38 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
         .background(theme::color(theme::SOFT))
         .with_corner_radius(8.)
         .on_mouse_up(move |_| {
-            eprintln!("[freya][editor] action:complete action=close");
-            state.write().editor = None;
+            let result = {
+                let mut shell = state.write();
+                let result = shell.editor.as_mut().map_or_else(
+                    || Err("cannot close without an open note".to_string()),
+                    |editor| editor.close().map_err(|error| error.to_string()),
+                );
+                if result.is_ok() {
+                    shell.editor = None;
+                }
+                result
+            };
+            if let Err(error) = result {
+                eprintln!("[freya][editor] action:failure action=close error={error}");
+                state.write().error = Some(error);
+            }
         })
         .a11y_alt("Close note")
         .child(label().text("Close"));
 
     let document = editor.session().document();
-    let document_view = render_document(state, document);
+    let document_view = render_document(state, document, autosave_generation);
+    let compact = editor.topbar_compact();
+    let topbar_height = if compact { 36. } else { 44. };
+    let error_view = snapshot.error.map(|error| {
+        rect()
+            .width(Size::fill())
+            .padding(Gaps::new_all(6.))
+            .background(theme::color(theme::DANGER))
+            .a11y_alt("Editor error")
+            .child(label().color(theme::color(theme::SURFACE)).text(error))
+            .into_element()
+    });
 
     rect()
         .width(Size::fill())
@@ -327,36 +452,55 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
         .spacing(10.)
         .child(
             rect()
-                .height(Size::px(44.))
+                .height(Size::px(topbar_height))
                 .horizontal()
                 .spacing(8.)
+                .a11y_alt(if compact {
+                    "Editor topbar compact"
+                } else {
+                    "Editor topbar"
+                })
                 .child(undo)
                 .child(save)
                 .child(close),
         )
+        .maybe_child(error_view)
         .child(
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
-                .scrollable(true)
                 .padding(Gaps::new_all(18.))
                 .background(theme::color(theme::SURFACE))
                 .with_corner_radius(10.)
                 .a11y_alt("Editor scroll")
-                .child(document_view),
+                .child(
+                    ScrollView::new_controlled(scroll_controller)
+                        .width(Size::fill())
+                        .height(Size::fill())
+                        .child(document_view),
+                ),
         )
         .a11y_alt("NoteEditorHost")
         .into_element()
 }
 
-fn render_document(state: State<ShellState>, document: &Document) -> Element {
-    render_block_children(state, document, document.root)
+fn render_document(
+    state: State<ShellState>,
+    document: &Document,
+    autosave_generation: State<u64>,
+) -> Element {
+    render_block_children(state, document, document.root, autosave_generation)
 }
 
-fn render_block_children(state: State<ShellState>, document: &Document, parent: NodeId) -> Element {
+fn render_block_children(
+    state: State<ShellState>,
+    document: &Document,
+    parent: NodeId,
+    autosave_generation: State<u64>,
+) -> Element {
     let children = document
         .children(parent)
-        .map(|node| render_block(state, document, node.id))
+        .map(|node| render_block(state, document, node.id, autosave_generation))
         .collect::<Vec<_>>();
 
     rect()
@@ -366,17 +510,27 @@ fn render_block_children(state: State<ShellState>, document: &Document, parent: 
         .into_element()
 }
 
-fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) -> Element {
+fn render_block(
+    state: State<ShellState>,
+    document: &Document,
+    node_id: NodeId,
+    autosave_generation: State<u64>,
+) -> Element {
     let Some(node) = document.node(node_id) else {
         return label().text("[Muya node unavailable]").into_element();
     };
 
     match &node.kind {
-        NodeKind::Block(BlockKind::Paragraph) => {
-            render_inline_block(state, node_id, "Paragraph", BlockTextStyle::default())
-        }
+        NodeKind::Block(BlockKind::Paragraph) => render_inline_block(
+            state,
+            autosave_generation,
+            node_id,
+            "Paragraph",
+            BlockTextStyle::default(),
+        ),
         NodeKind::Block(BlockKind::Heading { level }) => render_inline_block(
             state,
+            autosave_generation,
             node_id,
             &format!("Heading {level}"),
             BlockTextStyle {
@@ -393,14 +547,24 @@ fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) 
                     .fill(theme::color(theme::BORDER_STRONG))
                     .width(1.),
             )
-            .child(render_block_children(state, document, node_id))
+            .child(render_block_children(
+                state,
+                document,
+                node_id,
+                autosave_generation,
+            ))
             .a11y_alt("Block quote")
             .into_element(),
-        NodeKind::Block(BlockKind::List { kind, start }) => {
-            render_list(state, document, node_id, *kind, start.unwrap_or(1))
-        }
+        NodeKind::Block(BlockKind::List { kind, start }) => render_list(
+            state,
+            document,
+            node_id,
+            *kind,
+            start.unwrap_or(1),
+            autosave_generation,
+        ),
         NodeKind::Block(BlockKind::ListItem { .. }) => {
-            render_block_children(state, document, node_id)
+            render_block_children(state, document, node_id, autosave_generation)
         }
         NodeKind::Block(BlockKind::CodeBlock { language, .. }) => {
             let mut children = Vec::new();
@@ -416,6 +580,7 @@ fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) 
             }
             children.push(render_inline_block(
                 state,
+                autosave_generation,
                 node_id,
                 "Code block",
                 BlockTextStyle {
@@ -447,7 +612,7 @@ fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) 
             .children(
                 document
                     .children(node_id)
-                    .map(|child| render_block(state, document, child.id))
+                    .map(|child| render_block(state, document, child.id, autosave_generation))
                     .collect::<Vec<_>>(),
             )
             .a11y_alt("Table")
@@ -459,7 +624,7 @@ fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) 
             .children(
                 document
                     .children(node_id)
-                    .map(|child| render_block(state, document, child.id))
+                    .map(|child| render_block(state, document, child.id, autosave_generation))
                     .collect::<Vec<_>>(),
             )
             .into_element(),
@@ -470,6 +635,7 @@ fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) 
             .child(if *header {
                 render_inline_block(
                     state,
+                    autosave_generation,
                     node_id,
                     "Table header cell",
                     BlockTextStyle {
@@ -478,32 +644,54 @@ fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) 
                     },
                 )
             } else {
-                render_inline_block(state, node_id, "Table cell", BlockTextStyle::default())
+                render_inline_block(
+                    state,
+                    autosave_generation,
+                    node_id,
+                    "Table cell",
+                    BlockTextStyle::default(),
+                )
             })
             .into_element(),
-        NodeKind::Block(BlockKind::HtmlBlock) => {
-            render_unsupported_block(state, node_id, "HTML block not rendered")
-        }
-        NodeKind::Block(BlockKind::MathBlock) => {
-            render_unsupported_block(state, node_id, "Math block not rendered")
-        }
-        NodeKind::Block(BlockKind::FrontMatter { .. }) => {
-            render_unsupported_block(state, node_id, "Front matter is not an editor block")
-        }
+        NodeKind::Block(BlockKind::HtmlBlock) => render_unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            "HTML block not rendered",
+        ),
+        NodeKind::Block(BlockKind::MathBlock) => render_unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            "Math block not rendered",
+        ),
+        NodeKind::Block(BlockKind::FrontMatter { .. }) => render_unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            "Front matter is not an editor block",
+        ),
         NodeKind::Block(BlockKind::FootnoteDefinition { label }) => render_unsupported_block(
             state,
+            autosave_generation,
             node_id,
             &format!("Footnote definition not rendered: {label}"),
         ),
         NodeKind::Block(BlockKind::ReferenceDefinition { label }) => render_unsupported_block(
             state,
+            autosave_generation,
             node_id,
             &format!("Reference definition not rendered: {label}"),
         ),
-        NodeKind::Block(BlockKind::Diagram { language }) => {
-            render_unsupported_block(state, node_id, &format!("Diagram not rendered: {language}"))
+        NodeKind::Block(BlockKind::Diagram { language }) => render_unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            &format!("Diagram not rendered: {language}"),
+        ),
+        NodeKind::Document | NodeKind::Inline(_) => {
+            render_block_children(state, document, node_id, autosave_generation)
         }
-        NodeKind::Document | NodeKind::Inline(_) => render_block_children(state, document, node_id),
     }
 }
 
@@ -820,6 +1008,7 @@ fn render_list(
     node_id: NodeId,
     kind: ListKind,
     start: u64,
+    autosave_generation: State<u64>,
 ) -> Element {
     let items = document
         .children(node_id)
@@ -836,7 +1025,12 @@ fn render_list(
                         .color(theme::color(theme::MUTED))
                         .text(marker),
                 )
-                .child(render_block_children(state, document, item.id))
+                .child(render_block_children(
+                    state,
+                    document,
+                    item.id,
+                    autosave_generation,
+                ))
                 .into_element()
         })
         .collect::<Vec<_>>();
@@ -880,12 +1074,14 @@ fn list_accessibility_label(kind: ListKind) -> &'static str {
 
 fn render_inline_block(
     state: State<ShellState>,
+    autosave_generation: State<u64>,
     node_id: NodeId,
     accessibility_label: &str,
     style: BlockTextStyle,
 ) -> Element {
     EditableInlineBlock {
         state,
+        autosave_generation,
         node_id,
         accessibility_label: accessibility_label.to_string(),
         style,
@@ -893,7 +1089,12 @@ fn render_inline_block(
     .into_element()
 }
 
-fn render_unsupported_block(state: State<ShellState>, node_id: NodeId, message: &str) -> Element {
+fn render_unsupported_block(
+    state: State<ShellState>,
+    autosave_generation: State<u64>,
+    node_id: NodeId,
+    message: &str,
+) -> Element {
     rect()
         .width(Size::fill())
         .spacing(4.)
@@ -909,6 +1110,7 @@ fn render_unsupported_block(state: State<ShellState>, node_id: NodeId, message: 
         )
         .child(render_inline_block(
             state,
+            autosave_generation,
             node_id,
             message,
             BlockTextStyle {
