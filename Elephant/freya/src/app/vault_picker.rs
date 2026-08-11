@@ -23,9 +23,20 @@ struct StartupState {
 
 /// Open the operating-system's native directory chooser.
 ///
-/// `rfd` uses the platform native dialog on macOS/Windows and the desktop
-/// portal/native backend on Linux. Cancellation is intentionally not an error.
-pub(super) fn pick_vault() -> Option<PathBuf> {
+/// On desktop, `rfd` uses the platform dialog/desktop portal. Cancellation is
+/// not an error. Mobile intentionally returns an explicit error until the
+/// Android/iOS storage adapter is wired; it must never masquerade as a working
+/// picker.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+pub(super) fn pick_vault() -> Result<Option<PathBuf>, String> {
     eprintln!("[freya][vault-picker] action:start");
     let picked = rfd::FileDialog::new()
         .set_title("Choose an Elephant vault")
@@ -38,7 +49,23 @@ pub(super) fn pick_vault() -> Option<PathBuf> {
         ),
         None => eprintln!("[freya][vault-picker] action:cancel"),
     }
-    picked
+    Ok(picked)
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "netbsd",
+    target_os = "openbsd"
+)))]
+pub(super) fn pick_vault() -> Result<Option<PathBuf>, String> {
+    Err(format!(
+        "Native vault selection is not implemented for {} yet; the mobile storage adapter must provide it.",
+        env::consts::OS
+    ))
 }
 
 /// Read the last successfully opened vault, if one was persisted and still
