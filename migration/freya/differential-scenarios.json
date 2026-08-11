@@ -1,0 +1,692 @@
+{
+  "schemaVersion": 1,
+  "id": "elephant-tauri-freya-differential",
+  "description": "Protocole commun pour rejouer les mêmes parcours sur le WebView Tauri avec Playwright et sur la surface native Freya avec freya-testing.",
+  "policy": {
+    "sameFixture": true,
+    "sameLogicalActions": true,
+    "compareStateAtEveryCheckpoint": true,
+    "compareVisualOutputAtEveryFrame": true,
+    "missingAdapterIsFailure": true,
+    "doNotInventTarget": true,
+    "visualSurface": "application-content-only",
+    "nativeWindowChromeExcluded": true,
+    "comparison": {
+      "dimensionsMustMatch": true,
+      "pixelEquivalence": {
+        "maxChangedPixelRatio": 0,
+        "maxMeanAbsoluteError": 0
+      },
+      "stateEquivalence": "normalized-json-deep-equal",
+      "motionEquivalence": "same-frame-index-and-action-relative-time"
+    }
+  },
+  "provenance": {
+    "tauriPlaywright": [
+      "tests/app/e2e/helpers.js#createSeededVaultFixture",
+      "tests/app/e2e/linux-usage-regressions.spec.js#launchUsageApp",
+      "tests/app/e2e/linux-usage-regressions.spec.js#openSearch",
+      "tests/app/e2e/linux-usage-regressions.spec.js#openNote",
+      "tests/app/e2e/ui-feature-regressions.spec.js#rail-icons-can-be-reordered-directly"
+    ],
+    "freyaTesting": [
+      "Elephant/freya/tests/shell_freya_testing.rs#converted_shell_exposes_vue_source_contracts_through_freya_accessibility",
+      "Elephant/freya/src/app/navigation.rs",
+      "Elephant/freya/src/app/library.rs",
+      "Elephant/freya/src/app/explorer.rs",
+      "Elephant/freya/src/app/editor_view.rs"
+    ]
+  },
+  "adapters": {
+    "tauri": {
+      "driver": "playwright",
+      "surface": "Tauri WebView page",
+      "selectorDialect": "Playwright locator strategies",
+      "forbiddenFallbacks": ["Electron page", "DOM bridge", "synthetic success response"]
+    },
+    "freya": {
+      "driver": "freya-testing",
+      "surface": "TestingRunner accessibility tree and PNG render",
+      "selectorDialect": "TestingNode accessibility label",
+      "timeControl": "TestingRunner.poll / poll_n / animation_clock",
+      "forbiddenFallbacks": ["coordinate-only selector when an existing label is absent", "mock editor", "mock drag event"]
+    }
+  },
+  "fixture": {
+    "id": "differential-vault-v1",
+    "roots": {
+      "vault": "vault",
+      "config": "config",
+      "userData": "user-data"
+    },
+    "config": {
+      "vaults": [
+        {
+          "id": "e2e-vault",
+          "name": "E2E Vault",
+          "path": "${fixture.roots.vault}",
+          "icon": "vault"
+        }
+      ],
+      "activeVaultId": "e2e-vault"
+    },
+    "fileDefaults": {
+      "encoding": "utf-8",
+      "mtime": "2026-06-22T10:00:00.000Z"
+    },
+    "files": [
+      {
+        "root": "vault",
+        "path": "Alpha.md",
+        "content": {
+          "prefix": "---\ntitle: \"Alpha note\"\ntype: \"note\"\ntags: [\"e2e\", \"alpha\"]\n---\n\n# Alpha note\n\nVisible alpha body line.\n\n",
+          "generatedLines": {
+            "from": 1,
+            "to": 96,
+            "template": "Deterministic scroll fixture line {index}."
+          },
+          "suffix": ""
+        }
+      },
+      {
+        "root": "vault",
+        "path": "Projects/Beta.md",
+        "content": "---\ntitle: \"Beta project\"\ntype: \"note\"\ntags: [\"e2e\", \"beta\"]\n---\n\n# Beta project\n\nVisible beta body line.\n"
+      },
+      {
+        "root": "vault",
+        "path": ".elephantnote/workspace.json",
+        "json": {
+          "version": 1,
+          "vaultName": "E2E Vault",
+          "sidebar": [
+            {
+              "id": "alpha-note",
+              "title": "Alpha note",
+              "type": "note",
+              "path": "Alpha.md",
+              "collapsed": false
+            },
+            {
+              "id": "projects-folder",
+              "title": "Projects",
+              "type": "folder",
+              "path": "Projects",
+              "collapsed": false
+            }
+          ]
+        }
+      },
+      {
+        "root": "vault",
+        "path": ".elephantnote/index.json",
+        "json": {
+          "version": 1,
+          "updatedAt": "2026-06-22T10:00:00.000Z",
+          "entries": []
+        }
+      },
+      {
+        "root": "vault",
+        "path": ".elephantnote/calendar.json",
+        "json": {
+          "version": 1,
+          "updatedAt": "",
+          "events": []
+        }
+      },
+      {
+        "root": "vault",
+        "path": ".elephantnote/sources.json",
+        "json": {
+          "version": 1,
+          "updatedAt": "",
+          "sources": []
+        }
+      },
+      {
+        "root": "vault",
+        "path": ".elephantnote/wiki.json",
+        "json": {
+          "version": 1,
+          "updatedAt": "",
+          "records": []
+        }
+      },
+      {
+        "root": "config",
+        "path": "elephantnote.json",
+        "jsonRef": "fixture.config"
+      }
+    ]
+  },
+  "viewport": {
+    "width": 1280,
+    "height": 840,
+    "scaleFactor": 1,
+    "deviceScaleFactor": 1,
+    "fullPage": false,
+    "colorScheme": "light",
+    "locale": "en-US"
+  },
+  "capture": {
+    "artifactRoot": "artifacts/differential/${runtime}/${scenarioId}",
+    "imageFormat": "png",
+    "stateFormat": "json",
+    "trace": true,
+    "video": true,
+    "frameNaming": "${actionIndex}-${actionId}-${frameIndex}-${relativeMs}ms",
+    "beforeAndAfterEveryAction": true,
+    "frameTimeline": {
+      "clock": "action-dispatch-relative",
+      "intervalMs": 50,
+      "settleAfterActionMs": 250,
+      "framesPerAction": {
+        "before": 1,
+        "during": 8,
+        "after": 1
+      },
+      "tauri": {
+        "capture": "page.screenshot",
+        "advance": "Playwright auto-wait plus action-relative sampling"
+      },
+      "freya": {
+        "capture": "TestingRunner.render",
+        "advance": "TestingRunner.poll_n(step=50ms, times=8)"
+      }
+    }
+  },
+  "normalization": {
+    "text": ["trim", "collapse-whitespace", "preserve-case"],
+    "paths": "vault-relative-posix",
+    "geometry": "round-to-3-decimals",
+    "colors": "rgba-8bit",
+    "state": ["remove-runtime-ids", "remove-request-ids", "sort-object-keys"]
+  },
+  "actions": [
+    {
+      "id": "launch",
+      "logical": "launch application with the deterministic fixture",
+      "tauri": {
+        "operation": "launch",
+        "ready": {
+          "strategy": "css",
+          "selector": ".en-library-grid",
+          "state": "visible"
+        }
+      },
+      "freya": {
+        "operation": "TestingRunner.new",
+        "factory": "app_with_vault",
+        "ready": {
+          "strategy": "accessibility-label",
+          "label": "All notes"
+        }
+      },
+      "frames": [0, 250, 400],
+      "checkpoint": "startup"
+    },
+    {
+      "id": "move-to-alpha-card",
+      "logical": "move pointer onto the Alpha note card and retain the hover frames",
+      "target": {
+        "tauri": {
+          "strategy": "locator-filter",
+          "selector": ".en-note-card",
+          "hasText": "Alpha note"
+        },
+        "freya": {
+          "strategy": "accessibility-label",
+          "label": "Alpha note"
+        }
+      },
+      "pointer": {
+        "path": ["center", "center-plus-x-24", "center"],
+        "durationMs": 400,
+        "sampleEveryMs": 50
+      },
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "alpha-card-hover"
+    },
+    {
+      "id": "open-search",
+      "logical": "open workspace search from the rail",
+      "target": {
+        "tauri": {
+          "strategy": "role",
+          "role": "button",
+          "name": "Search",
+          "exact": true
+        },
+        "freya": {
+          "strategy": "accessibility-label",
+          "label": "Search"
+        }
+      },
+      "event": "click",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "search-open"
+    },
+    {
+      "id": "search-alpha",
+      "logical": "type the same query and wait for the real search result",
+      "target": {
+        "tauri": {
+          "strategy": "placeholder",
+          "value": "Search notes, paths, tags, or ideas…"
+        },
+        "freya": {
+          "strategy": "placeholder",
+          "value": "Search notes, paths, tags, or ideas…"
+        }
+      },
+      "input": "Alpha note",
+      "event": "write-text",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "search-results"
+    },
+    {
+      "id": "close-search",
+      "logical": "close search with the existing Escape behavior",
+      "target": {
+        "tauri": {
+          "strategy": "placeholder",
+          "value": "Search notes, paths, tags, or ideas…"
+        },
+        "freya": {
+          "strategy": "placeholder",
+          "value": "Search notes, paths, tags, or ideas…"
+        }
+      },
+      "event": "press-key",
+      "key": "Escape",
+      "repeat": 2,
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "library-after-search"
+    },
+    {
+      "id": "navigate-all-notes",
+      "logical": "return to the root note directory through the existing All notes control",
+      "target": {
+        "tauri": {
+          "strategy": "role",
+          "role": "button",
+          "name": "All notes",
+          "exact": true
+        },
+        "freya": {
+          "strategy": "accessibility-label",
+          "label": "All notes"
+        }
+      },
+      "event": "click",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "root-library"
+    },
+    {
+      "id": "open-alpha-note",
+      "logical": "open the same note through the library card",
+      "target": {
+        "tauri": {
+          "strategy": "locator-filter",
+          "selector": ".en-note-card",
+          "hasText": "Alpha note"
+        },
+        "freya": {
+          "strategy": "accessibility-label",
+          "label": "Alpha note"
+        }
+      },
+      "event": "click",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "note-open"
+    },
+    {
+      "id": "edit-alpha-note",
+      "logical": "append the same deterministic marker through the production editor",
+      "target": {
+        "tauri": {
+          "strategy": "testid",
+          "value": "muya-runtime-editor"
+        },
+        "freya": {
+          "status": "not-exposed",
+          "selector": null,
+          "reason": "editor_view.rs renders the Muya document and exposes Undo/Save, but no editable input or existing accessibility target was found"
+        }
+      },
+      "event": "focus-write-text",
+      "keysBeforeText": ["Control+End", "Enter"],
+      "text": "Differential edit marker 2026-06-22.",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "note-edited",
+      "requiredForParity": true
+    },
+    {
+      "id": "scroll-alpha-note",
+      "logical": "scroll the long note by the same wheel gesture and capture motion frames",
+      "target": {
+        "tauri": {
+          "strategy": "css",
+          "selector": ".en-note-editor-shell"
+        },
+        "freya": {
+          "status": "not-exposed",
+          "selector": null,
+          "reason": "the current Freya editor scrollable rect has no inspected accessibility label or test id"
+        }
+      },
+      "event": "scroll",
+      "delta": {
+        "x": 0,
+        "y": 560
+      },
+      "pointerPath": ["center", "center-plus-y-120", "center-plus-y-240"],
+      "durationMs": 400,
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "note-scrolled",
+      "requiredForParity": true
+    },
+    {
+      "id": "close-alpha-note",
+      "logical": "close the note through the existing note chrome",
+      "target": {
+        "tauri": {
+          "strategy": "role",
+          "role": "button",
+          "name": "Close note",
+          "exact": true
+        },
+        "freya": {
+          "strategy": "accessibility-label",
+          "label": "Save",
+          "note": "No existing Close note label was found in the inspected Freya editor surface; do not substitute a coordinate or invent one."
+        }
+      },
+      "event": "click",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "library-after-note"
+    },
+    {
+      "id": "open-create-menu",
+      "logical": "open the real creation menu and compare its visible entries",
+      "target": {
+        "tauri": {
+          "strategy": "role",
+          "role": "button",
+          "name": "Create",
+          "exact": true
+        },
+        "freya": {
+          "strategy": "accessibility-label",
+          "label": "Create"
+        }
+      },
+      "event": "click",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "create-menu-open"
+    },
+    {
+      "id": "move-through-create-menu",
+      "logical": "move the pointer across the existing Note menu item without activating it",
+      "target": {
+        "tauri": {
+          "strategy": "role",
+          "role": "menuitem",
+          "name": "Note",
+          "exact": true
+        },
+        "freya": {
+          "strategy": "accessibility-label",
+          "label": "Note"
+        }
+      },
+      "event": "move-pointer",
+      "pointerPath": ["left", "center", "right", "center"],
+      "durationMs": 400,
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "create-menu-hover"
+    },
+    {
+      "id": "close-create-menu",
+      "logical": "close the menu without creating an entry",
+      "event": "press-key",
+      "key": "Escape",
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "library-after-menu"
+    },
+    {
+      "id": "drag-search-rail-item",
+      "logical": "drag the Search rail item onto the existing sidebar rail target",
+      "target": {
+        "tauri": {
+          "source": {
+            "strategy": "css",
+            "selector": ".en-rail-nav .en-rail-icon[aria-label=\"Search\"]"
+          },
+          "dropTarget": {
+            "strategy": "css",
+            "selector": ".en-rail-nav .en-rail-sidebar-toggle"
+          }
+        },
+        "freya": {
+          "source": {
+            "strategy": "accessibility-label",
+            "label": "Search"
+          },
+          "dropTarget": {
+            "strategy": "accessibility-label",
+            "label": "Hide sidebar"
+          },
+          "status": "not-exposed",
+          "reason": "the current Freya navigation surface has click handlers for these labels but no drag-start/drag-over/drop handler"
+        }
+      },
+      "event": "drag",
+      "dragPhases": ["start", "over", "drop", "end"],
+      "pointerPath": ["source-center", "midpoint", "target-center"],
+      "durationMs": 400,
+      "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
+      "checkpoint": "rail-after-drag",
+      "requiredForParity": true
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "startup",
+      "afterAction": "launch",
+      "state": {
+        "route": "library",
+        "vaultName": "E2E Vault",
+        "visibleEntries": ["Alpha note", "Projects"],
+        "sidebarVisible": true,
+        "errors": []
+      },
+      "visual": {
+        "root": ["full application content"],
+        "targets": [".en-shell", ".en-rail", ".en-sidebar", ".en-library-grid"]
+      }
+    },
+    {
+      "id": "alpha-card-hover",
+      "afterAction": "move-to-alpha-card",
+      "state": {
+        "hoveredEntry": "Alpha note",
+        "visibleEntries": ["Alpha note", "Projects"]
+      },
+      "visual": {
+        "compareFrames": true,
+        "pointerPathMustBePresent": true
+      }
+    },
+    {
+      "id": "search-open",
+      "afterAction": "open-search",
+      "state": {
+        "searchVisible": true,
+        "query": "",
+        "libraryStillMounted": true
+      },
+      "visual": {
+        "targets": [".en-search-overlay", ".en-search-dialog"]
+      }
+    },
+    {
+      "id": "search-results",
+      "afterAction": "search-alpha",
+      "state": {
+        "searchVisible": true,
+        "query": "Alpha note",
+        "resultTitles": ["Alpha note"]
+      },
+      "visual": {
+        "targets": [".en-search-results", ".en-search-result"]
+      }
+    },
+    {
+      "id": "library-after-search",
+      "afterAction": "close-search",
+      "state": {
+        "searchVisible": false,
+        "route": "library",
+        "visibleEntries": ["Alpha note", "Projects"]
+      }
+    },
+    {
+      "id": "root-library",
+      "afterAction": "navigate-all-notes",
+      "state": {
+        "route": "library",
+        "currentPath": "",
+        "visibleEntries": ["Alpha note", "Projects"]
+      }
+    },
+    {
+      "id": "note-open",
+      "afterAction": "open-alpha-note",
+      "state": {
+        "route": "note-editor",
+        "openNote": "Alpha note",
+        "notePath": "Alpha.md",
+        "bodyContains": ["Visible alpha body line."],
+        "closeControl": "Close note"
+      },
+      "visual": {
+        "targets": [".en-note-editor-shell", ".en-note-topbar", "muya-runtime-editor"]
+      }
+    },
+    {
+      "id": "note-edited",
+      "afterAction": "edit-alpha-note",
+      "state": {
+        "route": "note-editor",
+        "openNote": "Alpha note",
+        "bodyContains": ["Differential edit marker 2026-06-22."],
+        "persistedFile": {
+          "path": "Alpha.md",
+          "mustContain": "Differential edit marker 2026-06-22."
+        }
+      },
+      "freya": {
+        "expectedResult": "hard-mismatch-until-editable-target-exists"
+      }
+    },
+    {
+      "id": "note-scrolled",
+      "afterAction": "scroll-alpha-note",
+      "state": {
+        "route": "note-editor",
+        "openNote": "Alpha note",
+        "scroll": {
+          "requestedDeltaY": 560,
+          "mustChange": true
+        }
+      },
+      "visual": {
+        "compareFrames": true,
+        "compareScrollPosition": true
+      },
+      "freya": {
+        "expectedResult": "hard-mismatch-until-scrollable-target-is-addressable"
+      }
+    },
+    {
+      "id": "library-after-note",
+      "afterAction": "close-alpha-note",
+      "state": {
+        "route": "library",
+        "openNote": null,
+        "visibleEntries": ["Alpha note", "Projects"]
+      }
+    },
+    {
+      "id": "create-menu-open",
+      "afterAction": "open-create-menu",
+      "state": {
+        "createMenuVisible": true,
+        "menuItems": ["Note", "Drawing", "Folder"]
+      },
+      "visual": {
+        "targets": ["Create", "Note", "Drawing", "Folder"]
+      }
+    },
+    {
+      "id": "create-menu-hover",
+      "afterAction": "move-through-create-menu",
+      "state": {
+        "createMenuVisible": true,
+        "hoveredMenuItem": "Note"
+      },
+      "visual": {
+        "compareFrames": true,
+        "pointerPathMustBePresent": true
+      }
+    },
+    {
+      "id": "library-after-menu",
+      "afterAction": "close-create-menu",
+      "state": {
+        "createMenuVisible": false,
+        "route": "library",
+        "visibleEntries": ["Alpha note", "Projects"]
+      }
+    },
+    {
+      "id": "rail-after-drag",
+      "afterAction": "drag-search-rail-item",
+      "state": {
+        "railOrder": {
+          "mustChange": true,
+          "contains": ["Search"]
+        }
+      },
+      "visual": {
+        "compareFrames": true,
+        "dragPhases": ["start", "over", "drop", "end"]
+      },
+      "freya": {
+        "expectedResult": "hard-mismatch-until-native-drag-adapter-exists"
+      }
+    }
+  ],
+  "stateCapture": {
+    "tauri": {
+      "domText": "document.body.innerText",
+      "activeElement": "document.activeElement",
+      "geometry": "boundingBox for every checkpoint target",
+      "scroll": "scrollTop and scrollHeight for the addressed scroll container",
+      "vault": "sorted vault-relative file paths and SHA-256 bytes after mutation"
+    },
+    "freya": {
+      "accessibilityTree": "TestingRunner.find_many and node accessibility labels",
+      "geometry": "TestingNode.layout().area for every addressed label",
+      "render": "TestingRunner.render PNG bytes",
+      "vault": "sorted vault-relative file paths and SHA-256 bytes after mutation"
+    }
+  },
+  "requiredEvidence": {
+    "perRuntime": ["startup screenshot", "one PNG per timeline frame", "checkpoint state JSON", "trace", "motion video or equivalent frame sequence", "runtime error log"],
+    "comparison": ["state diff", "frame-by-frame pixel diff", "changed-pixel summary", "first divergent action/frame", "final vault diff"],
+    "claimRule": "The scenario is PROVEN only when both runtimes complete every required action and every checkpoint/frame comparison passes from the same fixture."
+  }
+}
