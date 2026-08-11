@@ -1,0 +1,17 @@
+{
+  "oracle": "Tauri/Vue/Muya DOM path",
+  "target": "Freya native shell plus typed Rust services and explicitly isolated web islands",
+  "policy": "keep the oracle until each route has behavioral, lifecycle, accessibility, persistence, error, and screenshot evidence",
+  "surfaces": [
+    {"id": "shell", "source": "AppShell.vue, TopVaultBar.vue, IconRail.vue, SidebarNav.vue", "target": "Elephant/freya/src/app.rs", "status": "PARTIALLY_PROVEN", "next": "match window chrome, keyboard semantics, responsive states and pixel diff against the paired oracle capture"},
+    {"id": "vault-navigation", "source": "vaultStore.js, elephantnoteClient, vault commands", "target": "Elephant/freya/src/application.rs plus shared Rust service", "status": "PARTIALLY_PROVEN", "next": "finish nested tree, rename/move/delete UI, editor handoff, watcher and restart persistence"},
+    {"id": "editor", "source": "NoteEditorHost.vue, runtimeEditor.vue, Muya", "target": "muya-core plus Freya editor surface", "status": "NOT_STARTED", "next": "choose one editor source of truth and prove selection, IME, undo, paste, markdown and save"},
+    {"id": "search", "source": "searchStore.js and JS semantic services", "target": "typed Rust search service and Freya route", "status": "NOT_STARTED", "next": "FTS and semantic parity, indexing lifecycle, errors and performance"},
+    {"id": "graph-wiki", "source": "graphLibrary.js, wikiLibrary.js", "target": "native service and Freya view", "status": "NOT_STARTED", "next": "port contracts before rendering"},
+    {"id": "settings", "source": "settings pages and persistence services", "target": "Freya route and typed persistence", "status": "NOT_STARTED", "next": "migrate every setting, validation, restart and mobile layout"},
+    {"id": "excalidraw", "source": "ExcalidrawDialog.vue and ExcalidrawEditorOverlay.vue", "target": "explicit bytes/events web island with native host persistence", "status": "WEB_ISLAND_PENDING", "next": "remove globals, add atomic PNG/sidecar writePair and lifecycle acceptance"},
+    {"id": "addons", "source": "addonHostRuntime and official addons", "target": "permission-scoped host API and isolated runtime", "status": "NOT_STARTED", "next": "install-enable-open-disable-uninstall-reinstall lifecycle"},
+    {"id": "sync-ai-mobile", "source": "JS sync/AI and Tauri Android paths", "target": "native services and Freya/Android integration", "status": "NOT_STARTED", "next": "real protocol/process/device proof"},
+    {"id": "packaging", "source": "Tauri desktop and Android packaging", "target": "Freya desktop and supported mobile packaging", "status": "NOT_STARTED", "next": "build and run distributable artifacts on each claimed platform"}
+  ]
+}

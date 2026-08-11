@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-08-11",
+  "scope": "frontend source inventory",
+  "counts": {
+    "document": {"files": 95, "occurrences": 425},
+    "querySelector": {"files": 59, "occurrences": 203},
+    "createElement": {"files": 50, "occurrences": 180},
+    "selectionRange": {"files": 72, "occurrences": 520},
+    "contentEditable": {"files": 26, "occurrences": 37},
+    "mutationObserver": {"files": 9, "occurrences": 14},
+    "domListeners": {"files": 55, "occurrences": 256},
+    "innerHtml": {"files": 28, "occurrences": 105},
+    "canvas": {"files": 2, "occurrences": 6},
+    "tauriApis": {"files": 73, "occurrences": 354},
+    "piniaStores": {"files": 54, "occurrences": 94}
+  },
+  "migrationRules": [
+    "DOM and browser globals become explicit Freya state, typed host services, or an approved web island.",
+    "contentEditable, Selection/Range and Muya are manual ports; no mechanical replacement is accepted.",
+    "Tauri invoke calls must be replaced by a versioned, permission-scoped native service contract before the Vue path is removed."
+  ]
+}

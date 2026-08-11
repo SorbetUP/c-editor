@@ -1,0 +1,8 @@
+{
+  "status": "PARTIAL_INVENTORY",
+  "source": "inventory/components.json",
+  "scope": ["Elephant/frontend/app", "Elephant/frontend/src/renderer/src", "Elephant/frontend/src/muya"],
+  "counts": {"vue": 109, "javascript": 434, "css": 106, "html": 2, "other": 242, "classifiable": 651},
+  "classification": {"MANUAL_PORT_REQUIRED": 415, "MOSTLY_AUTO": 68, "AUTO_CONVERTIBLE": 162, "WEB_ISLAND": 6, "DEAD_PROVEN": 0, "UNKNOWN": 0},
+  "notes": ["The detailed audited baseline is in inventory/components.json.", "A full per-component props/emits/slots manifest is still required before claiming complete migration coverage."]
+}

@@ -1,0 +1,13 @@
+{
+  "generatedAt": "2026-08-11",
+  "status": "PARTIAL_INVENTORY",
+  "manualPortRequired": [
+    {"surface":"Muya editor","paths":["Elephant/frontend/src/muya","Elephant/frontend/src/renderer/src/components/editorWithTabs/runtimeEditor.vue"],"why":"DOM selection, composition/IME, contentEditable, observers, clipboard and generated HTML"},
+    {"surface":"Excalidraw","paths":["Elephant/frontend/app/components/editor/ExcalidrawDialog.vue","Elephant/frontend/src/renderer/src/addons/builtin/ui/ExcalidrawEditorOverlay.vue"],"why":"React/canvas lifecycle and current global/window coupling"},
+    {"surface":"addon runtime","paths":["Elephant/frontend/src/renderer/src/addons/addonHostRuntime.js","Elephant/frontend/src/renderer/src/addons/trustedAddonRuntime.js"],"why":"trusted runtime exposes window, document, Vue, Pinia and services"},
+    {"surface":"sync and AI","paths":["Elephant/backend/js/sync","Elephant/backend/js/runtime","Elephant/backend/js/atomic"],"why":"real process/protocol/persistence paths must be recreated and exercised"},
+    {"surface":"settings and responsive shell","paths":["Elephant/frontend/app/components/shell","Elephant/frontend/src/renderer/src/pages"],"why":"geometry, breakpoints, keyboard and persisted settings require oracle comparison"}
+  ],
+  "notDeadCode": ["Elephant/frontend/src/muya/native/index.html","Elephant/frontend/src/muya/native/main.js","Elephant/frontend/src/muya/native/style.css"],
+  "rule": "A component is not classified as migrated until its real user path and error/lifecycle behavior are proven."
+}
