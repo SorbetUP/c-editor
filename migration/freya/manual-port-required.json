@@ -1,5 +1,0 @@
-{
-  "status": "PARTIAL_INVENTORY",
-  "source": "inventory/manual-port-required.json",
-  "rule": "The detailed surfaces, paths, reasons, and unvalidated deletions are in inventory/manual-port-required.json. No unsupported construction is silently dropped by the converter."
-}

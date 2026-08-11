@@ -1,6 +1,0 @@
-{
-  "status": "PARTIAL_INVENTORY",
-  "source": "inventory/web-api-usage.json",
-  "counts": {"document_files": 95, "document_occurrences": 425, "query_selector_files": 59, "query_selector_occurrences": 203, "selection_range_files": 72, "selection_range_occurrences": 520, "content_editable_files": 26, "mutation_observer_files": 9, "tauri_api_files": 73, "pinia_store_files": 54},
-  "rule": "The detailed audited counts and conversion rules are in inventory/web-api-usage.json."
-}

@@ -1,7 +1,0 @@
-{
-  "status": "PARTIAL_INVENTORY",
-  "source": "inventory/css-features.json",
-  "external_css_files": 106,
-  "high_risk_features": ["position: fixed", "backdrop-filter", "color-mix", "!important", "-webkit-app-region", "responsive media queries"],
-  "rule": "The detailed risk and conversion policy are in inventory/css-features.json."
-}
