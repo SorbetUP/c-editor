@@ -223,10 +223,14 @@ impl ShellState {
 }
 
 fn choose_vault(mut state: State<ShellState>) {
-    let Some(root) = vault_picker::pick_vault() else {
-        return;
-    };
-    state.write().open_vault(root);
+    match vault_picker::pick_vault() {
+        Ok(Some(root)) => state.write().open_vault(root),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("[freya][vault-picker] action:failure error={error}");
+            state.write().error = Some(error);
+        }
+    }
 }
 
 pub fn app() -> impl IntoElement {
