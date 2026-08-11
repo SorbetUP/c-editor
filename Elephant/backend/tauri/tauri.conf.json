@@ -14,7 +14,7 @@
       "cwd": "../../.."
     },
     "devUrl": "http://127.0.0.1:1420",
-    "frontendDist": "../../../build/out/renderer"
+    "frontendDist": "/Users/sorbet/Desktop/Dev/c-editor/build/out/renderer"
   },
   "app": {
     "withGlobalTauri": true,
@@ -44,17 +44,18 @@
       "assetProtocol": {
         "enable": true,
         "scope": []
-      }
+      },
+      "capabilities": ["default"]
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["resources/official-addons"],
+    "resources": ["/Users/sorbet/Desktop/Dev/c-editor/Elephant/backend/tauri/resources/official-addons"],
     "icon": [
-      "../../assets/static/icon.png",
-      "../../assets/static/icon.icns",
-      "../../assets/static/icon.ico"
+      "/Users/sorbet/Desktop/Dev/c-editor/Elephant/assets/static/icon.png",
+      "/Users/sorbet/Desktop/Dev/c-editor/Elephant/assets/static/icon.icns",
+      "/Users/sorbet/Desktop/Dev/c-editor/Elephant/assets/static/icon.ico"
     ]
   },
   "plugins": {

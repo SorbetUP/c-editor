@@ -21,6 +21,10 @@ export const COMPATIBILITY_CALLS = Object.freeze({
   'vaults.setIcon': (payload) => getBridge()?.setVaultIcon?.(payload),
   'vaults.setName': (payload) => getBridge()?.setVaultName?.(payload),
   'vaults.remove': (payload) => getBridge()?.removeVault?.(payload),
+  'vaults.setEnabled': (payload) => getBridge()?.setVaultEnabled?.(payload),
+  'vaults.trash.list': () => getBridge()?.vaultTrash?.list?.(),
+  'vaults.trash.restore': (payload) => getBridge()?.vaultTrash?.restore?.(payload),
+  'vaults.trash.empty': () => getBridge()?.vaultTrash?.empty?.(),
   'directory.list': (payload = '') => getBridge()?.listDirectory?.(directoryListPayload(payload)),
   'notes.create': (payload = {}) => {
     const normalizedPayload = typeof payload === 'string' ? { relativePath: payload } : payload

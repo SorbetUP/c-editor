@@ -174,7 +174,7 @@ fn editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault() {
     runner.sync_and_update();
     click_label(&mut runner, "Save");
     runner.sync_and_update();
-    click_label(&mut runner, "Close");
+    click_label(&mut runner, "Close note");
     runner.sync_and_update();
     assert_eq!(accessible_nodes(&runner, "Paragraph").len(), 0);
 

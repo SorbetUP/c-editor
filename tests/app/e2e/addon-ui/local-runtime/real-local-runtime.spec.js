@@ -96,6 +96,13 @@ test('elephant.open-models starts the real service, discovers the cached GGUF an
     const initialStatus = await service.call('models.status')
     assert.equal(initialStatus.owner, 'elephant.open-models')
     assert.equal(initialStatus.serverRunning, false)
+    await assert.rejects(
+      service.call('models.download', { id: 'https://127.0.0.1:1/elephant-integrity-error.gguf' }, 10_000),
+      /download request failed|Model download returned HTTP|error/i
+    )
+    const failedDownloadStatus = await service.call('models.status')
+    assert.match(String(failedDownloadStatus.lastError || ''), /download/i)
+    evidence.events.push({ event: 'download.failure-visible', result: failedDownloadStatus })
     evidence.events.push({ event: 'status.before-model', result: initialStatus })
 
     const first = await ensureSharedModel(service, runtime)
@@ -131,6 +138,11 @@ test('elephant.open-models starts the real service, discovers the cached GGUF an
     const afterChat = await service.call('models.status')
     assert.equal(afterChat.serverRunning, true)
     assert.equal(afterChat.serverModelPath, first.model.path)
+    assert.equal(afterChat.runtime.executable, path.basename(BIN))
+    assert.ok(Array.isArray(afterChat.runtime.args))
+    assert.equal(afterChat.runtime.args.includes(first.model.path), false, 'runtime diagnostics must not expose the full model path')
+    assert.equal(afterChat.runtime.args.includes(path.basename(first.model.path)), true)
+    assert.ok(String(afterChat.runtime.version || '').length > 0)
     const llamaModels = await runtime.fetchJson(`${baseUrl}/models`)
     assert.ok((llamaModels.payload?.data || []).some((entry) => entry.id === discovered.fileName))
     evidence.events.push({ event: 'status.after-chat', result: afterChat, llamaModels: llamaModels.payload })

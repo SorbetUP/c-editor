@@ -71,10 +71,18 @@ describe('trusted addon manifest model', () => {
       runtime: { type: 'javascript-worker', entry: 'main.js' },
       contributes: { runtimeMode: 'trusted' }
     })
+    const secretCapable = normalizeAddonManifest({
+      id: 'com.example.secret-capable',
+      name: 'Secret capable',
+      version: '1.0.0',
+      permissions: { secrets: true }
+    })
 
     expect(getAddonAccessLevel(isolated)).toBe(ADDON_ACCESS_LEVEL.isolated)
     expect(getAddonAccessLevel(trusted)).toBe(ADDON_ACCESS_LEVEL.trusted)
     expect(isTrustedExternalManifest(trusted)).toBe(true)
+    expect(secretCapable.permissions.secrets).toBe(true)
+    expect(isolated.permissions?.secrets === true).toBe(false)
   })
 
   it('treats builtin addons as system addons', () => {
@@ -138,6 +146,56 @@ describe('hash-bound trusted approval', () => {
 })
 
 describe('trusted addon host API', () => {
+  it('routes permitted secret operations through the core broker and rejects missing permission', async () => {
+    const invoke = vi.fn(async (command, payload) => {
+      if (command !== 'tauri_addons_call') throw new Error(`Unexpected command: ${command}`)
+      return { command, payload }
+    })
+    const target = { __TAURI__: { core: { invoke } } }
+    const context = {
+      addonHost: null,
+      router: {},
+      pinia: {},
+      services: {},
+      runtime: 'tauri',
+      addons: {},
+      vueApp: {}
+    }
+
+    const permitted = createTrustedAddonApi({
+      manifest: { id: 'com.example.secrets', permissions: { secrets: true } },
+      packageHash: 'hash'
+    }, context, [], target)
+
+    await permitted.secrets.set('openai', 'token')
+    await permitted.secrets.get('openai')
+    await permitted.secrets.remove('openai')
+
+    expect(invoke).toHaveBeenNthCalledWith(1, 'tauri_addons_call', {
+      addonId: 'com.example.secrets',
+      method: 'secrets.set',
+      params: { name: 'openai', value: 'token' }
+    })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'tauri_addons_call', {
+      addonId: 'com.example.secrets',
+      method: 'secrets.get',
+      params: { name: 'openai' }
+    })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'tauri_addons_call', {
+      addonId: 'com.example.secrets',
+      method: 'secrets.remove',
+      params: { name: 'openai' }
+    })
+
+    const denied = createTrustedAddonApi({
+      manifest: { id: 'com.example.denied', permissions: { secrets: false } },
+      packageHash: 'hash'
+    }, context, [], target)
+
+    await expect(denied.secrets.get('openai')).rejects.toThrow('Addon secrets permission was not granted')
+    expect(invoke).toHaveBeenCalledTimes(3)
+  })
+
   it('opens addon workspace views through the AppShell event contract', () => {
     const target = { document: {}, dispatchEvent: vi.fn() }
     const context = {

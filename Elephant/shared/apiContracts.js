@@ -7,6 +7,7 @@ const optionalString = (value) => value === undefined || typeof value === 'strin
 const requiredString = (value) => typeof value === 'string' && value.trim().length > 0
 const textString = (value) => typeof value === 'string'
 const optionalBoolean = (value) => value === undefined || typeof value === 'boolean'
+const requiredBoolean = (value) => typeof value === 'boolean'
 const optionalNumber = (value) => value === undefined || Number.isFinite(Number(value))
 const optionalObject = (value) => value === undefined || isPlainObject(value)
 const optionalEnum = (allowed) => (value) => value === undefined || allowed.includes(value)
@@ -78,6 +79,7 @@ export const schema = Object.freeze({
   requiredString,
   textString,
   optionalBoolean,
+  requiredBoolean,
   optionalNumber,
   optionalObject,
   optionalEnum,
@@ -105,7 +107,19 @@ export const ELEPHANTNOTE_API_DOMAINS = Object.freeze({
       'vaults.setName',
       schema.object({ vaultId: requiredString, name: requiredString })
     ),
-    action('VAULTS_REMOVE', 'vaults.remove', schema.object({ vaultId: requiredString }))
+    action('VAULTS_REMOVE', 'vaults.remove', schema.object({ vaultId: requiredString })),
+    action(
+      'VAULTS_SET_ENABLED',
+      'vaults.setEnabled',
+      schema.object({ vaultId: requiredString, enabled: requiredBoolean })
+    ),
+    action('VAULTS_TRASH_LIST', 'vaults.trash.list'),
+    action(
+      'VAULTS_TRASH_RESTORE',
+      'vaults.trash.restore',
+      schema.object({ trashPath: requiredString })
+    ),
+    action('VAULTS_TRASH_EMPTY', 'vaults.trash.empty')
   ]),
   documents: Object.freeze([
     action(

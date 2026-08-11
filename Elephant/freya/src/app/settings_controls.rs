@@ -22,12 +22,16 @@ mod settings_search;
 #[path = "settings_surface.rs"]
 mod settings_surface;
 
-pub(super) fn settings_header(search: Input) -> Element {
-    settings_navigation::settings_header(search)
+pub(super) fn settings_header(search: Input, palette: theme::ThemePalette) -> Element {
+    settings_navigation::settings_header(search, palette)
 }
 
-pub(super) fn section_navigation(active_section: &str, state: State<SettingsViewState>) -> Element {
-    settings_navigation::section_navigation(active_section, state)
+pub(super) fn section_navigation(
+    active_section: &str,
+    state: State<SettingsViewState>,
+    palette: theme::ThemePalette,
+) -> Element {
+    settings_navigation::section_navigation(active_section, state, palette)
 }
 
 pub(super) fn preference_switch(
@@ -58,16 +62,26 @@ pub(super) fn delay_preference(
     settings_preference_controls::delay_preference(state, delay, enabled)
 }
 
+pub(super) fn theme_variant(
+    state: State<SettingsViewState>,
+    label_text: &'static str,
+    theme_id: &'static str,
+    active: bool,
+) -> Element {
+    settings_preference_controls::theme_variant(state, label_text, theme_id, active)
+}
+
+pub(super) fn navigation_visibility(
+    state: State<SettingsViewState>,
+    label_text: &'static str,
+    item_id: &'static str,
+    hidden_ids: Vec<String>,
+) -> Element {
+    settings_preference_controls::navigation_visibility(state, label_text, item_id, hidden_ids)
+}
+
 pub(super) fn search_results_content(state: State<SettingsViewState>, query: &str) -> Element {
     settings_search::search_results_content(state, query)
-}
-
-pub(super) fn surface_state(surface: &SettingsSurfaceState) -> Element {
-    settings_surface::surface_state(surface)
-}
-
-pub(super) fn unavailable_section(section_label: &str) -> Element {
-    settings_surface::unavailable_section(section_label)
 }
 
 pub(super) fn section_content(
@@ -76,6 +90,7 @@ pub(super) fn section_content(
     surface: &SettingsSurfaceState,
     query: &str,
 ) -> Element {
+    let palette = state.read().effects().palette();
     if !query.trim().is_empty() {
         return search_results_content(state, query);
     }
@@ -89,8 +104,12 @@ pub(super) fn section_content(
         .width(Size::fill())
         .height(Size::fill())
         .padding(Gaps::new_all(14.))
-        .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::token_color(palette, theme::ThemeToken::Surface))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(10.)
         .spacing(12.)
         .a11y_alt(format!("Settings section {active_section}"))
@@ -102,7 +121,9 @@ pub(super) fn section_content(
         );
 
     if !matches!(surface, SettingsSurfaceState::Ready) {
-        return content.child(surface_state(surface)).into_element();
+        return content
+            .child(settings_surface::surface_state(surface, palette))
+            .into_element();
     }
 
     let entries = match active_section {
@@ -111,12 +132,14 @@ pub(super) fn section_content(
         _ => CORE_SETTINGS_INDEX
             .iter()
             .filter(|entry| entry.section == active_section)
-            .map(settings_preference_controls::setting_row)
+            .map(|entry| settings_preference_controls::setting_row(entry, palette))
             .collect::<Vec<_>>(),
     };
 
     if entries.is_empty() {
-        return content.child(unavailable_section(&title)).into_element();
+        return content
+            .child(settings_surface::unavailable_section(&title, palette))
+            .into_element();
     }
 
     content.children(entries).into_element()

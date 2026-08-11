@@ -120,38 +120,6 @@ test.describe('real UI request coverage gaps', () => {
     }
   })
 
-  test('floating mode keeps the rail on the background with icon surfaces above it', async () => {
-    const context = await launchAuditApp()
-    try {
-      const { page } = context
-      await page.getByRole('button', { name: 'Settings' }).click()
-      const floating = page.getByRole('switch', { name: 'Floating surfaces' })
-      await floating.scrollIntoViewIfNeeded()
-      await floating.click()
-      await expect(page.locator('.en-shell')).toHaveClass(/en-floating-surfaces/)
-
-      const geometry = await page.locator('.en-rail').evaluate((rail) => {
-        const style = getComputedStyle(rail)
-        const icon = rail.querySelector('.en-rail-icon')
-        const iconStyle = icon ? getComputedStyle(icon) : null
-        return {
-          background: style.backgroundColor,
-          borderRight: style.borderRightWidth,
-          boxShadow: iconStyle?.boxShadow || 'none',
-          iconCount: rail.querySelectorAll('.en-rail-icon').length
-        }
-      })
-      expect(geometry.background).toBe(
-        await page.locator('.en-shell').evaluate((shell) => getComputedStyle(shell).backgroundColor)
-      )
-      expect(geometry.borderRight).toBe('0px')
-      expect(geometry.boxShadow).not.toBe('none')
-      expect(geometry.iconCount).toBeGreaterThan(0)
-    } finally {
-      await closeAuditApp(context)
-    }
-  })
-
   test('application topbar stays flat instead of rendering a decorative border', async () => {
     const context = await launchAuditApp()
     try {

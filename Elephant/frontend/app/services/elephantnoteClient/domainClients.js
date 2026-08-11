@@ -69,7 +69,13 @@ export const createDomainClients = (call, requireAtomicFeatureApi) => ({
     setActive: (vaultId) => call(API.VAULTS_SET_ACTIVE, { vaultId }),
     setIcon: (vaultId, icon) => call(API.VAULTS_SET_ICON, { vaultId, icon }),
     setName: (vaultId, name) => call(API.VAULTS_SET_NAME, { vaultId, name }),
-    remove: (vaultId) => call(API.VAULTS_REMOVE, { vaultId })
+    remove: (vaultId) => call(API.VAULTS_REMOVE, { vaultId }),
+    setEnabled: (vaultId, enabled) => call(API.VAULTS_SET_ENABLED, { vaultId, enabled }),
+    trash: {
+      list: () => call(API.VAULTS_TRASH_LIST),
+      restore: (trashPath) => call(API.VAULTS_TRASH_RESTORE, { trashPath }),
+      empty: () => call(API.VAULTS_TRASH_EMPTY)
+    }
   },
   directory: {
     list: (payload = '') => call(API.DIRECTORY_LIST, directoryListPayload(payload))

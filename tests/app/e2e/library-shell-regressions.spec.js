@@ -145,29 +145,30 @@ test.describe('library and shell visual contracts', () => {
     }
   })
 
-  test('floating surfaces keep the sidebar resize control embedded without a second border', async () => {
+  test('flat workspace surfaces keep the sidebar resize control embedded without a second border', async () => {
     const context = await launchLibraryApp()
     try {
       const { page } = context
-      await page.locator('.en-shell').evaluate((element) => {
-        element.classList.add('en-floating-surfaces')
-      })
-      await expect(page.locator('.en-shell')).toHaveClass(/en-floating-surfaces/)
-
       const metrics = await page.locator('[data-sidebar-resizer]').evaluate((element) => ({
         background: getComputedStyle(element).backgroundColor,
         border: getComputedStyle(element).borderRightStyle,
         handleOpacity: getComputedStyle(element, '::after').opacity,
         handleDisplay: getComputedStyle(element, '::after').display,
         sidebarBorder: getComputedStyle(document.querySelector('.en-sidebar')).borderRightStyle,
-        bodyBorder: getComputedStyle(document.querySelector('.en-body-main')).borderRightStyle
+        bodyBorder: getComputedStyle(document.querySelector('.en-body-main')).borderRightStyle,
+        railShadow: getComputedStyle(document.querySelector('.en-rail')).boxShadow,
+        sidebarShadow: getComputedStyle(document.querySelector('.en-sidebar')).boxShadow,
+        bodyShadow: getComputedStyle(document.querySelector('.en-body-main')).boxShadow
       }))
       expect(metrics.background).toBe('rgba(0, 0, 0, 0)')
       expect(metrics.border).toBe('none')
       expect(metrics.handleOpacity).toBe('0')
       expect(metrics.handleDisplay).toBe('none')
-      expect(metrics.sidebarBorder).toBe('none')
-      expect(metrics.bodyBorder).toBe('solid')
+      expect(metrics.sidebarBorder).toBe('solid')
+      expect(metrics.bodyBorder).toBe('none')
+      expect(metrics.railShadow).toBe('none')
+      expect(metrics.sidebarShadow).toBe('none')
+      expect(metrics.bodyShadow).toBe('none')
     } finally {
       await closeLibraryApp(context)
     }

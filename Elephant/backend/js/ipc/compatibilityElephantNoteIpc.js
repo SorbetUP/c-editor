@@ -12,6 +12,14 @@ export const registerCompatibilityElephantNoteIpc = ({ ipcMain, api }) => {
     api.call(ELEPHANTNOTE_API_ACTIONS.VAULTS_SET_NAME, payload))
   ipcMain.handle('elephantnote:removeVault', async(_event, payload) =>
     api.call(ELEPHANTNOTE_API_ACTIONS.VAULTS_REMOVE, payload))
+  ipcMain.handle('elephantnote:setVaultEnabled', async(_event, payload) =>
+    api.call(ELEPHANTNOTE_API_ACTIONS.VAULTS_SET_ENABLED, payload))
+  ipcMain.handle('elephantnote:listVaultTrash', async() =>
+    api.call(ELEPHANTNOTE_API_ACTIONS.VAULTS_TRASH_LIST))
+  ipcMain.handle('elephantnote:restoreVaultTrash', async(_event, payload) =>
+    api.call(ELEPHANTNOTE_API_ACTIONS.VAULTS_TRASH_RESTORE, payload))
+  ipcMain.handle('elephantnote:emptyVaultTrash', async() =>
+    api.call(ELEPHANTNOTE_API_ACTIONS.VAULTS_TRASH_EMPTY))
   ipcMain.handle('elephantnote:listDirectory', async(_event, relativePath = '') =>
     api.call(ELEPHANTNOTE_API_ACTIONS.DIRECTORY_LIST, { relativePath }))
   ipcMain.handle('elephantnote:createNote', async(_event, payload) =>

@@ -44,10 +44,11 @@ or if the resulting dimensions do not match the measured rectangle.
 
 The Playwright capability probe remains intentionally separate and honest:
 `webkit.connectOverCDP` reports unsupported because Playwright CDP attachment
-is Chromium-only. Official Tauri guidance for macOS now requires
+is Chromium-only. Official Tauri guidance for macOS requires
 `@wdio/tauri-service` with `driverProvider: 'embedded'` and
-`tauri-plugin-wdio-webdriver`; neither is present in this repository, so this
-write set does not label the native CGEvent adapter as a WebDriver session.
+`tauri-plugin-wdio-webdriver`. The dedicated implementation lives in
+`tools/tauri-wdio-embedded`; this native CGEvent adapter remains a separate
+diagnostic capture path and does not label its evidence as a WebDriver session.
 
 The acceptance contract enables the smallest product hook through
 `ELEPHANT_ACCEPTANCE_TAURI_PORT` plus the explicit absolute

@@ -327,44 +327,33 @@ test.describe('production UI regression paths', () => {
     }
   })
 
-  test('floating surfaces can be enabled from Appearance and persist in the shell', async () => {
+  test('keeps the rail, workspace and note editor on flat structural surfaces', async () => {
     const context = await launchFeatureApp()
-    let reopenedApp
     try {
       const { page } = context
-      await page.getByRole('button', { name: 'Settings' }).click()
-      await expect(page.locator('.en-settings-panel')).toBeVisible()
-      const floating = page.getByRole('switch', { name: 'Floating surfaces' })
-      await floating.scrollIntoViewIfNeeded()
-      await expect(floating).toHaveAttribute('aria-checked', 'false')
-      await floating.click()
-      await expect(floating).toHaveAttribute('aria-checked', 'true')
-      await expect(page.locator('.en-shell')).toHaveClass(/en-floating-surfaces/)
-      await expect
-        .poll(() =>
-          page.evaluate(() => window.localStorage.getItem('elephantnote:pref:floatingSurfaces'))
-        )
-        .toBe('true')
-
-      await context.app.close()
-      const reopened = await launchElectron([], {
-        userDataPath: context.fixture.userDataPath,
-        env: {
-          ELEPHANTNOTE_CONFIG_DIR: context.fixture.configRoot,
-          ELEPHANT_E2E_VAULT_ROOT: context.fixture.vaultRoot,
-          ELEPHANTNOTE_MUYA_RUNTIME: 'rust'
+      const structuralSurfaceMetrics = (selector) => page.locator(selector).evaluate((element) => {
+        const style = getComputedStyle(element)
+        return {
+          boxShadow: style.boxShadow,
+          borderRadius: style.borderRadius,
+          margin: style.margin
         }
       })
-      reopenedApp = reopened.app
-      await reopened.page.setViewportSize({ width: 1366, height: 900 })
-      await reopened.page.waitForSelector('.en-library-grid', { state: 'visible', timeout: 30000 })
-      await reopened.page.getByRole('button', { name: 'Settings' }).click()
-      const persistedFloating = reopened.page.getByRole('switch', { name: 'Floating surfaces' })
-      await persistedFloating.scrollIntoViewIfNeeded()
-      await expect(persistedFloating).toHaveAttribute('aria-checked', 'true')
-      await expect(reopened.page.locator('.en-shell')).toHaveClass(/en-floating-surfaces/)
+
+      for (const selector of ['.en-rail', '.en-sidebar', '.en-body-main']) {
+        const metrics = await structuralSurfaceMetrics(selector)
+        expect(metrics.boxShadow).toBe('none')
+        expect(metrics.borderRadius).toBe('0px')
+        expect(metrics.margin).toBe('0px')
+      }
+
+      await card(page, 'Alpha note').click()
+      await expect(page.locator('.en-note-editor-shell')).toBeVisible()
+      const noteMetrics = await structuralSurfaceMetrics('.en-note-editor-shell')
+      expect(noteMetrics.boxShadow).toBe('none')
+      expect(noteMetrics.borderRadius).toBe('0px')
+      expect(noteMetrics.margin).toBe('0px')
     } finally {
-      await reopenedApp?.close().catch(() => {})
       await closeFeatureApp(context)
     }
   })

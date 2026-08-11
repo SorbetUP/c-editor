@@ -35,7 +35,8 @@ export async function validateManifest (manifest, context) {
   }
   if (manifest.schemaVersion !== 1) issues.push(issue('manifest', `${runtime} manifest schemaVersion must be 1`))
   if (manifest.scenarioId !== scenario.id) issues.push(issue('scenario-mismatch', `${runtime} manifest scenario id differs`, { expected: scenario.id, actual: manifest.scenarioId }))
-  if (manifest.runtime !== runtime) issues.push(issue('runtime-mismatch', `${runtime} manifest identifies another runtime`, { actual: manifest.runtime }))
+  const acceptedManifestRuntimes = runtime === 'tauri' ? ['tauri', 'tauri-wdio-embedded'] : [runtime]
+  if (!acceptedManifestRuntimes.includes(manifest.runtime)) issues.push(issue('runtime-mismatch', `${runtime} manifest identifies another runtime`, { actual: manifest.runtime }))
 
   const provenance = manifest.provenance
   if (!provenance || typeof provenance !== 'object') {
@@ -44,7 +45,10 @@ export async function validateManifest (manifest, context) {
     if (provenance.runId !== runId) issues.push(issue('provenance', `${runtime} runId does not match the orchestrator invocation`, { expected: runId, actual: provenance.runId }))
     if (provenance.commandSha256 !== commandSha256) issues.push(issue('provenance', `${runtime} command digest does not match the configured capture command`))
     if (provenance.captureNonce !== captureNonce) issues.push(issue('provenance', `${runtime} capture nonce does not match the orchestrator invocation`))
-    if (provenance.captureId !== `${runtime}:${runId}`) issues.push(issue('provenance', `${runtime} captureId is not bound to its runtime and run`))
+    const acceptedCaptureIds = runtime === 'tauri'
+      ? [`tauri:${runId}`, `tauri-wdio-embedded:${runId}`]
+      : [`${runtime}:${runId}`]
+    if (!acceptedCaptureIds.includes(provenance.captureId)) issues.push(issue('provenance', `${runtime} captureId is not bound to its runtime and run`))
     const expectedDriver = runtime === 'tauri' ? 'webdriver' : 'freya-testing'
     if (provenance.driver !== expectedDriver) issues.push(issue('control-plane', `${runtime} capture driver must be ${expectedDriver}`, { actual: provenance.driver }))
     if (runtime === 'tauri' && !['webdriver', 'acceptance-http'].includes(provenance.controlPlane)) {

@@ -34,6 +34,7 @@ const createRuntimeProbe = (addonId) => {
     styles: []
   }
   const storage = new Map()
+  const secrets = new Map()
   let aiConfig = {}
   if (addonId === 'elephant.open-models') {
     registrations.resources.set('ai.config', Object.freeze({
@@ -119,6 +120,11 @@ const createRuntimeProbe = (addonId) => {
       set: vi.fn(async (key, value) => { storage.set(key, value); return value }),
       remove: vi.fn(async (key) => storage.delete(key)),
       entries: vi.fn(async () => [...storage.entries()])
+    },
+    secrets: {
+      get: vi.fn(async (key) => secrets.get(key) ?? null),
+      set: vi.fn(async (key, value) => { secrets.set(key, value); return value }),
+      remove: vi.fn(async (key) => secrets.delete(key))
     },
     native: {
       status: vi.fn(async () => ({ ok: true, configured: false, running: false })),

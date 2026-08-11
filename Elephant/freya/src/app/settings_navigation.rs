@@ -6,7 +6,7 @@ use crate::{settings_contract::CORE_SECTIONS, theme};
 
 use super::super::SettingsViewState;
 
-pub(super) fn settings_header(search: Input) -> Element {
+pub(super) fn settings_header(search: Input, palette: theme::ThemePalette) -> Element {
     rect()
         .width(Size::fill())
         .height(Size::px(48.))
@@ -24,26 +24,38 @@ pub(super) fn settings_header(search: Input) -> Element {
                 .width(Size::px(220.))
                 .height(Size::px(34.))
                 .padding(Gaps::new(8., 12., 8., 12.))
-                .background(theme::color(theme::SURFACE))
-                .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+                .background(theme::token_color(palette, theme::ThemeToken::Surface))
+                .border(
+                    Border::new()
+                        .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                        .width(1.),
+                )
                 .with_corner_radius(8.)
                 .child(search),
         )
         .into_element()
 }
 
-pub(super) fn section_navigation(active_section: &str, state: State<SettingsViewState>) -> Element {
+pub(super) fn section_navigation(
+    active_section: &str,
+    state: State<SettingsViewState>,
+    palette: theme::ThemePalette,
+) -> Element {
     let items = CORE_SECTIONS
         .iter()
-        .map(|section| section_button(section.id, section.label, active_section, state))
+        .map(|section| section_button(section.id, section.label, active_section, state, palette))
         .collect::<Vec<_>>();
 
     rect()
         .width(Size::px(196.))
         .height(Size::fill())
         .padding(Gaps::new_all(8.))
-        .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::token_color(palette, theme::ThemeToken::Surface))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(10.)
         .spacing(3.)
         .a11y_alt("Settings sections")
@@ -57,13 +69,13 @@ pub(super) fn section_navigation(active_section: &str, state: State<SettingsView
                 .child(
                     label()
                         .font_size(11.)
-                        .color(theme::color(theme::MUTED))
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .text("Local-first"),
                 )
                 .child(
                     label()
                         .font_size(11.)
-                        .color(theme::color(theme::MUTED))
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .text("v0.1.0"),
                 ),
         )
@@ -75,6 +87,7 @@ fn section_button(
     label_text: &'static str,
     active_section: &str,
     state: State<SettingsViewState>,
+    palette: theme::ThemePalette,
 ) -> Element {
     let selected = active_section == id;
     let mut state = state;
@@ -83,9 +96,9 @@ fn section_button(
         .height(Size::px(38.))
         .padding(Gaps::new(8., 10., 8., 10.))
         .background(if selected {
-            theme::color(theme::SOFT)
+            theme::token_color(palette, theme::ThemeToken::Soft)
         } else {
-            theme::color(theme::SURFACE)
+            theme::token_color(palette, theme::ThemeToken::Surface)
         })
         .with_corner_radius(7.)
         .horizontal()
@@ -95,6 +108,10 @@ fn section_button(
         })
         .a11y_alt(format!("Select {label_text} settings"))
         .child(label().text(label_text))
-        .child(label().color(theme::color(theme::MUTED)).text("›"))
+        .child(
+            label()
+                .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                .text("›"),
+        )
         .into_element()
 }

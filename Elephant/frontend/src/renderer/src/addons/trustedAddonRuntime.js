@@ -108,6 +108,12 @@ export const createTrustedAddonApi = (record, context, sessionDisposables = [], 
     method,
     params
   }, target)
+  const callSecretBroker = async (method, params = {}) => {
+    if (manifest.permissions?.secrets !== true) {
+      throw new Error('Addon secrets permission was not granted')
+    }
+    return callBroker(method, params)
+  }
 
   const api = {
     manifest,
@@ -136,6 +142,11 @@ export const createTrustedAddonApi = (record, context, sessionDisposables = [], 
       set: (key, value) => callBroker('storage.set', { key, value }),
       remove: (key) => callBroker('storage.remove', { key }),
       entries: () => callBroker('storage.entries')
+    }),
+    secrets: Object.freeze({
+      get: (name) => callSecretBroker('secrets.get', { name }),
+      set: (name, value) => callSecretBroker('secrets.set', { name, value }),
+      remove: (name) => callSecretBroker('secrets.remove', { name })
     }),
     native: Object.freeze({
       status: () => invoke('tauri_addons_sidecar_status', { addonId: manifest.id }, target),

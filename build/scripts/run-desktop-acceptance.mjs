@@ -149,6 +149,61 @@ const stopChild = () => new Promise((resolvePromise) => {
   setTimeout(finish, 5000)
 })
 
+const runVaultManagementScenario = async() => {
+  const secondVaultRoot = join(fixtureRoot, 'vault-two')
+  mkdirSync(secondVaultRoot, { recursive: true })
+  await command('selectVault', secondVaultRoot)
+  await command('click', '.en-settings-nav button:nth-of-type(3)')
+  await command('waitFor', '.en-settings-content[data-active-section="vaults"]', 10000)
+  const vaultList = await waitForVisibleDom('.en-vault-list', 10000)
+  await command('click', '[aria-label="Activate vault"]')
+  const activatedVault = await waitForVisibleDom('[aria-label="Disable vault"]', 10000)
+  await command('click', '[aria-label="Disable vault"]')
+  const disabledVault = await waitForVisibleDom('[aria-label="Enable vault"]', 10000)
+  const secondVault = await waitForVisibleDom('[aria-label="Disable vault-two"]', 10000)
+  await command('click', '[aria-label="Enable vault"]')
+  const reenabledVault = await waitForVisibleDom('[aria-label="Disable vault"]', 10000)
+  await command('click', '[aria-label="Disable vault-two"]')
+  const fallbackActivatedVault = await waitForVisibleDom('[aria-label="Disable vault"]', 10000)
+  await command('click', '[aria-label="Change icon for vault"]')
+  const iconPicker = await waitForVisibleDom('.en-vault-icon-picker', 10000)
+  await command('click', '.en-vault-icon-choice:nth-of-type(2)')
+  await command('waitUntilGone', '.en-vault-icon-picker', 10000)
+  await command('click', '[aria-label="Close settings"]')
+  await command('waitUntilGone', '.en-settings-panel', 10000)
+  return { vaultList, activatedVault, disabledVault, secondVault, reenabledVault, fallbackActivatedVault, iconPicker }
+}
+
+const runVaultTrashSettingsScenario = async() => {
+  const trashNote = await command('invokeTauri', 'tauri_notes_create', { relativePath: '', filename: 'Trash acceptance.md', title: 'Trash acceptance' })
+  await command('invokeTauri', 'tauri_entries_delete', { relativePath: 'Trash acceptance.md' })
+  const trashItems = await command('invokeTauri', 'tauri_vault_trash_list')
+  if (!trashNote?.path || !Array.isArray(trashItems) || !trashItems.some((item) => item.originalPath === 'Trash acceptance.md')) {
+    throw new Error(`Vault trash did not record the deleted note: ${JSON.stringify({ trashNote, trashItems })}`)
+  }
+  await command('click', '[aria-label="Settings"]')
+  await command('waitFor', '.en-settings-panel', 10000)
+  await command('click', '.en-settings-nav button:nth-of-type(3)')
+  const vaultSettings = await command('waitFor', '.en-settings-content[data-active-section="vaults"]', 10000)
+  const vaultTrashSummary = await waitForDomText('.en-vault-trash-summary', '1 deleted item', 10000)
+  await command('click', '[data-testid="vault-trash-toggle"]')
+  const vaultTrashUi = await waitForDomText('.en-vault-trash-body', 'Trash acceptance.md', 10000)
+  await command('click', '.en-vault-trash-item button')
+  const restoredTrash = await waitForDomText('.en-vault-trash-summary', 'Trash is empty', 10000)
+  const restoredNote = await command('invokeTauri', 'tauri_notes_read', { relativePath: 'Trash acceptance.md' })
+  if (vaultSettings.text.includes('Trash and recovery') || vaultSettings.text.includes('Active vault') || !vaultTrashSummary.text.includes('1 deleted item') || !vaultTrashUi.text.includes('Trash acceptance.md') || !restoredNote?.content?.includes('# Trash acceptance')) {
+    throw new Error(`Vault settings trash controls are incomplete: ${JSON.stringify({ vaultSettings, vaultTrashSummary, vaultTrashUi, restoredTrash, restoredNote })}`)
+  }
+  const vaultManagementUi = process.env.ELEPHANT_ACCEPTANCE_VAULT_MANAGEMENT === '1'
+    ? await runVaultManagementScenario()
+    : null
+  if (!vaultManagementUi) {
+    await command('click', '[aria-label="Close settings"]')
+    await command('waitUntilGone', '.en-settings-panel', 10000)
+  }
+  return { trashNote, trashItems, restoredTrash, restoredNote, vaultSettings, vaultTrashSummary, vaultTrashUi, vaultManagementUi }
+}
+
 let result
 try {
   const emptyVaultUi = await command('readDom', '.en-empty-card')
@@ -156,6 +211,16 @@ try {
     throw new Error(`First-run vault picker is not visible: ${JSON.stringify(emptyVaultUi)}`)
   }
   await command('selectVault', vaultRoot)
+  if (process.env.ELEPHANT_ACCEPTANCE_VAULT_ONLY === '1') {
+    const vaultUiResult = await runVaultTrashSettingsScenario()
+    result = { emptyVaultUi, vaultUiResult }
+    writeFileSync(join(artifactRoot, 'latest.json'), JSON.stringify({ at: new Date().toISOString(), runtime: 'tauri', result }, null, 2))
+    writeFileSync(join(artifactRoot, 'latest-tauri.log'), output, 'utf8')
+    console.log(`[acceptance-runner] vault trash/settings scenario passed ${JSON.stringify({ restored: vaultUiResult.restoredTrash.text.includes('Trash is empty'), deletedCount: vaultUiResult.vaultTrashSummary.text })}`)
+    await stopChild()
+    rmSync(fixtureRoot, { recursive: true, force: true })
+    process.exit(0)
+  }
   if (process.env.ELEPHANT_ACCEPTANCE_UI_ONLY === '1') {
     const createToolbar = await command('waitFor', '.en-library-toolbar', 10000)
     const createButton = await command('readDom', '.en-create-button-primary')
@@ -210,7 +275,8 @@ try {
     if (!committedRename.text.includes('Acceptance renamed folder') || !compactListView.attributes.class?.includes('list')) {
       throw new Error(`Inline folder rename or list view failed: ${JSON.stringify({ committedRename, listView, compactListView })}`)
     }
-    const uiResult = { createToolbar, createButton, railVault, createMenu, createOptions, excalidrawLogo, menuItemCount, drawingDialog, drawingCanvas, drawingNamePrompt, drawingCardPreview, folderMenuTrigger, folderActions, folderRenameAction, cancelledRename, committedRename, listView, compactListView }
+    const vaultUiResult = await runVaultTrashSettingsScenario()
+    const uiResult = { createToolbar, createButton, railVault, createMenu, createOptions, excalidrawLogo, menuItemCount, drawingDialog, drawingCanvas, drawingNamePrompt, drawingCardPreview, folderMenuTrigger, folderActions, folderRenameAction, cancelledRename, committedRename, listView, compactListView, ...vaultUiResult }
     result = { emptyVaultUi: null, uiResult }
     writeFileSync(join(artifactRoot, 'latest.json'), JSON.stringify({ at: new Date().toISOString(), runtime: 'tauri', result }, null, 2))
     writeFileSync(join(artifactRoot, 'latest-tauri.log'), output, 'utf8')

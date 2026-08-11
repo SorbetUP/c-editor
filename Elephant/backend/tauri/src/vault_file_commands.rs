@@ -18,6 +18,9 @@ fn candidate_path(root: &Path, pathname: &str) -> R<PathBuf> {
   if pathname.trim().is_empty() {
     return Err("A vault path is required.".to_string());
   }
+  if pathname.contains('\0') || pathname.replace('\\', "/").split('/').any(|part| part == "..") {
+    return Err(format!("Parent path components are not allowed: {pathname}"));
+  }
   let candidate = PathBuf::from(pathname);
   Ok(if candidate.is_absolute() { candidate } else { root.join(candidate) })
 }
@@ -42,6 +45,9 @@ fn writable_path_inside_root(app: &AppHandle, pathname: &str) -> R<PathBuf> {
     return Err(format!("Refusing to write outside the active vault: {}", candidate.to_string_lossy()));
   }
   let file_name = candidate.file_name().ok_or_else(|| "The destination has no file name.".to_string())?;
+  if candidate.exists() && fs::symlink_metadata(&candidate).map_err(|error| error.to_string())?.file_type().is_symlink() {
+    return Err(format!("Refusing to write through a symlink: {}", candidate.to_string_lossy()));
+  }
   Ok(parent.join(file_name))
 }
 
@@ -93,6 +99,10 @@ pub fn tauri_vault_ensure_dir(app: AppHandle, pathname: String) -> R<Value> {
 #[tauri::command]
 pub fn tauri_vault_remove_path(app: AppHandle, pathname: String) -> R<Value> {
   let path = existing_path_inside_root(&app, &pathname)?;
+  let root = canonical_root(&app)?;
+  if path == root {
+    return Err("The vault root cannot be removed.".to_string());
+  }
   if path.is_dir() {
     fs::remove_dir_all(&path).map_err(|error| error.to_string())?;
   } else {

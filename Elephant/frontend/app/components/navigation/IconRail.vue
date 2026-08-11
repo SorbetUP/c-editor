@@ -164,6 +164,13 @@
             >
               <Plus class="en-vault-menu-add-icon" /><span>Add another vault</span>
             </button>
+            <button
+              class="en-vault-menu-item en-vault-menu-add"
+              type="button"
+              @click="openVaultSettings"
+            >
+              <Settings class="en-vault-menu-add-icon" /><span>Manage vaults</span>
+            </button>
           </div>
         </transition>
       </div>
@@ -402,6 +409,11 @@ const addVault = async () => {
     activeVaultId: store.activeVaultId || '',
     vaultCount: store.vaults.length
   })
+}
+const openVaultSettings = () => {
+  showVaultMenu.value = false
+  pushIconRailLog('vault:settings-opened', { vaultCount: store.vaults.length })
+  emit('open-settings', 'vaults')
 }
 const toggleIconPicker = (vaultId) => {
   editingVaultId.value = editingVaultId.value === vaultId ? '' : vaultId

@@ -1118,6 +1118,7 @@ version = "0.1.0"
 dependencies = [
  "elephantnote-knowledge-core",
  "freya",
+ "freya-clipboard",
  "freya-testing",
  "muya-core",
  "rusqlite",

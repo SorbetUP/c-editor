@@ -50,6 +50,14 @@ const dispatchApiAction = async (bridge, action, payload = {}) => {
       return bridge.setVaultName(payload)
     case apiActions.VAULTS_REMOVE:
       return bridge.removeVault(payload)
+    case apiActions.VAULTS_SET_ENABLED:
+      return bridge.setVaultEnabled(payload)
+    case apiActions.VAULTS_TRASH_LIST:
+      return bridge.vaultTrash.list()
+    case apiActions.VAULTS_TRASH_RESTORE:
+      return bridge.vaultTrash.restore(payload)
+    case apiActions.VAULTS_TRASH_EMPTY:
+      return bridge.vaultTrash.empty()
     case apiActions.DIRECTORY_LIST:
       return bridge.listDirectory(payload)
     case apiActions.NOTES_CREATE:
@@ -125,6 +133,12 @@ const createBridge = (target) => {
     setVaultIcon: (payload = {}) => invoke(target, 'tauri_vaults_set_icon', normalizePayload(payload)),
     setVaultName: (payload = {}) => invoke(target, 'tauri_vaults_set_name', normalizePayload(payload)),
     removeVault: (payload = {}) => invoke(target, 'tauri_vaults_remove', normalizePayload(payload)),
+    setVaultEnabled: (payload = {}) => invoke(target, 'tauri_vaults_set_enabled', normalizePayload(payload)),
+    vaultTrash: {
+      list: () => invoke(target, 'tauri_vault_trash_list'),
+      restore: (payload = {}) => invoke(target, 'tauri_vault_trash_restore', normalizePayload(payload)),
+      empty: () => invoke(target, 'tauri_vault_trash_empty')
+    },
     listDirectory: (payload = {}) => invoke(target, 'tauri_directory_list', normalizeDirectoryPayload(payload)),
     createNote: (payload = {}) => invoke(target, 'tauri_notes_create', normalizePayload(payload)),
     createFolder: (payload = {}) => invoke(target, 'tauri_folders_create', normalizePayload(payload)),

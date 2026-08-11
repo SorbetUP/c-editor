@@ -1,0 +1,64 @@
+//! Task marker interaction routing.
+
+use freya::prelude::*;
+use muya_core::NodeId;
+
+use crate::editor::EditorAction;
+
+use super::super::ShellState;
+
+pub(crate) fn task_marker(
+    state: State<ShellState>,
+    autosave_generation: State<u64>,
+    item_id: NodeId,
+    checked: bool,
+    marker: String,
+) -> Element {
+    let label_text = if checked {
+        "Task checked"
+    } else {
+        "Task unchecked"
+    };
+    let mut marker_state = state;
+    let mut marker_generation = autosave_generation;
+    rect()
+        .width(Size::px(24.))
+        .height(Size::px(24.))
+        .center()
+        .a11y_alt(label_text)
+        .on_mouse_up(move |_| {
+            let result = marker_state
+                .write()
+                .editor
+                .as_mut()
+                .ok_or_else(|| "cannot toggle task without an open note".to_string())
+                .and_then(|editor| {
+                    editor
+                        .dispatch(EditorAction::SetTaskChecked {
+                            item: item_id,
+                            checked: !checked,
+                            auto_check: false,
+                        })
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                });
+            match result {
+                Ok(()) => {
+                    *marker_generation.write() += 1;
+                    eprintln!(
+                        "[freya][editor] action:complete action=toggle-task item={:?} checked={}",
+                        item_id, !checked
+                    );
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[freya][editor] action:failure action=toggle-task item={:?} error={error}",
+                        item_id
+                    );
+                    marker_state.write().error = Some(error);
+                }
+            }
+        })
+        .child(label().font_size(16.).text(marker))
+        .into_element()
+}

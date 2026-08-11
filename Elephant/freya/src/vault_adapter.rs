@@ -9,8 +9,8 @@
 //! Provenance:
 //! - `Elephant/backend/tauri/src/vault/entries.rs`: directory pagination,
 //!   entry summaries, note/folder CRUD, rename and move.
-//! - `Elephant/backend/tauri/src/fts.rs`: Markdown scanning, SQLite FTS5,
-//!   excerpt generation and BM25 ranking.
+//! - `Elephant/backend/tauri/src/fts.rs`: SQLite FTS5 ingestion, excerpt
+//!   generation and BM25 ranking.
 //! - `Elephant/backend/tauri/src/vault/types.rs`: `VaultDescriptor`, vault
 //!   identity and schema types.
 //! - `Elephant/backend/tauri/src/vault_layout.rs`: hidden vault roots,
@@ -81,7 +81,6 @@ pub const PROVENANCE: &[&str] = &[
     "Elephant/backend/tauri/src/vault/entries.rs::create_folder",
     "Elephant/backend/tauri/src/vault/entries.rs::rename_entry",
     "Elephant/backend/tauri/src/vault/entries.rs::move_entry",
-    "Elephant/backend/tauri/src/fts.rs::scan_markdown_files",
     "Elephant/backend/tauri/src/fts.rs::FtsIndex",
     "Elephant/backend/tauri/src/vault/types.rs::VaultDescriptor",
     "Elephant/backend/tauri/src/vault_layout.rs::is_visible_vault_path",
@@ -404,9 +403,7 @@ impl VaultAdapter {
     }
 
     pub fn rebuild_search_index(&self) -> AdapterResult<IndexRefreshStatus> {
-        search_index::rebuild(&self.descriptor.id, self.root(), |relative_path| {
-            self.find_entry(relative_path).map(|entry| entry.title)
-        })
+        search_index::rebuild(self)
     }
 
     pub fn search_index(

@@ -30,7 +30,12 @@ pub(super) fn load_from_root(root: PathBuf) -> ShellState {
             ));
             state.sidebar_visible = preferences.sidebar_visible;
             state.sidebar_width = preferences.sidebar_width;
-            state.rail_order = preferences.rail_order;
+            state.rail_order = if preferences.rail_order_persisted {
+                preferences.rail_order.clone()
+            } else {
+                let effects = super::settings::SettingsViewState::default().effects();
+                effects.startup_rail_order(&preferences.rail_order)
+            };
             state.vault = Some(vault);
             let preference_error = state.error.clone();
             state.reload_directory("");

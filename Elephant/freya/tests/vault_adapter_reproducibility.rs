@@ -68,22 +68,32 @@ fn rebuild_uses_the_committed_fts_index_and_removes_stale_documents() {
     )
     .expect("write dense note");
     fs::write(fixture.path().join("Sparse.md"), "# Sparse\n\nneedle\n").expect("write sparse note");
+    fs::create_dir_all(fixture.path().join("Nested")).expect("create nested directory");
+    fs::write(
+        fixture.path().join("Nested/Deep.md"),
+        "# Deep\n\nneedle elsewhere\n",
+    )
+    .expect("write nested note");
+    fs::write(fixture.path().join(".Hidden.md"), "# Hidden\n\nneedle\n")
+        .expect("write hidden note");
     let adapter = VaultAdapter::open(fixture.path()).expect("open adapter");
 
     let first = adapter
         .rebuild_search_index()
         .expect("rebuild committed FTS index");
     assert_eq!(first.status, "complete");
-    assert_eq!(first.scanned, 2);
+    assert_eq!(first.scanned, 3);
     assert!(first.failed.is_empty());
     assert!(fixture
         .path()
         .join(".elephantnote/index/notes.sqlite")
         .is_file());
     let hits = adapter.search_index("needle", 20).expect("search real FTS");
-    assert_eq!(hits.len(), 2);
+    assert_eq!(hits.len(), 3);
     assert_eq!(hits[0].path, "Dense.md");
     assert!(hits[0].score < hits[1].score);
+    assert!(hits.iter().any(|hit| hit.path == "Nested/Deep.md"));
+    assert!(!hits.iter().any(|hit| hit.path == ".Hidden.md"));
 
     fs::remove_file(fixture.path().join("Dense.md")).expect("remove indexed source");
     let second = adapter
@@ -93,8 +103,8 @@ fn rebuild_uses_the_committed_fts_index_and_removes_stale_documents() {
     let hits = adapter
         .search_index("needle", 20)
         .expect("search rebuilt FTS");
-    assert_eq!(hits.len(), 1);
-    assert_eq!(hits[0].path, "Sparse.md");
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().all(|hit| hit.path != "Dense.md"));
 }
 
 #[test]

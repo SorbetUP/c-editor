@@ -27,6 +27,7 @@ const officialAddonFixture = (() => {
     : { installed: requestedIds, enabled: [], storage: {} }
   if (!state.storage || typeof state.storage !== 'object') state.storage = {}
   const storage = new Map(Object.entries(state.storage))
+  const secrets = new Map()
   const runningServices = new Set()
   const nativeServices = new Map()
   const realNativeEnabled = process.env.ELEPHANT_E2E_REAL_NATIVE === '1'
@@ -358,6 +359,10 @@ const officialAddonFixture = (() => {
     const intercepted = method === 'http.request' ? interceptedAiRequest(addonId, params) : null
     if (intercepted) return intercepted
     const key = addonId + ':' + String(params.key || '')
+    const secretKey = addonId + ':' + String(params.name || '')
+    if (method === 'secrets.get') return secrets.get(secretKey) ?? null
+    if (method === 'secrets.set') { secrets.set(secretKey, params.value); return { ok: true } }
+    if (method === 'secrets.remove') { secrets.delete(secretKey); return { ok: true } }
     if (method === 'storage.get') return storage.get(key) ?? null
     if (method === 'storage.set') { storage.set(key, params.value); save(); return params.value }
     if (method === 'storage.remove') { storage.delete(key); save(); return true }

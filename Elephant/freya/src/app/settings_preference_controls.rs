@@ -14,12 +14,17 @@ pub(super) fn preference_switch(
     active: bool,
     alt: &'static str,
 ) -> Element {
+    let palette = state.read().effects().palette();
     let mut state = state;
     rect()
         .width(Size::fill())
         .padding(Gaps::new(10., 12., 10., 12.))
-        .background(theme::color(theme::BG))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(8.)
         .horizontal()
         .main_align(Alignment::SpaceBetween)
@@ -27,7 +32,11 @@ pub(super) fn preference_switch(
             rect()
                 .spacing(3.)
                 .child(label().font_weight(FontWeight::BOLD).text(title))
-                .child(label().color(theme::color(theme::MUTED)).text(description)),
+                .child(
+                    label()
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                        .text(description),
+                ),
         )
         .child(
             rect()
@@ -35,11 +44,14 @@ pub(super) fn preference_switch(
                 .padding(Gaps::new(0., 10., 0., 10.))
                 .center()
                 .with_corner_radius(15.)
-                .background(theme::color(if active {
-                    theme::PRIMARY
-                } else {
-                    theme::SURFACE
-                }))
+                .background(theme::token_color(
+                    palette,
+                    if active {
+                        theme::ThemeToken::Primary
+                    } else {
+                        theme::ThemeToken::Surface
+                    },
+                ))
                 .a11y_alt(alt)
                 .on_mouse_up(move |event: Event<MouseEventData>| {
                     event.stop_propagation();
@@ -56,13 +68,18 @@ pub(super) fn text_preference(
     description: &'static str,
     current: String,
 ) -> Element {
+    let palette = state.read().effects().palette();
     let value = State::create(current);
     let mut state = state;
     rect()
         .width(Size::fill())
         .padding(Gaps::new(10., 12., 10., 12.))
-        .background(theme::color(theme::BG))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(8.)
         .horizontal()
         .main_align(Alignment::SpaceBetween)
@@ -70,7 +87,11 @@ pub(super) fn text_preference(
             rect()
                 .spacing(3.)
                 .child(label().font_weight(FontWeight::BOLD).text(title))
-                .child(label().color(theme::color(theme::MUTED)).text(description)),
+                .child(
+                    label()
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                        .text(description),
+                ),
         )
         .child(
             Input::new(value)
@@ -91,12 +112,17 @@ pub(super) fn delay_preference(
     delay: u64,
     enabled: bool,
 ) -> Element {
+    let palette = state.read().effects().palette();
     let mut state = state;
     rect()
         .width(Size::fill())
         .padding(Gaps::new(10., 12., 10., 12.))
-        .background(theme::color(theme::BG))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(8.)
         .horizontal()
         .main_align(Alignment::SpaceBetween)
@@ -106,7 +132,7 @@ pub(super) fn delay_preference(
                 .child(label().font_weight(FontWeight::BOLD).text("Autosave delay"))
                 .child(
                     label()
-                        .color(theme::color(theme::MUTED))
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .text("How long ElephantNote waits after the last edit."),
                 ),
         )
@@ -127,19 +153,118 @@ pub(super) fn delay_preference(
         .into_element()
 }
 
-pub(super) fn setting_row(entry: &SettingIndexEntry) -> Element {
+pub(super) fn theme_variant(
+    state: State<SettingsViewState>,
+    label_text: &'static str,
+    theme_id: &'static str,
+    active: bool,
+) -> Element {
+    let palette = state.read().effects().palette();
+    let mut state = state;
+    rect()
+        .width(Size::fill())
+        .padding(Gaps::new(8., 12., 8., 12.))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
+        .with_corner_radius(8.)
+        .horizontal()
+        .main_align(Alignment::SpaceBetween)
+        .child(label().font_weight(FontWeight::BOLD).text(label_text))
+        .child(
+            rect()
+                .padding(Gaps::new(6., 12., 6., 12.))
+                .with_corner_radius(7.)
+                .background(theme::token_color(
+                    palette,
+                    if active {
+                        theme::ThemeToken::Primary
+                    } else {
+                        theme::ThemeToken::Surface
+                    },
+                ))
+                .a11y_alt(label_text)
+                .on_mouse_up(move |_| {
+                    state
+                        .write()
+                        .set_text_preference("theme", theme_id.to_owned());
+                })
+                .child(label().text(if active { "Active" } else { "Use" })),
+        )
+        .into_element()
+}
+
+pub(super) fn navigation_visibility(
+    state: State<SettingsViewState>,
+    label_text: &'static str,
+    item_id: &'static str,
+    hidden_ids: Vec<String>,
+) -> Element {
+    let palette = state.read().effects().palette();
+    let mut state = state;
+    let hidden = hidden_ids.iter().any(|id| id == item_id);
+    let title = if hidden {
+        format!("Show {label_text} in navigation")
+    } else {
+        format!("Hide {label_text} in navigation")
+    };
+    let accessibility_label = if hidden {
+        format!("Show {label_text} in navigation")
+    } else {
+        format!("Hide {label_text} in navigation")
+    };
+    rect()
+        .width(Size::fill())
+        .padding(Gaps::new(8., 12., 8., 12.))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
+        .with_corner_radius(8.)
+        .horizontal()
+        .main_align(Alignment::SpaceBetween)
+        .child(label().font_weight(FontWeight::BOLD).text(title))
+        .child(
+            rect()
+                .padding(Gaps::new(6., 12., 6., 12.))
+                .with_corner_radius(7.)
+                .background(theme::token_color(
+                    palette,
+                    if hidden {
+                        theme::ThemeToken::Primary
+                    } else {
+                        theme::ThemeToken::Surface
+                    },
+                ))
+                .a11y_alt(accessibility_label)
+                .on_mouse_up(move |_| state.write().toggle_rail_hidden(item_id))
+                .child(label().text(if hidden { "Hidden" } else { "Visible" })),
+        )
+        .into_element()
+}
+
+pub(super) fn setting_row(entry: &SettingIndexEntry, palette: theme::ThemePalette) -> Element {
     rect()
         .width(Size::fill())
         .padding(Gaps::new(10., 12., 10., 12.))
-        .background(theme::color(theme::BG))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(8.)
         .spacing(4.)
         .a11y_alt(entry.label)
         .child(label().font_weight(FontWeight::BOLD).text(entry.label))
         .child(
             label()
-                .color(theme::color(theme::MUTED))
+                .color(theme::token_color(palette, theme::ThemeToken::Muted))
                 .text(entry.description),
         )
         .into_element()

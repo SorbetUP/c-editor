@@ -73,6 +73,22 @@ impl SettingsRuntimeState {
         apply_text_transform(value, contract.transform)
     }
 
+    pub fn has_key(&self, key: &str) -> bool {
+        self.preferences.contains_key(key)
+    }
+
+    pub fn string_list_value(&self, key: &str) -> Vec<String> {
+        let Some(contract) = contract_for(key) else {
+            return Vec::new();
+        };
+        self.value_for(Some(contract))
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|item| item.as_str().map(ToOwned::to_owned))
+            .collect()
+    }
+
     pub fn integer_value(&self, key: &str) -> i64 {
         let Some(contract) = contract_for(key) else {
             return self
@@ -118,6 +134,30 @@ impl SettingsRuntimeState {
         self.preferences
             .insert(key.to_owned(), Value::String(value));
         self.persist();
+    }
+
+    pub fn set_string_list_preference(&mut self, key: &str, value: Vec<String>) {
+        let Some(contract) = contract_for(key) else {
+            return;
+        };
+        if contract.value_kind != ValueKind::StringList {
+            return;
+        }
+        self.preferences.insert(
+            key.to_owned(),
+            Value::Array(value.into_iter().map(Value::String).collect()),
+        );
+        self.persist();
+    }
+
+    pub fn toggle_string_list_value(&mut self, key: &str, item: &str) {
+        let mut values = self.string_list_value(key);
+        if let Some(index) = values.iter().position(|value| value == item) {
+            values.remove(index);
+        } else {
+            values.push(item.to_owned());
+        }
+        self.set_string_list_preference(key, values);
     }
 
     pub fn cycle_auto_save_delay(&mut self) {

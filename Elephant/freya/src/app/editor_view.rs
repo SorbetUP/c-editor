@@ -19,6 +19,9 @@ use crate::{editor::Delay, theme};
 
 use super::{route_notice, ShellState};
 
+#[path = "editor_interactions.rs"]
+mod editor_interactions;
+
 #[derive(Clone, Copy, Default)]
 struct InlineStyle {
     strong: bool,
@@ -79,6 +82,24 @@ impl Component for EditableInlineBlock {
         let a11y_id = use_a11y();
         let holder = use_state(ParagraphHolder::default);
 
+        let should_focus = snapshot.editor.as_ref().is_some_and(|editor| {
+            editor.focus_target().is_some_and(|target| {
+                let contains = contains_node(editor.session().document(), self.node_id, target);
+                if contains {
+                    eprintln!(
+                        "[freya][editor] focus-apply block={:?} target={:?}",
+                        self.node_id, target
+                    );
+                }
+                contains
+            })
+        });
+        use_side_effect(move || {
+            if should_focus {
+                a11y_id.request_focus();
+            }
+        });
+
         if snapshot.editor.is_none() {
             return route_notice("NoteEditorHost", "No note open").into_element();
         }
@@ -94,124 +115,19 @@ impl Component for EditableInlineBlock {
             .editor()
             .read()
             .get_visible_selection(EditorLine::SingleParagraph);
-        let mut state = self.state;
-        let mut autosave_generation = self.autosave_generation;
+        let state = self.state;
+        let autosave_generation = self.autosave_generation;
         let node_id = self.node_id;
         let previous_value = value.clone();
-        let on_key_down = move |event: Event<KeyboardEventData>| {
-            if let Err(error) = sync_muya_selection(state, node_id, &editable) {
-                state.write().error = Some(error.clone());
-                eprintln!("[freya][editor] action:failure action=selection error={error}");
-                return;
-            }
-
-            let result = match &event.key {
-                Key::Named(NamedKey::Enter) if event.modifiers.is_empty() => state
-                    .write()
-                    .editor
-                    .as_mut()
-                    .ok_or_else(|| "cannot split without an open note".to_string())
-                    .and_then(|editor| {
-                        editor
-                            .insert_paragraph()
-                            .map(|_| ())
-                            .map_err(|error| error.to_string())
-                    }),
-                Key::Named(NamedKey::Backspace) if event.modifiers.is_empty() => state
-                    .write()
-                    .editor
-                    .as_mut()
-                    .ok_or_else(|| "cannot delete without an open note".to_string())
-                    .and_then(|editor| {
-                        editor
-                            .delete_backward()
-                            .map(|_| ())
-                            .map_err(|error| error.to_string())
-                    }),
-                Key::Named(NamedKey::Delete) if event.modifiers.is_empty() => state
-                    .write()
-                    .editor
-                    .as_mut()
-                    .ok_or_else(|| "cannot delete without an open note".to_string())
-                    .and_then(|editor| {
-                        editor
-                            .delete_forward()
-                            .map(|_| ())
-                            .map_err(|error| error.to_string())
-                    }),
-                Key::Character(character)
-                    if event.modifiers.contains(Modifiers::ctrl_or_meta())
-                        && character.eq_ignore_ascii_case("s") =>
-                {
-                    state
-                        .write()
-                        .editor
-                        .as_mut()
-                        .ok_or_else(|| "cannot save without an open note".to_string())
-                        .and_then(|editor| editor.save().map_err(|error| error.to_string()))
-                }
-                Key::Character(character)
-                    if event.modifiers.contains(Modifiers::ctrl_or_meta())
-                        && character.eq_ignore_ascii_case("z") =>
-                {
-                    let redo = event.modifiers.contains(Modifiers::SHIFT);
-                    state
-                        .write()
-                        .editor
-                        .as_mut()
-                        .ok_or_else(|| "cannot change history without an open note".to_string())
-                        .and_then(|editor| {
-                            if redo {
-                                editor.redo().map(|_| ()).map_err(|error| error.to_string())
-                            } else {
-                                editor.undo().map(|_| ()).map_err(|error| error.to_string())
-                            }
-                        })
-                }
-                Key::Character(character)
-                    if event.modifiers.contains(Modifiers::ctrl_or_meta())
-                        && character.eq_ignore_ascii_case("y") =>
-                {
-                    state
-                        .write()
-                        .editor
-                        .as_mut()
-                        .ok_or_else(|| "cannot change history without an open note".to_string())
-                        .and_then(|editor| {
-                            editor.redo().map(|_| ()).map_err(|error| error.to_string())
-                        })
-                }
-                _ => {
-                    editable.process_event(EditableEvent::KeyDown {
-                        key: &event.key,
-                        modifiers: event.modifiers,
-                    });
-                    let next_value = editable.editor().read().committed_text();
-                    if next_value == previous_value {
-                        sync_muya_selection(state, node_id, &editable)
-                    } else {
-                        apply_inline_delta(state, node_id, &previous_value, &next_value)
-                    }
-                }
-            };
-
-            match result {
-                Ok(()) => {
-                    *autosave_generation.write() += 1;
-                    sync_editable_from_muya(state, node_id, &mut editable);
-                    eprintln!(
-                        "[freya][editor] action:complete action=keyboard node={:?} key={}",
-                        node_id, event.key
-                    );
-                }
-                Err(error) => {
-                    let error = error.to_string();
-                    state.write().error = Some(error.clone());
-                    editable.editor_mut().write().set(&previous_value);
-                    eprintln!("[freya][editor] action:failure action=keyboard error={error}");
-                }
-            }
-        };
+        let on_key_down = editor_interactions::key_down_handler(
+            state,
+            node_id,
+            editable,
+            previous_value,
+            autosave_generation,
+        );
+        let on_ime_preedit =
+            editor_interactions::ime_preedit_handler(state, node_id, editable, autosave_generation);
         let on_key_up = move |event: Event<KeyboardEventData>| {
             editable.process_event(EditableEvent::KeyUp { key: &event.key });
         };
@@ -245,6 +161,7 @@ impl Component for EditableInlineBlock {
             .on_global_pointer_press(on_pointer_up)
             .on_key_down(on_key_down)
             .on_key_up(on_key_up)
+            .on_ime_preedit(on_ime_preedit)
             .font_size(self.style.font_size)
             .color(theme::color(self.style.color));
         if self.style.bold {
@@ -752,7 +669,33 @@ fn editable_text_nodes(document: &Document, parent: NodeId, nodes: &mut Vec<(Nod
     }
 }
 
-fn sync_muya_selection(
+pub(super) fn has_table_ancestor(document: &Document, mut node_id: NodeId) -> bool {
+    loop {
+        let Some(node) = document.node(node_id) else {
+            return false;
+        };
+        if matches!(node.kind, NodeKind::Block(BlockKind::Table)) {
+            return true;
+        }
+        let Some(parent) = node.parent else {
+            return false;
+        };
+        node_id = parent;
+    }
+}
+
+pub(super) fn contains_node(document: &Document, root: NodeId, target: NodeId) -> bool {
+    if root == target {
+        return true;
+    }
+    document.node(root).is_some_and(|node| {
+        node.children
+            .iter()
+            .any(|child| contains_node(document, *child, target))
+    })
+}
+
+pub(super) fn sync_muya_selection(
     mut state: State<ShellState>,
     block_id: NodeId,
     editable: &UseEditable,
@@ -791,7 +734,11 @@ fn sync_muya_selection(
         .map_err(|error| error.to_string())
 }
 
-fn sync_editable_from_muya(state: State<ShellState>, block_id: NodeId, editable: &mut UseEditable) {
+pub(super) fn sync_editable_from_muya(
+    state: State<ShellState>,
+    block_id: NodeId,
+    editable: &mut UseEditable,
+) {
     let (value, selection) = {
         let snapshot = state.read();
         let Some(editor) = snapshot.editor.as_ref() else {
@@ -943,7 +890,7 @@ fn block_offset_for_point(nodes: &[(NodeId, String)], point: SelectionPoint) -> 
     None
 }
 
-fn apply_inline_delta(
+pub(super) fn apply_inline_delta(
     mut state: State<ShellState>,
     block_id: NodeId,
     before: &str,
@@ -1015,16 +962,27 @@ fn render_list(
         .enumerate()
         .map(|(index, item)| {
             let marker = list_marker(kind, start.saturating_add(index as u64), item.id, document);
+            let marker_view = if kind == ListKind::Task {
+                let checked = task_checked(item.id, document);
+                editor_interactions::task_marker(
+                    state,
+                    autosave_generation,
+                    item.id,
+                    checked,
+                    marker,
+                )
+            } else {
+                label()
+                    .font_size(16.)
+                    .color(theme::color(theme::MUTED))
+                    .text(marker)
+                    .into_element()
+            };
             rect()
                 .width(Size::fill())
                 .horizontal()
                 .spacing(6.)
-                .child(
-                    label()
-                        .font_size(16.)
-                        .color(theme::color(theme::MUTED))
-                        .text(marker),
-                )
+                .child(marker_view)
                 .child(render_block_children(
                     state,
                     document,
@@ -1041,6 +999,16 @@ fn render_list(
         .children(items)
         .a11y_alt(list_accessibility_label(kind))
         .into_element()
+}
+
+fn task_checked(item_id: NodeId, document: &Document) -> bool {
+    document
+        .node(item_id)
+        .and_then(|node| match &node.kind {
+            NodeKind::Block(BlockKind::ListItem { checked }) => *checked,
+            _ => None,
+        })
+        .unwrap_or(false)
 }
 
 fn list_marker(kind: ListKind, number: u64, item_id: NodeId, document: &Document) -> String {

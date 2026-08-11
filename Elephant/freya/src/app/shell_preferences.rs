@@ -17,6 +17,7 @@ pub(super) struct ShellPreferences {
     pub(super) sidebar_visible: bool,
     pub(super) sidebar_width: SidebarWidth,
     pub(super) rail_order: Vec<String>,
+    pub(super) rail_order_persisted: bool,
 }
 
 impl Default for ShellPreferences {
@@ -25,6 +26,7 @@ impl Default for ShellPreferences {
             sidebar_visible: true,
             sidebar_width: SidebarWidth::default(),
             rail_order: default_rail_order(),
+            rail_order_persisted: false,
         }
     }
 }
@@ -69,6 +71,7 @@ pub(super) fn read_shell_preferences(root: &Path) -> Result<ShellPreferences, St
         preferences.sidebar_width = SidebarWidth::from_number(width);
     }
     if let Some(order) = shell.get("railOrder").and_then(Value::as_array) {
+        preferences.rail_order_persisted = true;
         let mut normalized = Vec::new();
         for id in order.iter().filter_map(Value::as_str) {
             if DEFAULT_RAIL_ORDER.contains(&id) && !normalized.iter().any(|item| item == id) {

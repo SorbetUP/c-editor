@@ -12,7 +12,6 @@
       `en-theme-${themeClassId}`,
       {
         'en-pinned-card-halo': preferences.pinnedCardHalo,
-        'en-floating-surfaces': preferences.floatingSurfaces,
         'en-mobile-shell': isMobileShell,
         'en-mobile-drawer-open': isMobileShell && drawerProgress > 0,
         'en-mobile-drawer-dragging': isMobileShell && drawerDragging,
@@ -726,24 +725,6 @@ onBeforeUnmount(() => {
 .en-sidebar-resizer:focus-visible::after,
 :global(.en-resizing-sidebar) .en-sidebar-resizer::after {
   opacity: 1;
-}
-
-.en-floating-surfaces .en-sidebar-resizer {
-  width: 0;
-  background: transparent;
-  border: 0;
-}
-
-.en-floating-surfaces .en-sidebar {
-  border-right: 0 !important;
-}
-
-.en-floating-surfaces .en-body-main {
-  border-left: 0 !important;
-}
-
-.en-floating-surfaces .en-sidebar-resizer::after {
-  background: color-mix(in srgb, var(--en-primary) 72%, var(--en-border));
 }
 
 :global(.en-resizing-sidebar),

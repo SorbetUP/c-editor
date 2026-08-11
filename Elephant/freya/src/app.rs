@@ -6,9 +6,12 @@
 mod editor_view;
 mod explorer;
 mod explorer_runtime;
+mod graph_canvas;
 mod library;
 mod navigation;
+mod navigation_icons;
 mod settings;
+mod settings_effects;
 mod shell_gestures;
 mod shell_history;
 mod shell_preferences;
@@ -183,9 +186,12 @@ pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
 
 fn app_shell(state: State<ShellState>) -> Element {
     let settings_state = use_state(settings::SettingsViewState::default);
+    let settings_effects = settings_state.read().effects();
+    let palette = settings_effects.palette();
     let explorer_state = use_state(explorer::ExplorerState::new);
     let explorer_query = use_state(String::new);
     let explorer_graph_query = use_state(String::new);
+    let graph_canvas_state = use_state(graph_canvas::GraphCanvasState::default);
     explorer::bind_live_search(explorer_state, explorer_query);
     let snapshot = state.read().clone();
     if snapshot.vault.is_none() {
@@ -198,23 +204,28 @@ fn app_shell(state: State<ShellState>) -> Element {
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state)
     } else if snapshot.search_open || snapshot.view == WorkspaceView::Graph {
-        explorer::explorer_view(explorer_state, explorer_query, explorer_graph_query)
+        explorer::explorer_view(
+            explorer_state,
+            explorer_query,
+            explorer_graph_query,
+            graph_canvas_state,
+        )
     } else {
         library::main_content(state)
     };
     let shell = rect()
         .width(Size::fill())
         .height(Size::fill())
-        .background(theme::color(theme::BG))
-        .color(theme::color(theme::TEXT))
-        .child(navigation::top_vault_bar(state))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .color(theme::token_color(palette, theme::ThemeToken::Text))
+        .child(navigation::top_vault_bar(state, palette))
         .child(
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
                 .horizontal()
-                .child(navigation::icon_rail(state))
-                .child(navigation::sidebar_nav(state))
+                .child(navigation::icon_rail(state, palette, &settings_effects))
+                .child(navigation::sidebar_nav(state, palette))
                 .child(content),
         )
         .a11y_alt(contract.provenance.component.source_name());

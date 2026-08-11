@@ -91,15 +91,10 @@
     "gen-third-party": "node build/scripts/generateThirdPartyLicense.js",
     "validate-licenses": "node build/scripts/validateLicenses.js",
     "muya:wasm:build": "node build/scripts/build-muya-wasm.mjs",
-    "muya:avalonia:build": "node build/scripts/build-muya-native.mjs",
     "addons:sync": "node build/scripts/sync-elephant-addons.mjs",
-    "avalonia:restore": "dotnet restore Elephant/avalonia/ElephantNote.Avalonia.sln",
-    "avalonia:renderer:build": "pnpm tauri:web:build && node build/scripts/build-avalonia-renderer.mjs",
-    "avalonia:build": "pnpm muya:avalonia:build && pnpm avalonia:renderer:build && dotnet build Elephant/avalonia/ElephantNote.Avalonia.sln -c Release --no-restore",
-    "avalonia:test": "dotnet test Elephant/avalonia/ElephantNote.Avalonia.sln -c Release --no-restore",
-    "avalonia:run": "pnpm muya:avalonia:build && dotnet run --project Elephant/avalonia/src/ElephantNote.Avalonia",
-    "test:avalonia:muya:e2e:raw": "pnpm muya:avalonia:build && NODE_PATH=Elephant/node_modules node_modules/.bin/playwright test tests/app/e2e/avalonia-muya-usage.spec.js --config tests/app/e2e/playwright.config.js",
-    "test:avalonia:muya:e2e": "node build/scripts/run-observable.mjs --label playwright-avalonia-muya -- pnpm test:avalonia:muya:e2e:raw"
+    "freya:check": "cargo check --manifest-path Elephant/freya/Cargo.toml",
+    "freya:test": "cargo test --manifest-path Elephant/freya/Cargo.toml",
+    "test:vue-to-freya": "node tools/vue-to-freya/test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

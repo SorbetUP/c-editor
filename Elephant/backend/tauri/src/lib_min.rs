@@ -83,6 +83,9 @@ pub fn run() {
     #[cfg(not(mobile))]
     let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
 
+    #[cfg(feature = "acceptance-wdio")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+
     builder
         .setup(|app| {
             let handle = app.handle().clone();
@@ -191,6 +194,7 @@ pub fn run() {
             vault::commands::tauri_vaults_set_icon,
             vault::commands::tauri_vaults_set_name,
             vault::commands::tauri_vaults_remove,
+            vault::commands::tauri_vaults_set_enabled,
             vault::commands::tauri_directory_list,
             vault::commands::tauri_notes_create,
             vault::commands::tauri_folders_create,
@@ -199,6 +203,9 @@ pub fn run() {
             vault::commands::tauri_entries_rename,
             vault::commands::tauri_entries_move,
             vault::commands::tauri_entries_delete,
+            vault::commands::tauri_vault_trash_list,
+            vault::commands::tauri_vault_trash_restore,
+            vault::commands::tauri_vault_trash_empty,
             vault::commands::tauri_sources_list,
             vault::commands::tauri_search_query,
             vault::commands::tauri_search_status,

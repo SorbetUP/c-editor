@@ -18,7 +18,7 @@ mod settings_controls;
 #[path = "settings_runtime.rs"]
 mod settings_runtime;
 
-use settings_runtime::SettingsRuntimeState;
+pub(super) use settings_runtime::SettingsRuntimeState;
 
 /// Visible state supplied by the host while a section-owned surface loads.
 ///
@@ -106,8 +106,17 @@ impl SettingsViewState {
         self.runtime.set_text_preference(key, value);
     }
 
+    pub(super) fn toggle_rail_hidden(&mut self, item: &str) {
+        self.runtime
+            .toggle_string_list_value("iconRailHidden", item);
+    }
+
     pub fn cycle_auto_save_delay(&mut self) {
         self.runtime.cycle_auto_save_delay();
+    }
+
+    pub(super) fn effects(&self) -> super::settings_effects::SettingsEffects {
+        super::settings_effects::SettingsEffects::from_runtime(&self.runtime)
     }
 }
 
@@ -137,6 +146,7 @@ impl Default for SettingsViewState {
 /// the corresponding host contracts are integrated.
 pub fn settings_panel(state: State<SettingsViewState>) -> Element {
     let snapshot = state.read().clone();
+    let palette = snapshot.effects().palette();
     let active_section = snapshot.settings.active_section.clone();
     let search_value = State::create(snapshot.settings.query.clone());
     let mut search_state = state;
@@ -150,18 +160,22 @@ pub fn settings_panel(state: State<SettingsViewState>) -> Element {
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .background(theme::color(theme::BG))
-        .color(theme::color(theme::TEXT))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .color(theme::token_color(palette, theme::ThemeToken::Text))
         .padding(Gaps::new_all(16.))
         .spacing(14.)
         .a11y_alt("ElephantNote settings")
-        .child(settings_controls::settings_header(search))
+        .child(settings_controls::settings_header(search, palette))
         .maybe_child(snapshot.runtime.feedback.clone().map(|message| {
             rect()
                 .width(Size::fill())
                 .padding(Gaps::new(6., 10., 6., 10.))
                 .a11y_alt("Settings feedback")
-                .child(label().color(theme::color(theme::MUTED)).text(message))
+                .child(
+                    label()
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                        .text(message),
+                )
                 .into_element()
         }))
         .child(
@@ -173,6 +187,7 @@ pub fn settings_panel(state: State<SettingsViewState>) -> Element {
                 .child(settings_controls::section_navigation(
                     &active_section,
                     state,
+                    palette,
                 ))
                 .child(settings_controls::section_content(
                     state,

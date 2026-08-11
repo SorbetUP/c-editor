@@ -107,32 +107,32 @@ pub fn tauri_user_data_set_many(state: State<'_, AppState>, items: Value) -> R<(
 
 #[tauri::command]
 pub fn tauri_secret_set(state: State<'_, AppState>, name: String, value: String) -> R<()> {
-  let mut guard = state.data.lock().map_err(|e| e.to_string())?;
-  match guard.as_mut() {
-    Some(d) => {
-      d.set(&name, Value::String(value)).map(|_| ()).map_err(|e| e.to_string())
-    }
-    None => Err("userData not available".into()),
+  let guard = state.data.lock().map_err(|e| e.to_string())?;
+  match guard.as_ref() {
+    Some(d) => d.secret_set(&name, &value).map_err(|e| e.to_string()),
+    None => Err("secure secret storage is not available".into()),
   }
 }
 
 #[tauri::command]
 pub fn tauri_secret_get(state: State<'_, AppState>, name: String) -> R<Value> {
   let guard = state.data.lock().map_err(|e| e.to_string())?;
-  Ok(match guard.as_ref() {
-    Some(d) => d.get(&name),
-    None => Value::Null,
-  })
+  match guard.as_ref() {
+    Some(d) => Ok(d
+      .secret_get(&name)
+      .map_err(|e| e.to_string())?
+      .map(Value::String)
+      .unwrap_or(Value::Null)),
+    None => Err("secure secret storage is not available".into()),
+  }
 }
 
 #[tauri::command]
 pub fn tauri_secret_delete(state: State<'_, AppState>, name: String) -> R<()> {
-  let mut guard = state.data.lock().map_err(|e| e.to_string())?;
-  match guard.as_mut() {
-    Some(d) => {
-      d.set(&name, Value::String(String::new())).map(|_| ()).map_err(|e| e.to_string())
-    }
-    None => Err("userData not available".into()),
+  let guard = state.data.lock().map_err(|e| e.to_string())?;
+  match guard.as_ref() {
+    Some(d) => d.secret_delete(&name).map_err(|e| e.to_string()),
+    None => Err("secure secret storage is not available".into()),
   }
 }
 

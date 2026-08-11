@@ -20,7 +20,7 @@ fn generate_tauri_parity_tests() {
   out.push_str("use crate::search_logic::{normalize_query, score_text};\n");
   out.push_str("use crate::vault::types::{active_vault, next_vault_id, slug_id, VaultConfig, VaultDescriptor};\n");
   out.push_str("use crate::vault_layout::{is_hidden_vault_path, is_visible_vault_path, required_hidden_dirs, HIDDEN_ROOT};\n\n");
-  out.push_str("fn vault_descriptor(id: &str, name: &str, path: &str) -> VaultDescriptor { VaultDescriptor { id: id.to_string(), name: name.to_string(), path: path.to_string(), icon: String::new(), last_opened_at: String::from(\"0\") } }\n\n");
+  out.push_str("fn vault_descriptor(id: &str, name: &str, path: &str) -> VaultDescriptor { VaultDescriptor { id: id.to_string(), name: name.to_string(), path: path.to_string(), icon: String::new(), last_opened_at: String::from(\"0\"), enabled: true } }\n\n");
 
   for index in 0..90 {
     push_test(&mut out, &format!("generated_slug_case_{index:03}"), &format!("assert_eq!(slug_id(\"Vault {index} Project\"), \"vault-{index}-project\");"));

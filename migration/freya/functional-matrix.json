@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "statusEnum": [
+    "NOT_STARTED",
+    "ANALYZED",
+    "AUTO_CONVERTED",
+    "MANUALLY_COMPLETED",
+    "PARITY_PENDING",
+    "PROVEN",
+    "WEB_ISLAND",
+    "BLOCKED",
+    "DEAD_REMOVED"
+  ],
+  "baseline": {
+    "branch": "develop",
+    "commit": "62a606c145fe930682efbe491980c20ffeade14c",
+    "targetBranch": "nsb/freya-native-migration",
+    "targetCommitAtAudit": "387e0b151abc52c31ebd82ca2b24780b6df46b61"
+  },
+  "proofLevels": [
+    "backend-contract",
+    "native-frontend-behavior",
+    "packaged-user-journey",
+    "visual-static",
+    "visual-motion"
+  ],
+  "scenarios": [
+    {
+      "id": "vault-lifecycle",
+      "feature": "Vault launch, picker, reopen and hidden metadata",
+      "sourceKnown": ["Elephant/frontend/app/components/shell/EmptyVaultPicker.vue", "Elephant/backend/tauri/src/vault/entries.rs", "Elephant/backend/tauri/src/vault/config.rs"],
+      "target": ["Elephant/freya/src/app.rs", "Elephant/freya/src/vault_adapter.rs", "Elephant/freya/src/app/shell_preferences.rs"],
+      "checks": ["clean launch", "choose existing vault", "create vault when supported", "restart and reopen", "hidden metadata remains correct", "visible and logged errors"],
+      "requiredProof": ["native-frontend-behavior", "packaged-user-journey", "disk-state", "restart"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": [],
+      "missingProof": ["real Freya picker interaction", "clean packaged Freya profile", "restart persistence", "error log artifact"]
+    },
+    {
+      "id": "notes-persistence",
+      "feature": "Create, name, open, edit, autosave and restart a note",
+      "sourceKnown": ["Elephant/frontend/app/components/library/CreateEntryMenu.vue", "Elephant/frontend/app/components/library/LibraryGrid.vue", "Elephant/frontend/app/components/shell/NoteEditorHost.vue", "Elephant/backend/tauri/src/vault/entries.rs"],
+      "target": ["Elephant/freya/src/app/library_actions.rs", "Elephant/freya/src/app/library.rs", "Elephant/freya/src/editor.rs", "Elephant/freya/src/vault_adapter.rs"],
+      "checks": ["create note", "name note", "open note", "edit note", "autosave", "verify file on disk", "restart", "verify content"],
+      "requiredProof": ["native-frontend-behavior", "packaged-user-journey", "disk-state", "restart", "logs"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": ["/private/tmp/elephant-freya-diff.3siK3g/output"],
+      "missingProof": ["complete clean-vault scenario", "production Freya window run", "restart and disk verification from final commit", "failure-path artifact"]
+    },
+    {
+      "id": "folders",
+      "feature": "Create, discover, rename, move and delete folders",
+      "sourceKnown": ["Elephant/frontend/app/components/library/FolderCard.vue", "Elephant/frontend/app/components/navigation/SidebarNav.vue", "Elephant/backend/tauri/src/folder_domain.rs", "Elephant/backend/tauri/src/vault/entries.rs"],
+      "target": ["Elephant/freya/src/app/library.rs", "Elephant/freya/src/app/library_actions.rs", "Elephant/freya/src/app/navigation.rs", "Elephant/freya/src/vault_adapter.rs"],
+      "checks": ["create in Elephant", "verify on disk", "create manually in filesystem", "observe in Elephant", "rename", "move", "delete"],
+      "requiredProof": ["native-frontend-behavior", "packaged-user-journey", "filesystem-state", "watcher refresh"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": [],
+      "missingProof": ["folder card UI", "recursive tree/watch refresh", "rename/move/delete real interaction", "drag/drop motion proof"]
+    },
+    {
+      "id": "external-files",
+      "feature": "External file drag/import/link/open contract",
+      "sourceKnown": ["Elephant/frontend/app/components/library/NoteCard.vue", "Elephant/frontend/app/components/editor/NoteEditorHost.vue", "Elephant/frontend/src/renderer/src/editor-rust/inputController/drop.js", "Elephant/frontend/app/services/excalidraw.js"],
+      "target": ["Elephant/freya/src/editor.rs", "Elephant/freya/src/vault_adapter.rs"],
+      "checks": ["drag file", "copy/import according to source behavior", "create link", "open with addon when present", "open with system default otherwise"],
+      "requiredProof": ["native-frontend-behavior", "packaged-user-journey", "external-effect", "error-path"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": [],
+      "missingProof": ["native file-drop adapter", "path-safe import and link behavior", "system opener proof", "addon-owned open proof"]
+    },
+    {
+      "id": "images",
+      "feature": "Image drag/insertion, .assets copy and restart rendering",
+      "sourceKnown": ["Elephant/frontend/app/components/library/NoteCard.vue", "Elephant/frontend/app/components/editor/NoteEditorHost.vue", "Elephant/frontend/src/muya/lib/parser/render/renderInlines/loadImageAsync.js", "Elephant/backend/tauri/src/media_domain.rs"],
+      "target": ["Elephant/freya/src/editor.rs", "Elephant/freya/src/vault_adapter.rs"],
+      "checks": ["drag image", "insert at expected caret", "copy to .assets", "render after restart"],
+      "requiredProof": ["native-frontend-behavior", "packaged-user-journey", "disk-state", "restart"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": [],
+      "missingProof": ["native image/drop path", "image decode/render in Freya", "asset persistence", "restart proof"]
+    },
+    {
+      "id": "markdown-editor",
+      "feature": "Markdown rich editor and live rendering",
+      "sourceKnown": ["Elephant/frontend/app/components/editor/NoteEditorHost.vue", "Elephant/frontend/app/components/editor/NoteEditorToolbar.vue", "Elephant/frontend/app/components/editor/NoteEditorTopBar.vue", "Elephant/frontend/src/renderer/src/muya/", "Elephant/backend/tauri/src/markdown/"],
+      "target": ["Elephant/freya/src/editor.rs", "Elephant/freya/src/app/editor_view.rs", "Elephant/freya/src/app/editor_lifecycle.rs"],
+      "checks": ["headings", "bold", "italic", "lists", "links", "wiki links", "code blocks", "tables", "checkboxes", "images", "shortcuts", "slash menu"],
+      "requiredProof": ["backend-contract", "native-frontend-behavior", "visual-static", "visual-motion", "disk-state"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": ["/private/var/folders/2y/t4dxb2q13l15gvfy46pthlqc0000gn/T/elephant-freya-editor-lifecycle.png"],
+      "missingProof": ["full rich rendering parity", "selection and scroll parity", "image/wiki/slash paths", "source-vs-Freya visual/motion pair"]
+    },
+    {
+      "id": "editor-durability",
+      "feature": "Typing, selection, clipboard, history, IME and durable save",
+      "sourceKnown": ["Elephant/frontend/src/renderer/src/editor-rust/inputController/", "Elephant/backend/tauri/src/markdown/muya_session.rs", "Elephant/backend/tauri/src/markdown/muya_clipboard.rs"],
+      "target": ["Elephant/freya/src/editor.rs", "Elephant/freya/src/app/editor_*.rs"],
+      "checks": ["continuous typing", "Enter", "Delete", "Backspace", "paste", "undo/redo", "selection", "save", "restart", "no UI/state/disk divergence"],
+      "requiredProof": ["native-frontend-behavior", "packaged-user-journey", "disk-state", "restart", "clipboard-provider", "error-path"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": [],
+      "missingProof": ["clipboard test does not compile in current dirty checkout", "real GUI clipboard", "clean final-commit run", "large-note and restart proof"]
+    },
+    {
+      "id": "sidebar",
+      "feature": "Rail, sidebar, tree, recently edited, grid/list and motion",
+      "sourceKnown": ["Elephant/frontend/app/components/navigation/IconRail.vue", "Elephant/frontend/app/components/navigation/NavigationBar.vue", "Elephant/frontend/app/components/navigation/SidebarNav.vue", "Elephant/frontend/app/components/navigation/SidebarTreeEntry.vue", "Elephant/frontend/app/components/shell/AppShell.vue"],
+      "target": ["Elephant/freya/src/app/navigation.rs", "Elephant/freya/src/app/shell_runtime.rs", "Elephant/freya/src/app/shell_gestures.rs"],
+      "checks": ["open", "close", "expand/collapse", "navigate", "recently edited", "grid/list", "desktop pointer motion", "mobile edge gesture"],
+      "requiredProof": ["native-frontend-behavior", "visual-static", "visual-motion", "desktop packaged", "Android"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": ["/private/tmp/freya-navigation-visual/navigation-static.png", "/private/tmp/elephant-source-playwright.GtMMxG/output/manifest.json"],
+      "missingProof": ["icon and geometry parity", "rail drag postcondition", "scroll/motion parity", "mobile Freya gesture run"]
+    },
+    {
+      "id": "settings",
+      "feature": "Settings navigation, search and every preference section",
+      "sourceKnown": ["Elephant/frontend/app/components/settings/SettingsPanel.vue", "Elephant/frontend/app/components/settings/SyncSettingsPanel.vue", "Elephant/frontend/app/components/settings/AiProviderSettingsPanel.vue", "Elephant/frontend/app/components/settings/AddonsSettingsPanel.vue", "Elephant/frontend/app/components/settings/IconRailLayoutSettings.vue"],
+      "target": ["Elephant/freya/src/app/settings.rs", "Elephant/freya/src/app/settings_navigation.rs", "Elephant/freya/src/app/settings_search.rs", "Elephant/freya/src/app/settings_runtime.rs"],
+      "checks": ["open", "navigate", "search", "change preference", "restart", "preference remains"],
+      "requiredProof": ["native-frontend-behavior", "packaged-user-journey", "settings persistence", "visual-static", "error-path"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": [],
+      "missingProof": ["all sections", "addon/sync/AI/provider wiring", "restart persistence", "source-vs-Freya visual parity"]
+    },
+    {
+      "id": "excalidraw",
+      "feature": "Create, edit, save, close, reopen, re-edit and theme Excalidraw",
+      "sourceKnown": ["Elephant/frontend/app/components/editor/ExcalidrawDialog.vue", "Elephant/frontend/app/services/excalidraw.js", "Elephant/backend/tauri/src/core_commands.rs", "Elephant/backend/tauri/src/drawing_domain.rs"],
+      "target": ["Elephant/web_islands/excalidraw (not present)", "Elephant/freya/src/app/drawing*.rs"],
+      "checks": ["create", "modify", "save", "close", "reopen", "re-edit", "correct theme", "export PNG", "visible errors"],
+      "requiredProof": ["isolated-web-island", "packaged-user-journey", "disk-state", "restart", "visual-static", "visual-motion"],
+      "status": "WEB_ISLAND",
+      "currentArtifacts": ["/private/var/folders/2y/t4dxb2q13l15gvfy46pthlqc0000gn/T/elephant-freya-drawing-canvas-primitives.png"],
+      "missingProof": ["real Excalidraw isolation boundary", "production wiring", "durable scene/PNG reopen", "theme and resize lifecycle", "packaged proof"]
+    },
+    {
+      "id": "search",
+      "feature": "Search query, relevant result and open-from-result",
+      "sourceKnown": ["Elephant/frontend/app/search/SearchModal.vue", "Elephant/frontend/app/search/SearchResultItem.vue", "Elephant/frontend/app/search/SearchStatusBadge.vue", "Elephant/backend/tauri/src/fts.rs"],
+      "target": ["Elephant/freya/src/app/explorer.rs", "Elephant/freya/src/app/explorer_runtime.rs", "Elephant/freya/src/vault_adapter/search_index.rs"],
+      "checks": ["open search", "type query", "results update", "relevant result", "open selected result", "empty/error state"],
+      "requiredProof": ["native-frontend-behavior", "backend-contract", "packaged-user-journey", "disk-state", "visual-motion"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": ["/private/tmp/elephant-freya-diff.3siK3g/output"],
+      "missingProof": ["strict differential run after live-query fix", "open-result persistence", "large-index performance", "Tauri-vs-Freya capture pair"]
+    },
+    {
+      "id": "graph-wiki",
+      "feature": "Wiki links, graph display, node click, zoom, pan and clusters",
+      "sourceKnown": ["Elephant/frontend/app/components/views/AtomicGraphView.vue", "Elephant/frontend/app/components/editor/internalNoteLinks.js", "Elephant/frontend/app/components/views/semanticGraphViewHelpers.js", "Elephant/backend/knowledge-core/src/graph.rs"],
+      "target": ["Elephant/freya/src/app/graph_runtime.rs", "Elephant/freya/src/app/explorer.rs", "Elephant/backend/knowledge-core/"],
+      "checks": ["display graph", "correct wiki edge", "click node", "zoom", "pan", "cluster/large graph behavior", "visible failure"],
+      "requiredProof": ["backend-contract", "native-frontend-behavior", "visual-static", "visual-motion", "large-graph benchmark"],
+      "status": "PARITY_PENDING",
+      "currentArtifacts": [],
+      "missingProof": ["actual interactive native graph canvas", "node geometry/motion parity", "large graph benchmark", "open-node persistence"]
+    },
+    {
+      "id": "addons-lifecycle",
+      "feature": "Representative official addon install/enable/UI/action/restart/disable/uninstall/reinstall",
+      "sourceKnown": ["Elephant/frontend/app/components/settings/AddonsSettingsPanel.vue", "Elephant/frontend/app/components/views/AddonWorkspaceHost.vue", "Elephant/frontend/app/components/views/AddonWorkspaceRouter.vue", "Elephant/backend/tauri/src/addons.rs"],
+      "target": ["Elephant/freya/src/app/settings.rs", "Elephant/freya/src/app.rs", "Elephant/backend/tauri/src/addons.rs"],
+      "checks": ["absent before install", "real install", "enable", "UI opens", "real action", "restart", "disable", "uninstall", "reinstall", "no residue"],
+      "requiredProof": ["packaged-user-journey", "addon package", "disk/runtime cleanup", "logs"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": [],
+      "missingProof": ["Freya addon host API", "owned UI lifecycle", "real package execution", "disable/uninstall cleanup"]
+    },
+    {
+      "id": "sync",
+      "feature": "Current real Iroh synchronization path and UI",
+      "sourceKnown": ["Elephant/frontend/app/components/settings/SyncSettingsPanel.vue", "Elephant/frontend/app/components/navigation/SyncNavigationControl.vue", "Elephant/backend/tauri/src/vault/sync_iroh/", "Elephant/backend/tauri/src/sync_commands.rs"],
+      "target": ["Elephant/freya/src/app/settings.rs", "Elephant/freya/src/app/navigation.rs", "Elephant/backend/tauri/src/vault/sync_iroh/"],
+      "checks": ["pair", "sync", "progress", "conflict preservation", "restart", "error and cleanup"],
+      "requiredProof": ["backend-contract", "native-frontend-behavior", "packaged-user-journey", "real network/system effect", "logs"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": [],
+      "missingProof": ["Freya sync UI", "real two-endpoint Freya journey", "conflict UI", "restart/cleanup proof"]
+    },
+    {
+      "id": "chat-ai",
+      "feature": "Chat, AI providers, model discovery, streaming, cancellation and errors",
+      "sourceKnown": ["Elephant/frontend/app/components/views/ChatView.vue", "Elephant/frontend/app/components/settings/AiProviderSettingsPanel.vue", "Elephant/frontend/app/components/settings/ChatgptSubscriptionCard.vue", "Elephant/backend/tauri/src/chat_runtime/", "Elephant/backend/tauri/src/local_llama_runtime.rs"],
+      "target": ["Elephant/freya/src/app.rs", "Elephant/backend/tauri/src/chat_runtime/", "Elephant/backend/tauri/src/local_llama_runtime.rs"],
+      "checks": ["runtime starts", "handshake", "provider/model discovery", "real request", "streaming", "cancel", "persist config", "restart", "stderr/timeout/error visible", "shutdown"],
+      "requiredProof": ["real-runtime", "native-frontend-behavior", "packaged-user-journey", "logs", "cleanup"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": [],
+      "missingProof": ["Freya chat UI", "provider/model wiring", "real runtime through Freya", "stream/cancel/persistence/error proof"]
+    },
+    {
+      "id": "mobile",
+      "feature": "Android/mobile startup, picker, gestures, keyboard, editor, images and settings",
+      "sourceKnown": ["Elephant/frontend/app/components/shell/AppShell.vue", "Elephant/frontend/src/renderer/src/platform/mobileInteractionRuntime.js", "Elephant/backend/tauri-plugin-elephant-android-vault/", "Elephant/android/"],
+      "target": ["Elephant/freya/src/app/shell_gestures.rs", "Elephant/freya/src/app/navigation.rs", "Elephant/freya/src/editor.rs", "Elephant/platform/android (not present)"],
+      "checks": ["startup", "permissions", "vault picker", "create/open/edit/save", "keyboard and toolbar", "back", "touch/scroll", "edge gesture", "images", "Excalidraw", "settings"],
+      "requiredProof": ["Android build", "real emulator/device", "adb logcat", "screenshots/video", "restart"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": [],
+      "missingProof": ["Freya Android target", "installed APK", "real permission/document provider flow", "all mobile gestures and restart"]
+    },
+    {
+      "id": "accessibility",
+      "feature": "Keyboard focus, semantics, screen-reader labels, dialogs and scaling",
+      "sourceKnown": ["Elephant/frontend/app/components/navigation/", "Elephant/frontend/app/components/settings/", "Elephant/frontend/app/components/editor/", "tests/app/"],
+      "target": ["Elephant/freya/src/app/", "Elephant/freya/src/editor.rs"],
+      "checks": ["focus order", "keyboard-only navigation", "visible focus", "dialogs", "editor focus", "disabled state", "labels/selected/expanded", "high DPI"],
+      "requiredProof": ["native-frontend-behavior", "accessibility tree", "keyboard input", "screen-reader or platform semantics"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": ["/private/tmp/tauri-profile-fixed-runtime-10/accessibility-tree.json"],
+      "missingProof": ["Freya semantics audit", "native accessibility tree", "focus traversal", "dialog and editor semantics"]
+    },
+    {
+      "id": "packaging-build",
+      "feature": "Freya desktop/mobile build, package, assets, versioning and CI",
+      "sourceKnown": ["package.json", "Elephant/backend/tauri/tauri.conf.json", "Elephant/freya/Cargo.toml", "build/scripts/", ".github/workflows/"],
+      "target": ["Elephant/freya/Cargo.toml", "Elephant/freya/Cargo.lock", "Elephant/platform/ (not present)", "build/scripts/ (unchanged)"],
+      "checks": ["desktop Linux", "desktop macOS", "desktop Windows when available", "Android APK", "clean profile", "packaged user journey", "assets/icons/version"],
+      "requiredProof": ["clean checkout", "desktop package", "Android package", "packaged-user-journey", "logs/artifacts"],
+      "status": "BLOCKED",
+      "currentArtifacts": ["/private/tmp/tauri-profile-fixed-runtime-10/tauri-process.log"],
+      "missingProof": ["clean Freya checkout build", "Freya package target", "desktop installer", "Android APK", "CI wiring and exact final-commit run"]
+    },
+    {
+      "id": "performance",
+      "feature": "Startup, memory, CPU, interaction latency and scale benchmarks",
+      "sourceKnown": ["build/scripts/", "Elephant/frontend/app/", "Elephant/backend/tauri/"],
+      "target": ["Elephant/freya/"],
+      "checks": ["cold/warm startup", "RSS idle/note/large vault/large note", "CPU idle/scroll/typing/graph", "first window/library/open note/keystroke/autosave latency", "large vault/folder/note/images/graph stress"],
+      "requiredProof": ["repeatable benchmark", "same fixture and platform", "source-vs-Freya raw data", "regression analysis"],
+      "status": "NOT_STARTED",
+      "currentArtifacts": [],
+      "missingProof": ["source baseline measurements", "Freya measurements", "same fixture", "delta and budget report"]
+    },
+    {
+      "id": "visual-motion-parity",
+      "feature": "Static and animated parity against the Tauri/Vue oracle",
+      "sourceKnown": ["all 47 component sources", "migration/freya/components.json", "migration/freya/css-features.json"],
+      "target": ["Elephant/freya/src/"],
+      "checks": ["same viewport/DPI/theme/content", "geometry", "spacing", "colors", "typography", "visibility", "responsive layout", "hover/focus/scroll/drag/zoom/gesture motion"],
+      "requiredProof": ["Tauri/Playwright capture", "Freya Testing capture", "real packaged capture", "image diff", "motion timeline", "documented intentional differences"],
+      "status": "BLOCKED",
+      "currentArtifacts": ["/private/tmp/elephant-source-playwright.GtMMxG/output/manifest.json", "/private/tmp/freya-navigation-visual/navigation-static.png", "/private/tmp/tauri-profile-fixed-runtime-10/manifest.json"],
+      "missingProof": ["fresh source run with mandatory scroll/drop postconditions", "Freya full 14-action run", "same-state screenshot pairs", "motion parity", "no material geometry/icon differences"]
+    }
+  ],
+  "summary": {
+    "scenarioCount": 20,
+    "provenCount": 0,
+    "requiredRuntimeProofMissing": true,
+    "sourceOracleIsTauriVue": true,
+    "headlessFreyaDoesNotEqualPackagedProof": true
+  }
+}

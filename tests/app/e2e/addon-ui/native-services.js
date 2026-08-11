@@ -144,9 +144,16 @@ const codex = {
     } else if (status.value?.connected === false) {
       await expect(card).toContainText('Disconnected')
       await expect(primary).toHaveText('Connect')
+      expect(['missing', 'present-unverified', 'copied-unverified', 'error']).toContain(status.value?.authState)
+      expect(status.value?.connectionProof).toBe('none')
+      expect(['auth', 'protocol', 'process', 'runtime', 'timeout']).toContain(status.value?.errorKind || 'auth')
       if (status.value?.error) {
         await expect(card.locator('.elephant-package-error')).toContainText(status.value.error)
       }
+    } else if (status.value?.connected === true) {
+      // A copied auth file is never connection proof; only the real account/read result is.
+      expect(status.value?.connectionProof).toBe('account/read')
+      expect(['present-unverified', 'copied-unverified']).toContain(status.value?.authState)
     }
 
     await card.getByRole('button', { name: 'Refresh', exact: true }).click()

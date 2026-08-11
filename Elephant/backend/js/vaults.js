@@ -85,6 +85,8 @@ import { ensureAtomicSourcesSection, suggestAtomicTags } from 'common/elephantno
 import { getConfig, setConfig } from './config/elephantConfigStore'
 import { modelRuntime, programRuntime, syncEngine } from './runtime/elephantRuntime'
 
+const VAULT_TRASH_DIR = 'trash'
+
 export const initializeVault = async (vaultRoot, now = new Date()) => {
   log.info('[sync] initializeVault', { vaultRoot })
   const root = path.resolve(vaultRoot)
@@ -261,7 +263,7 @@ const writeWiki = async (vaultRoot, records) => {
 
 const getActiveVault = () => {
   const config = getConfig()
-  const vault = config.vaults.find((vault) => vault.id === config.activeVaultId) || null
+  const vault = config.vaults.find((vault) => vault.id === config.activeVaultId && vault.enabled !== false) || null
   syncEngine.setCwd(vault?.path || '')
   return vault
 }
@@ -288,9 +290,11 @@ const upsertVault = (vaultPath) => {
     name: vaultName,
     path: absolutePath,
     icon: '',
+    enabled: true,
     lastOpenedAt: new Date().toISOString()
   }
 
+  vault.enabled = true
   vault.lastOpenedAt = new Date().toISOString()
   if (!existing) {
     let nextId = vault.id
@@ -327,13 +331,29 @@ const setVaultName = (vaultId, name = '') => {
   return loadVaultPayload(vault)
 }
 
+const setVaultEnabled = (vaultId, enabled) => {
+  const config = getConfig()
+  const vault = config.vaults.find((item) => item.id === vaultId)
+  if (!vault) throw new Error('Unknown ElephantNote vault.')
+  vault.enabled = enabled === true
+  if (vault.enabled) {
+    if (!config.activeVaultId || !config.vaults.some((item) => item.id === config.activeVaultId && item.enabled !== false)) {
+      config.activeVaultId = vault.id
+    }
+  } else if (config.activeVaultId === vault.id) {
+    config.activeVaultId = config.vaults.find((item) => item.enabled !== false && item.id !== vault.id)?.id || null
+  }
+  setConfig(config)
+  return loadVaultPayload(getActiveVault())
+}
+
 const removeVault = (vaultId) => {
   const config = getConfig()
   const vault = config.vaults.find((item) => item.id === vaultId)
   if (!vault) throw new Error('Unknown ElephantNote vault.')
   config.vaults = config.vaults.filter((item) => item.id !== vaultId)
   if (config.activeVaultId === vaultId) {
-    config.activeVaultId = config.vaults[0]?.id || null
+    config.activeVaultId = config.vaults.find((item) => item.enabled !== false)?.id || null
   }
   setConfig(config)
   return loadVaultPayload(getActiveVault())
@@ -716,10 +736,32 @@ const deleteEntry = async ({ relativePath } = {}) => {
   if (!vault) throw new Error('No active ElephantNote vault.')
   const normalizedPath = normalizeRelativePath(relativePath)
   if (!normalizedPath) throw new Error('A path is required.')
+  if (normalizedPath === WORKSPACE_DIR || normalizedPath.startsWith(`${WORKSPACE_DIR}/`)) {
+    throw new Error('Vault metadata cannot be deleted.')
+  }
 
   const target = resolveInsideVault(vault.path, normalizedPath)
   if (!(await fs.pathExists(target))) throw new Error('Entry not found.')
-  await fs.remove(target)
+  const trashRoot = path.join(vault.path, WORKSPACE_DIR, VAULT_TRASH_DIR)
+  await fs.ensureDir(trashRoot)
+  const token = `${Date.now()}-${createId(path.basename(target))}`
+  const item = path.join(trashRoot, token)
+  await fs.ensureDir(item)
+  const entryName = path.basename(target)
+  const trashedPath = path.join(item, entryName)
+  await fs.move(target, trashedPath)
+  try {
+    await fs.writeJson(path.join(item, 'manifest.json'), {
+      schemaVersion: 1,
+      originalPath: normalizedPath,
+      entryName,
+      deletedAt: new Date().toISOString()
+    }, { spaces: 2 })
+  } catch (error) {
+    await fs.move(trashedPath, target, { overwrite: false }).catch(() => {})
+    await fs.remove(item).catch(() => {})
+    throw error
+  }
   getSearchService()
     .deleteFile(target)
     .catch(() => {})
@@ -730,8 +772,81 @@ const deleteEntry = async ({ relativePath } = {}) => {
   const parentPath = path.dirname(normalizedPath) === '.' ? '' : path.dirname(normalizedPath)
   return {
     workspace,
-    entries: await listDirectoryForVault(vault, parentPath)
+    entries: await listDirectoryForVault(vault, parentPath),
+    trashPath: normalizeRelativePath(path.relative(vault.path, item)),
+    originalPath: normalizedPath,
+    restoreToken: token
   }
+}
+
+const getVaultTrashRoot = (vault) => path.join(vault.path, WORKSPACE_DIR, VAULT_TRASH_DIR)
+
+const getTrashItem = (vault, trashPath) => {
+  const normalizedPath = normalizeRelativePath(trashPath)
+  const trashRoot = getVaultTrashRoot(vault)
+  const item = resolveInsideVault(vault.path, normalizedPath)
+  const relativeToTrash = path.relative(trashRoot, item)
+  if (!normalizedPath || relativeToTrash.startsWith('..') || path.isAbsolute(relativeToTrash) || relativeToTrash.includes(path.sep)) {
+    throw new Error('Invalid vault trash item.')
+  }
+  return { item, trashRoot, normalizedPath }
+}
+
+const listVaultTrash = async () => {
+  const vault = getActiveVault()
+  if (!vault) throw new Error('No active ElephantNote vault.')
+  const trashRoot = getVaultTrashRoot(vault)
+  if (!(await fs.pathExists(trashRoot))) return []
+  const items = []
+  for (const name of await fs.readdir(trashRoot)) {
+    const item = path.join(trashRoot, name)
+    if (!(await fs.stat(item)).isDirectory()) continue
+    const manifestPath = path.join(item, 'manifest.json')
+    if (!(await fs.pathExists(manifestPath))) continue
+    const manifest = await fs.readJson(manifestPath)
+    items.push({
+      trashPath: normalizeRelativePath(path.relative(vault.path, item)),
+      restoreToken: name,
+      originalPath: normalizeRelativePath(manifest.originalPath),
+      deletedAt: manifest.deletedAt || '',
+      name: manifest.entryName || ''
+    })
+  }
+  return items.sort((a, b) => String(b.deletedAt).localeCompare(String(a.deletedAt)))
+}
+
+const restoreVaultTrash = async ({ trashPath } = {}) => {
+  const vault = getActiveVault()
+  if (!vault) throw new Error('No active ElephantNote vault.')
+  const { item, normalizedPath } = getTrashItem(vault, trashPath)
+  const manifestPath = path.join(item, 'manifest.json')
+  if (!(await fs.pathExists(manifestPath))) throw new Error('Trash manifest not found.')
+  const manifest = await fs.readJson(manifestPath)
+  const originalPath = normalizeRelativePath(manifest.originalPath)
+  const entryName = String(manifest.entryName || '')
+  if (!originalPath || !entryName || originalPath === WORKSPACE_DIR || originalPath.startsWith(`${WORKSPACE_DIR}/`)) {
+    throw new Error('Trash manifest contains an invalid restore path.')
+  }
+  const source = path.join(item, entryName)
+  const target = resolveInsideVault(vault.path, originalPath)
+  if (!(await fs.pathExists(source))) throw new Error('Trashed entry not found.')
+  if (await fs.pathExists(target)) throw new Error(`Cannot restore over an existing path: ${originalPath}`)
+  await fs.ensureDir(path.dirname(target))
+  await fs.move(source, target)
+  await fs.remove(manifestPath)
+  await fs.remove(item)
+  if (target.toLowerCase().endsWith('.md')) getSearchService().indexFile(target).catch(() => {})
+  return { restored: true, path: originalPath, originalPath, trashPath: normalizedPath }
+}
+
+const emptyVaultTrash = async () => {
+  const vault = getActiveVault()
+  if (!vault) throw new Error('No active ElephantNote vault.')
+  const trashRoot = getVaultTrashRoot(vault)
+  if (!(await fs.pathExists(trashRoot))) return { emptied: true, count: 0, removed: [] }
+  const removed = await fs.readdir(trashRoot)
+  await Promise.all(removed.map((name) => fs.remove(path.join(trashRoot, name))))
+  return { emptied: true, count: removed.length, removed }
 }
 
 const importGoogleKeep = async (event) => {
@@ -1648,6 +1763,7 @@ const createElephantNoteMainApi = () => {
         const config = getConfig()
         const vault = config.vaults.find((item) => item.id === vaultId)
         if (!vault) throw new Error('Unknown ElephantNote vault.')
+        vault.enabled = true
         config.activeVaultId = vault.id
         setConfig(config)
         return loadVaultPayload(vault)
@@ -1657,6 +1773,11 @@ const createElephantNoteMainApi = () => {
       [ELEPHANTNOTE_API_ACTIONS.VAULTS_SET_NAME]: async ({ vaultId, name }) =>
         setVaultName(vaultId, name),
       [ELEPHANTNOTE_API_ACTIONS.VAULTS_REMOVE]: async ({ vaultId }) => removeVault(vaultId),
+      [ELEPHANTNOTE_API_ACTIONS.VAULTS_SET_ENABLED]: async ({ vaultId, enabled }) =>
+        setVaultEnabled(vaultId, enabled),
+      [ELEPHANTNOTE_API_ACTIONS.VAULTS_TRASH_LIST]: async () => listVaultTrash(),
+      [ELEPHANTNOTE_API_ACTIONS.VAULTS_TRASH_RESTORE]: async (payload) => restoreVaultTrash(payload),
+      [ELEPHANTNOTE_API_ACTIONS.VAULTS_TRASH_EMPTY]: async () => emptyVaultTrash(),
       [ELEPHANTNOTE_API_ACTIONS.DIRECTORY_LIST]: async ({ relativePath = '' } = {}) => {
         const vault = getActiveVault()
         if (!vault) throw new Error('No active ElephantNote vault.')

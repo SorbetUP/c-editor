@@ -234,6 +234,15 @@ pub struct PreferenceContract {
 /// settings panel or its directly owned IconRailLayoutSettings child.
 pub const SETTINGS_PREFERENCES: &[PreferenceContract] = &[
     PreferenceContract {
+        setting_id: "appearance-theme",
+        key: "theme",
+        label: "Theme",
+        description: "The active Elephant theme variant.",
+        value_kind: ValueKind::String,
+        default: DefaultValue::Text("light"),
+        transform: UiValueTransform::Direct,
+    },
+    PreferenceContract {
         setting_id: "appearance-floating-surfaces",
         key: "floatingSurfaces",
         label: "Floating surfaces",

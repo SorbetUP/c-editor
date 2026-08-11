@@ -408,6 +408,17 @@ export const useVaultStore = defineStore('elephantnoteVaults', {
       return true
     },
 
+    async setVaultEnabled(vaultId, enabled) {
+      if (!vaultId) return false
+      const normalizedEnabled = enabled === true
+      this.vaults = this.vaults.map((vault) => vault.id === vaultId
+        ? { ...vault, enabled: normalizedEnabled }
+        : vault)
+      const payload = await elephantnoteClient.vaults.setEnabled(vaultId, normalizedEnabled)
+      this.applyPayload(payload)
+      return true
+    },
+
     async removeVault(vaultId) {
       if (!vaultId) return false
       const payload = await elephantnoteClient.vaults.remove(vaultId)

@@ -153,16 +153,18 @@ describe('ElephantNote UI regression contracts', () => {
     expect(editor).not.toContain('<template #title>')
   })
 
-  it('exposes an opt-in floating-surface layout with a persistent preference', () => {
-    const preferences = read('Elephant/frontend/src/renderer/src/store/preferences.js')
+  it('keeps structural workspace surfaces flat and leaves elevation to local controls', () => {
     const shell = read('Elephant/frontend/app/components/shell/AppShell.vue')
     const settings = read('Elephant/frontend/app/components/settings/SettingsPanel.vue')
     const stylesheet = read('Elephant/frontend/app/styles/app-shell.css')
+    const runtimeStyles = read('Elephant/frontend/app/styles/app-shell-runtime-fixes.css')
 
-    expect(preferences).toContain('floatingSurfaces: false')
-    expect(shell).toContain("'en-floating-surfaces': preferences.floatingSurfaces")
-    expect(settings).toContain('aria-label="Floating surfaces"')
-    expect(stylesheet).toContain('.en-floating-surfaces .en-rail-icon')
+    expect(shell).not.toContain('en-floating-surfaces')
+    expect(settings).not.toContain('Floating surfaces')
+    expect(stylesheet).not.toContain('en-floating-surfaces')
+    expect(runtimeStyles).not.toContain('en-floating-surfaces')
+    expect(stylesheet).toContain('.en-note-editor-shell')
+    expect(stylesheet).toContain('background: var(--en-bg);')
   })
 
   it('persists appearance preferences through the Tauri preference API', () => {
@@ -232,7 +234,7 @@ describe('ElephantNote UI regression contracts', () => {
 
     expect(topbar).toContain('display: none;')
     expect(shellStyles).toContain('border-top: 0;')
-    expect(runtimeStyles).toContain('.en-floating-surfaces .en-topstrip')
+    expect(runtimeStyles).toContain('.en-topstrip')
     expect(runtimeStyles).toContain('box-shadow: none !important;')
   })
 })

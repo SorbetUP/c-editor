@@ -2,9 +2,9 @@ use serde_json::{json, Value};
 use std::io::Read;
 use tauri::AppHandle;
 
-use super::config::{get_active_vault, read_config, remove_vault, set_active_vault, set_vault_icon, set_vault_name, upsert_vault, write_config};
+use super::config::{get_active_vault, read_config, remove_vault, set_active_vault, set_vault_enabled, set_vault_icon, set_vault_name, upsert_vault, write_config};
 use super::entries;
-use super::metadata::{initialize_vault, read_json_or};
+use super::metadata::{initialize_vault, open_vault, read_json_or};
 use super::types::active_vault;
 use crate::vault_layout;
 
@@ -20,7 +20,7 @@ const DIRECTORY_LIST_LIMIT_MAX: usize = 500;
 fn payload(app: &AppHandle, vault: Option<super::types::VaultDescriptor>) -> R<Value> {
   let config = read_config(app)?;
   if let Some(vault) = vault {
-    let workspace = initialize_vault(&vault.path)?;
+    let workspace = open_vault(&vault.path)?;
     let listed_entries = entries::list_directory_page(&vault, "", 0, Some(120), true)?;
     Ok(json!({
       "vaults": config.vaults,
@@ -49,15 +49,16 @@ pub fn tauri_vaults_get(app: AppHandle) -> R<Value> {
 #[tauri::command]
 pub fn tauri_vaults_select_path(app: AppHandle, vault_path: String) -> R<Value> {
   let mut config = read_config(&app)?;
-  let vault = upsert_vault(&mut config, vault_path);
+  let vault = upsert_vault(&mut config, vault_path)?;
   write_config(&app, &config)?;
+  initialize_vault(&vault.path)?;
   payload(&app, Some(vault))
 }
 
 #[tauri::command]
 pub fn tauri_vaults_set_active(app: AppHandle, vault_id: String) -> R<Value> {
   let mut config = read_config(&app)?;
-  set_active_vault(&mut config, vault_id);
+  set_active_vault(&mut config, vault_id)?;
   let vault = active_vault(&config);
   write_config(&app, &config)?;
   payload(&app, vault)
@@ -66,7 +67,7 @@ pub fn tauri_vaults_set_active(app: AppHandle, vault_id: String) -> R<Value> {
 #[tauri::command]
 pub fn tauri_vaults_set_icon(app: AppHandle, vault_id: String, icon: String) -> R<Value> {
   let mut config = read_config(&app)?;
-  set_vault_icon(&mut config, &vault_id, icon);
+  set_vault_icon(&mut config, &vault_id, icon)?;
   let vault = active_vault(&config);
   write_config(&app, &config)?;
   payload(&app, vault)
@@ -75,7 +76,7 @@ pub fn tauri_vaults_set_icon(app: AppHandle, vault_id: String, icon: String) -> 
 #[tauri::command]
 pub fn tauri_vaults_set_name(app: AppHandle, vault_id: String, name: String) -> R<Value> {
   let mut config = read_config(&app)?;
-  set_vault_name(&mut config, &vault_id, name);
+  set_vault_name(&mut config, &vault_id, name)?;
   let vault = active_vault(&config);
   write_config(&app, &config)?;
   payload(&app, vault)
@@ -84,7 +85,16 @@ pub fn tauri_vaults_set_name(app: AppHandle, vault_id: String, name: String) -> 
 #[tauri::command]
 pub fn tauri_vaults_remove(app: AppHandle, vault_id: String) -> R<Value> {
   let mut config = read_config(&app)?;
-  remove_vault(&mut config, &vault_id);
+  remove_vault(&mut config, &vault_id)?;
+  let vault = active_vault(&config);
+  write_config(&app, &config)?;
+  payload(&app, vault)
+}
+
+#[tauri::command]
+pub fn tauri_vaults_set_enabled(app: AppHandle, vault_id: String, enabled: bool) -> R<Value> {
+  let mut config = read_config(&app)?;
+  set_vault_enabled(&mut config, &vault_id, enabled)?;
   let vault = active_vault(&config);
   write_config(&app, &config)?;
   payload(&app, vault)
@@ -143,6 +153,21 @@ pub fn tauri_entries_delete(app: AppHandle, relative_path: String) -> R<Value> {
 }
 
 #[tauri::command]
+pub fn tauri_vault_trash_list(app: AppHandle) -> R<Vec<Value>> {
+  entries::list_trash(&get_active_vault(&app)?)
+}
+
+#[tauri::command]
+pub fn tauri_vault_trash_restore(app: AppHandle, trash_path: String) -> R<Value> {
+  entries::restore_trash(&get_active_vault(&app)?, trash_path)
+}
+
+#[tauri::command]
+pub fn tauri_vault_trash_empty(app: AppHandle) -> R<Value> {
+  entries::empty_trash(&get_active_vault(&app)?)
+}
+
+#[tauri::command]
 pub fn tauri_sources_list(app: AppHandle) -> R<Vec<Value>> {
   let vault = get_active_vault(&app)?;
   Ok(read_json_or(vault_layout::config_file(&vault.path, vault_layout::SOURCES_FILE), json!({ "sources": [] })).get("sources").and_then(Value::as_array).cloned().unwrap_or_default())
@@ -172,7 +197,7 @@ pub fn tauri_search_query(app: AppHandle, params: Option<Value>) -> R<Vec<Value>
   let root = std::path::PathBuf::from(&vault.path);
   if let Ok(index) = crate::fts::FtsIndex::open(&root) {
     let hits = index.search(&query, limit).unwrap_or_default();
-    if !hits.is_empty() || index.count(&vault.id).unwrap_or(0) > 0 {
+    if !hits.is_empty() {
       return Ok(hits
         .into_iter()
         .map(|hit| json!({

@@ -15,7 +15,6 @@ export const usePreferencesStore = defineStore('preferences', {
     autoSave: false,
     autoSaveDelay: 5000,
     pinnedCardHalo: false,
-    floatingSurfaces: false,
     iconRailOrder: ['dashboard', 'wiki', 'graph', 'models', 'search', 'chat'],
     iconRailHidden: [],
     showTagHashInEditor: true,

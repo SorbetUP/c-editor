@@ -8,12 +8,13 @@ use std::{
   sync::Mutex,
   time::Duration,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use url::Url;
 use zip::ZipArchive;
 
 use crate::vault::config as vault_config;
 use crate::vault_layout;
+use crate::{data_center::DataCenter, state::AppState};
 
 type R<T> = Result<T, String>;
 
@@ -71,6 +72,8 @@ pub struct AddonPermissions {
   pub storage: bool,
   #[serde(default)]
   pub commands: bool,
+  #[serde(default)]
+  pub secrets: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -459,6 +462,50 @@ fn broker_storage(app: &AppHandle, record: &InstalledAddon, method: &str, params
   }
 }
 
+fn secret_name(params: &Value) -> R<String> {
+  let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+  DataCenter::validate_secret_name(name).map_err(|error| error.to_string())?;
+  Ok(name.to_string())
+}
+
+fn require_secrets_permission(permissions: &AddonPermissions) -> R<()> {
+  if permissions.secrets {
+    Ok(())
+  } else {
+    Err("Addon secrets permission was not granted".to_string())
+  }
+}
+
+fn broker_secrets(app: &AppHandle, record: &InstalledAddon, method: &str, params: &Value) -> R<Value> {
+  require_secrets_permission(&record.manifest.permissions)?;
+  let name = secret_name(params)?;
+  let state = app.state::<AppState>();
+  let guard = state.data.lock().map_err(|error| error.to_string())?;
+  let data = guard.as_ref().ok_or_else(|| "secure secret storage is not available".to_string())?;
+  match method {
+    "secrets.get" => Ok(data
+      .addon_secret_get(&record.manifest.id, &name)
+      .map_err(|error| error.to_string())?
+      .map(Value::String)
+      .unwrap_or(Value::Null)),
+    "secrets.set" => {
+      let value = params
+        .get("value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Secret value must be a string".to_string())?;
+      data.addon_secret_set(&record.manifest.id, &name, value)
+        .map_err(|error| error.to_string())?;
+      Ok(json!({ "ok": true }))
+    }
+    "secrets.remove" => {
+      data.addon_secret_delete(&record.manifest.id, &name)
+        .map_err(|error| error.to_string())?;
+      Ok(json!({ "ok": true }))
+    }
+    _ => Err(format!("Unsupported secrets operation: {method}")),
+  }
+}
+
 fn broker_notes(app: &AppHandle, record: &InstalledAddon, method: &str, params: &Value) -> R<Value> {
   let relative_path = normalize_note_path(params.get("path").and_then(Value::as_str).unwrap_or(""))?;
   match method {
@@ -702,6 +749,8 @@ pub fn tauri_addons_call(
   let params = params.unwrap_or_else(empty_object);
   if method.starts_with("storage.") {
     broker_storage(&app, record, &method, &params)
+  } else if method.starts_with("secrets.") {
+    broker_secrets(&app, record, &method, &params)
   } else if method.starts_with("notes.") {
     broker_notes(&app, record, &method, &params)
   } else if method.starts_with("http.") {
@@ -759,5 +808,15 @@ mod tests {
       activation_events: Vec::new(),
     };
     assert!(validate_manifest(&manifest).is_ok());
+  }
+
+  #[test]
+  fn addon_secrets_permission_is_opt_in() {
+    assert!(!AddonPermissions::default().secrets);
+    assert!(require_secrets_permission(&AddonPermissions::default()).is_err());
+    let mut permissions = AddonPermissions::default();
+    permissions.secrets = true;
+    assert!(permissions.secrets);
+    assert!(require_secrets_permission(&permissions).is_ok());
   }
 }

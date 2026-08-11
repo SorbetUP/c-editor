@@ -13,8 +13,10 @@ use std::{
 };
 
 use muya_core::{
-    model::{InlineKind, NodeKind},
-    Command, EditError, EditorSession as MuyaEditorSession, GraphemeCommand,
+    edit::PasteCommand,
+    features::{TableNavigationCommand, TaskCommand},
+    model::{InlineKind, InlineMarkKind, NodeKind},
+    Command, EditError, EditorSession as MuyaEditorSession, GraphemeCommand, MarkCommand,
     ParagraphBoundaryCommand, Selection, SelectionPoint, SessionCommand, SessionSnapshot,
     SessionUpdate, ViewPatch,
 };
@@ -34,8 +36,22 @@ pub struct EditorViewState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditorAction {
     InsertText(String),
+    PasteMarkdown(String),
     InsertParagraph,
     DeleteBackward,
+    ToggleStrong,
+    ToggleEmphasis,
+    ToggleStrike,
+    TableNavigation(TableNavigationCommand),
+    SetTaskChecked {
+        item: muya_core::NodeId,
+        checked: bool,
+        auto_check: bool,
+    },
+    BeginComposition,
+    UpdateComposition(String),
+    CommitComposition,
+    CancelComposition,
     Undo,
     Redo,
 }
@@ -155,10 +171,30 @@ impl EditorSession {
     ) -> Result<EditorUpdate, EditorError> {
         let command = match action {
             EditorAction::InsertText(text) => SessionCommand::Core(Command::InsertText(text)),
+            EditorAction::PasteMarkdown(markdown) => {
+                SessionCommand::Paste(PasteCommand::new(markdown))
+            }
             EditorAction::InsertParagraph => SessionCommand::Core(Command::InsertParagraph),
             EditorAction::DeleteBackward => {
                 SessionCommand::Grapheme(GraphemeCommand::DeleteBackward)
             }
+            EditorAction::ToggleStrong => SessionCommand::Mark(MarkCommand::ToggleStrong),
+            EditorAction::ToggleEmphasis => SessionCommand::Mark(MarkCommand::ToggleEmphasis),
+            EditorAction::ToggleStrike => SessionCommand::Mark(MarkCommand::ToggleStrike),
+            EditorAction::TableNavigation(command) => SessionCommand::TableNavigation(command),
+            EditorAction::SetTaskChecked {
+                item,
+                checked,
+                auto_check,
+            } => SessionCommand::Task(TaskCommand::SetChecked {
+                item,
+                checked,
+                auto_check,
+            }),
+            EditorAction::BeginComposition => SessionCommand::BeginComposition,
+            EditorAction::UpdateComposition(text) => SessionCommand::UpdateComposition(text),
+            EditorAction::CommitComposition => SessionCommand::CommitComposition,
+            EditorAction::CancelComposition => SessionCommand::CancelComposition,
             EditorAction::Undo => SessionCommand::Undo,
             EditorAction::Redo => SessionCommand::Redo,
         };
@@ -171,6 +207,13 @@ impl EditorSession {
 
     pub fn dispatch_text(&mut self, text: impl Into<String>) -> Result<EditorUpdate, EditorError> {
         self.dispatch_current(EditorAction::InsertText(text.into()))
+    }
+
+    pub fn paste_markdown(
+        &mut self,
+        markdown: impl Into<String>,
+    ) -> Result<EditorUpdate, EditorError> {
+        self.dispatch_current(EditorAction::PasteMarkdown(markdown.into()))
     }
 
     pub fn undo(&mut self) -> Result<EditorUpdate, EditorError> {
@@ -201,6 +244,8 @@ pub struct EditorDocument {
     last_edit_at: Option<Instant>,
     preferences: EditorPreferences,
     view_state: EditorViewState,
+    focus_target: Option<muya_core::NodeId>,
+    composition_selection: Option<Selection>,
     autosave_failure_revision: Option<u64>,
 }
 
@@ -215,6 +260,8 @@ impl EditorDocument {
             last_edit_at: None,
             preferences: editor_lifecycle::load_preferences(),
             view_state: EditorViewState::default(),
+            focus_target: None,
+            composition_selection: None,
             autosave_failure_revision: None,
         }
     }
@@ -231,6 +278,8 @@ impl EditorDocument {
             last_edit_at: None,
             preferences: editor_lifecycle::load_preferences(),
             view_state: EditorViewState::default(),
+            focus_target: None,
+            composition_selection: None,
             autosave_failure_revision: None,
         })
     }
@@ -271,6 +320,10 @@ impl EditorDocument {
         self.view_state.topbar_compact
     }
 
+    pub fn focus_target(&self) -> Option<muya_core::NodeId> {
+        self.focus_target
+    }
+
     pub fn set_scroll_top(&mut self, scroll_top: i32) {
         self.view_state.scroll_top = scroll_top.max(0);
         self.view_state.topbar_compact = self.view_state.scroll_top > 24;
@@ -292,10 +345,51 @@ impl EditorDocument {
     }
 
     pub fn dispatch(&mut self, action: EditorAction) -> Result<EditorUpdate, EditorError> {
+        let moves_table_focus = matches!(&action, EditorAction::TableNavigation(_));
+        let begins_composition = matches!(&action, EditorAction::BeginComposition);
+        let updates_composition = matches!(&action, EditorAction::UpdateComposition(_));
+        let ends_composition = matches!(
+            &action,
+            EditorAction::CommitComposition | EditorAction::CancelComposition
+        );
+        if begins_composition {
+            self.composition_selection = Some(self.session.snapshot().selection);
+        }
+        if updates_composition {
+            if let Some(selection) = self.composition_selection {
+                let revision = self.session.revision();
+                self.session.set_selection(revision, selection)?;
+            }
+        }
         let before = self.serialize();
-        self.session
+        let result = self
+            .session
             .dispatch_current(action)
-            .map(|update| self.record_mutation(before, update))
+            .map(|update| self.record_mutation(before, update));
+        if moves_table_focus {
+            if let Ok(update) = &result {
+                self.focus_target = Some(update.selection.focus.node);
+                eprintln!(
+                    "[freya][editor] focus-request action=table target={:?}",
+                    update.selection.focus.node
+                );
+            }
+        }
+        if let Ok(update) = &result {
+            if updates_composition {
+                let anchor = self
+                    .composition_selection
+                    .map(|selection| selection.anchor)
+                    .unwrap_or(update.selection.anchor);
+                self.composition_selection = Some(Selection {
+                    anchor,
+                    focus: update.selection.focus,
+                });
+            } else if ends_composition {
+                self.composition_selection = None;
+            }
+        }
+        result
     }
 
     pub fn dispatch_text(&mut self, text: impl Into<String>) -> Result<EditorUpdate, EditorError> {
@@ -303,6 +397,17 @@ impl EditorDocument {
         self.session
             .dispatch_text(text)
             .map(|update| self.record_mutation(before, update))
+    }
+
+    pub fn paste_markdown(
+        &mut self,
+        markdown: impl Into<String>,
+    ) -> Result<EditorUpdate, EditorError> {
+        self.dispatch(EditorAction::PasteMarkdown(markdown.into()))
+    }
+
+    pub fn selected_markdown(&self) -> Result<String, String> {
+        selected_inline_markdown(self.session.document(), self.session.snapshot().selection)
     }
 
     pub fn set_selection(&mut self, selection: Selection) -> Result<EditorUpdate, EditorError> {
@@ -535,6 +640,88 @@ fn first_text_node(
     node.children
         .iter()
         .find_map(|child| first_text_node(document, *child))
+}
+
+fn selected_inline_markdown(
+    document: &muya_core::Document,
+    selection: Selection,
+) -> Result<String, String> {
+    if selection.anchor.node != selection.focus.node {
+        return Err("copy selection spans multiple Muya text nodes".to_string());
+    }
+    let node = document
+        .node(selection.anchor.node)
+        .ok_or_else(|| "copy selection has no Muya text node".to_string())?;
+    let NodeKind::Inline(InlineKind::Text { value }) = &node.kind else {
+        return Err("copy selection is not text".to_string());
+    };
+    let start = selection
+        .anchor
+        .offset_utf16
+        .min(selection.focus.offset_utf16);
+    let end = selection
+        .anchor
+        .offset_utf16
+        .max(selection.focus.offset_utf16);
+    if start == end {
+        return Err("copy requires a non-empty selection".to_string());
+    }
+    let text = utf16_slice(value, start, end)?;
+    let mut wrappers = Vec::new();
+    let mut parent = node.parent;
+    while let Some(parent_id) = parent {
+        let parent_node = document
+            .node(parent_id)
+            .ok_or_else(|| "copy selection has an invalid Muya parent".to_string())?;
+        match &parent_node.kind {
+            NodeKind::Inline(InlineKind::Strong) => wrappers.push(("**", "**")),
+            NodeKind::Inline(InlineKind::Emphasis) => wrappers.push(("*", "*")),
+            NodeKind::Inline(InlineKind::Strike) => wrappers.push(("~~", "~~")),
+            NodeKind::Inline(InlineKind::MarkFragment {
+                mark: InlineMarkKind::Strong,
+                ..
+            }) => wrappers.push(("**", "**")),
+            NodeKind::Inline(InlineKind::MarkFragment {
+                mark: InlineMarkKind::Emphasis,
+                ..
+            }) => wrappers.push(("*", "*")),
+            NodeKind::Inline(InlineKind::MarkFragment {
+                mark: InlineMarkKind::Strike,
+                ..
+            }) => wrappers.push(("~~", "~~")),
+            NodeKind::Block(_) => break,
+            _ => {}
+        }
+        parent = parent_node.parent;
+    }
+    let mut markdown = String::new();
+    for (open, _) in wrappers.iter().rev() {
+        markdown.push_str(open);
+    }
+    markdown.push_str(&text);
+    for (_, close) in &wrappers {
+        markdown.push_str(close);
+    }
+    Ok(markdown)
+}
+
+fn utf16_slice(value: &str, start: u32, end: u32) -> Result<String, String> {
+    let mut cursor = 0_u32;
+    let mut selected = String::new();
+    for character in value.chars() {
+        let next = cursor + character.len_utf16() as u32;
+        if cursor < start && start < next || cursor < end && end < next {
+            return Err("copy selection splits a Unicode code point".to_string());
+        }
+        if cursor >= start && next <= end {
+            selected.push(character);
+        }
+        cursor = next;
+    }
+    if end > cursor || start > end {
+        return Err("copy selection is outside the Muya text node".to_string());
+    }
+    Ok(selected)
 }
 
 #[cfg(test)]

@@ -96,6 +96,7 @@ const normalizePermissions = (value) => {
     }),
     storage: permissions.storage === true,
     commands: permissions.commands === true,
+    secrets: permissions.secrets === true,
     views: permissions.views === true,
     native: permissions.native === true
   })

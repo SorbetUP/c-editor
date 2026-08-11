@@ -7,7 +7,10 @@
 //! user drives; no state is mutated directly by this test.
 
 use elephant_freya::app::app_with_vault;
-use freya::prelude::{Rect, Size2D};
+use freya::{
+    elements::image::Image,
+    prelude::{Color, Fill, Rect, Size2D},
+};
 use freya_testing::{TestingNode, TestingRunner};
 use std::{
     fs,
@@ -20,7 +23,7 @@ const TOPBAR_HEIGHT: f32 = 32.;
 const NAV_BUTTON_SIZE: f32 = 24.;
 const NAV_BUTTON_TOP: f32 = 4.;
 const NAV_GAP: f32 = 2.;
-const RAIL_WIDTH: f32 = 48.;
+const RAIL_WIDTH: f32 = 56.;
 const RAIL_ACTION_SIZE: f32 = 34.;
 const RAIL_GAP: f32 = 2.;
 const SIDEBAR_WIDTH: f32 = 232.;
@@ -127,6 +130,26 @@ fn background(runner: &TestingRunner, label: &str) -> freya::prelude::Fill {
         .background
 }
 
+fn assert_svg_icon(node: &TestingNode, expected_pixels: i32) {
+    let dimensions = node.children().into_iter().find_map(|child| {
+        Image::try_downcast(child.element().as_ref())
+            .map(|image| image.image_handle.image.dimensions())
+    });
+    assert_eq!(
+        dimensions.map(|size| (size.width, size.height)),
+        Some((expected_pixels, expected_pixels)),
+        "Lucide SVG must rasterize to a pixel image at its visible size"
+    );
+}
+
+fn has_background(runner: &TestingRunner, label: &str, expected: Fill) -> bool {
+    labeled_nodes(runner, label).into_iter().any(|node| {
+        Rect::try_downcast(node.element().as_ref())
+            .map(|rect| rect.style.background == expected)
+            .unwrap_or(false)
+    })
+}
+
 fn evidence_path(name: &str) -> PathBuf {
     let dir = PathBuf::from("/private/tmp/freya-navigation-visual");
     fs::create_dir_all(&dir).expect("create navigation visual evidence directory");
@@ -160,6 +183,8 @@ fn source_navigation_geometry_labels_and_order_are_exact_at_shared_viewport() {
 
     let back = require_label(&runner, "Retour");
     let forward = require_label(&runner, "Avancer");
+    assert_svg_icon(&back, 18);
+    assert_svg_icon(&forward, 18);
     assert_eq!(area(&back), Size2D::new(NAV_BUTTON_SIZE, NAV_BUTTON_SIZE));
     assert_eq!(
         area(&forward),
@@ -178,11 +203,20 @@ fn source_navigation_geometry_labels_and_order_are_exact_at_shared_viewport() {
         area(&rail),
         Size2D::new(RAIL_WIDTH, VIEWPORT.1 - TOPBAR_HEIGHT)
     );
+    assert_eq!(
+        background(&mut runner, "Workspace navigation"),
+        Fill::Color(Color::from_rgb(237, 242, 247)),
+        "light rail must use appearance.js activeThemeTokens.sidebar (#edf2f7)"
+    );
 
     let hide_sidebar = require_label(&runner, "Hide sidebar");
     let search = require_label(&runner, "Search");
     let settings = require_label(&runner, "Settings");
     let vault = require_label_matching(&runner, |label| label.ends_with("- open vault switcher"));
+    assert_svg_icon(&hide_sidebar, 18);
+    assert_svg_icon(&search, 18);
+    assert_svg_icon(&settings, 18);
+    assert_svg_icon(&vault, 19);
     for node in [&hide_sidebar, &search, &vault, &settings] {
         assert_eq!(area(node), Size2D::new(RAIL_ACTION_SIZE, RAIL_ACTION_SIZE));
         assert_eq!(origin(node).0, (RAIL_WIDTH - RAIL_ACTION_SIZE) / 2.);
@@ -201,8 +235,22 @@ fn source_navigation_geometry_labels_and_order_are_exact_at_shared_viewport() {
         area(&sidebar),
         Size2D::new(SIDEBAR_WIDTH, VIEWPORT.1 - TOPBAR_HEIGHT)
     );
+    assert_eq!(
+        background(&mut runner, "Sidebar"),
+        Fill::Color(Color::from_rgb(237, 242, 247)),
+        "light sidebar must use appearance.js activeThemeTokens.sidebar (#edf2f7)"
+    );
+    assert!(
+        has_background(
+            &runner,
+            "Alpha",
+            Fill::Color(Color::from_rgb(255, 255, 255)),
+        ),
+        "the real Library card must use the light source surface token"
+    );
 
     let all_notes = require_label(&runner, "All notes");
+    assert_svg_icon(&all_notes, 18);
     assert_eq!(origin(&all_notes), (RAIL_WIDTH + 8., TOPBAR_HEIGHT + 8.));
     assert_eq!(area(&all_notes).height, SIDEBAR_ALL_NOTES_HEIGHT);
     assert_eq!(area(&all_notes).width, SIDEBAR_WIDTH - 16.);

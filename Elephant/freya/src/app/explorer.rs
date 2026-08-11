@@ -14,8 +14,8 @@ use std::time::Duration;
 use crate::{
     search_graph_contract::{
         ConceptCandidate, GraphCommand, GraphEdge, GraphFilterState, GraphLoadState, GraphNode,
-        GraphNodeKind, GraphSnapshot, SearchCommand, SearchMatchType, SearchMode, SearchRequest,
-        SearchResult, SearchStatus, SearchStatusKind, SurfaceError, GRAPH_RENDER_MAX_EDGES,
+        GraphSnapshot, SearchCommand, SearchMatchType, SearchMode, SearchRequest, SearchResult,
+        SearchStatus, SearchStatusKind, SurfaceError, GRAPH_RENDER_MAX_EDGES,
         SEARCH_QUERY_LIMIT_DEFAULT,
     },
     theme,
@@ -488,9 +488,11 @@ impl ExplorerState {
     pub fn select_graph_node(&mut self, id: impl Into<String>) {
         let id = id.into();
         if self.visible_graph_nodes().iter().any(|node| node.id == id) {
+            eprintln!("[freya][graph] action=select:start node={id}");
             self.graph.selected_node_id = Some(id.clone());
             self.pending
                 .push(ExplorerAction::Graph(GraphCommand::SelectNode(id)));
+            eprintln!("[freya][graph] action=select:complete");
         }
     }
 
@@ -537,6 +539,7 @@ pub fn explorer_view(
     state: State<ExplorerState>,
     query: State<String>,
     graph_query: State<String>,
+    graph_canvas: State<super::graph_canvas::GraphCanvasState>,
 ) -> Element {
     let snapshot = state.read().clone();
 
@@ -565,7 +568,7 @@ pub fn explorer_view(
 
     let content = match snapshot.surface {
         ExplorerSurface::Search => search_surface(state, &snapshot, search_input, query),
-        ExplorerSurface::Graph => graph_surface(state, &snapshot, graph_input),
+        ExplorerSurface::Graph => graph_surface(state, &snapshot, graph_input, graph_canvas),
     };
 
     rect()
@@ -837,6 +840,7 @@ fn graph_surface(
     mut state: State<ExplorerState>,
     snapshot: &ExplorerState,
     input: Input,
+    graph_canvas: State<super::graph_canvas::GraphCanvasState>,
 ) -> Element {
     let refresh = rect()
         .height(Size::px(30.))
@@ -856,13 +860,17 @@ fn graph_surface(
         .on_mouse_up(move |_| state.write().reset_graph_filter())
         .a11y_alt("Reset graph filter")
         .child(label().text("Reset"));
+    let mut recenter_canvas = graph_canvas.clone();
     let recenter = rect()
         .height(Size::px(30.))
         .padding(Gaps::new(0., 10., 0., 10.))
         .center()
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| state.write().reset_graph_view())
+        .on_mouse_up(move |_| {
+            recenter_canvas.write().fit_to_content();
+            state.write().reset_graph_view();
+        })
         .a11y_alt("Recenter graph")
         .child(label().text("Recenter"));
     let toolbar = rect()
@@ -879,11 +887,15 @@ fn graph_surface(
         .padding(Gaps::new(0., 12., 12., 12.))
         .spacing(8.)
         .child(toolbar)
-        .child(graph_state_content(state, snapshot))
+        .child(graph_state_content(state, graph_canvas, snapshot))
         .into_element()
 }
 
-fn graph_state_content(state: State<ExplorerState>, snapshot: &ExplorerState) -> Element {
+fn graph_state_content(
+    state: State<ExplorerState>,
+    graph_canvas: State<super::graph_canvas::GraphCanvasState>,
+    snapshot: &ExplorerState,
+) -> Element {
     let body = match snapshot.graph.phase {
         ExplorerPhase::Idle => state_message("Graph not loaded", false),
         ExplorerPhase::Loading => state_message("Building the semantic graph…", true),
@@ -897,7 +909,7 @@ fn graph_state_content(state: State<ExplorerState>, snapshot: &ExplorerState) ->
                 .unwrap_or("Graph failed."),
             false,
         ),
-        ExplorerPhase::Results => graph_results(state, snapshot),
+        ExplorerPhase::Results => super::graph_canvas::render(state, snapshot, graph_canvas),
     };
     rect()
         .width(Size::fill())
@@ -906,138 +918,6 @@ fn graph_state_content(state: State<ExplorerState>, snapshot: &ExplorerState) ->
         .with_corner_radius(12.)
         .padding(Gaps::new_all(12.))
         .child(body)
-        .into_element()
-}
-
-fn graph_results(mut state: State<ExplorerState>, snapshot: &ExplorerState) -> Element {
-    let nodes = snapshot.visible_graph_nodes();
-    let edges = snapshot.visible_graph_edges();
-    let stats = snapshot.graph.snapshot.as_ref().map(|_| {
-        let text = format!("{} nœuds · {} liens visibles", nodes.len(), edges.len());
-        label()
-            .a11y_alt(text.clone())
-            .color(theme::color(theme::MUTED))
-            .text(text)
-    });
-    let node_list = rect()
-        .width(Size::fill())
-        .spacing(4.)
-        .child(section_title("Nodes"))
-        .children(nodes.iter().map(|node| {
-            let selected = snapshot.graph.selected_node_id.as_deref() == Some(node.id.as_str());
-            graph_node_row(state, node, selected)
-        }));
-    let edge_list = rect()
-        .width(Size::fill())
-        .spacing(4.)
-        .child(section_title("Edges"))
-        .children(edges.iter().map(|edge| graph_edge_row(edge)));
-    let selected = snapshot
-        .graph
-        .selected_node_id
-        .as_deref()
-        .and_then(|id| nodes.iter().find(|node| node.id == id));
-    let selected_card = selected.map(|node| {
-        let centered_label = if snapshot.graph.view_generation > 0 {
-            format!("Graph viewport centered on {}", node.title)
-        } else {
-            format!("Graph node selected {}", node.title)
-        };
-        rect()
-            .width(Size::fill())
-            .padding(Gaps::new_all(10.))
-            .background(theme::color(theme::SOFT))
-            .with_corner_radius(10.)
-            .a11y_alt(centered_label)
-            .child(
-                label()
-                    .font_weight(FontWeight::BOLD)
-                    .text(format!("Selected: {}", node.title)),
-            )
-            .child(
-                label()
-                    .color(theme::color(theme::MUTED))
-                    .text(node.summary.clone()),
-            )
-            .child(
-                rect()
-                    .height(Size::px(30.))
-                    .padding(Gaps::new(0., 10., 0., 10.))
-                    .center()
-                    .background(theme::color(theme::SURFACE))
-                    .with_corner_radius(7.)
-                    .on_mouse_up(move |_| state.write().open_selected_graph_node())
-                    .a11y_alt("Open selected note")
-                    .child(label().text("Open note")),
-            )
-            .into_element()
-    });
-    rect()
-        .width(Size::fill())
-        .height(Size::fill())
-        .spacing(10.)
-        .maybe_child(stats)
-        .maybe_child(selected_card)
-        .child(node_list)
-        .child(edge_list)
-        .into_element()
-}
-
-fn graph_node_row(mut state: State<ExplorerState>, node: &GraphNode, selected: bool) -> Element {
-    let id = node.id.clone();
-    let tags = if node.tags.is_empty() {
-        String::new()
-    } else {
-        format!(" · #{}", node.tags.join(" #"))
-    };
-    rect()
-        .width(Size::fill())
-        .padding(Gaps::new_all(9.))
-        .background(if selected {
-            theme::color(theme::SOFT)
-        } else {
-            theme::color(theme::BG)
-        })
-        .with_corner_radius(9.)
-        .on_mouse_up(move |_| state.write().select_graph_node(id.clone()))
-        .a11y_alt(format!("Select graph node {}", node.title))
-        .child(label().font_weight(FontWeight::BOLD).text(format!(
-            "{}  [{}]",
-            node.title,
-            node_kind_label(node.kind)
-        )))
-        .child(
-            label()
-                .font_size(12.)
-                .color(theme::color(theme::MUTED))
-                .text(format!("{}{}", node.relative_path, tags)),
-        )
-        .into_element()
-}
-
-fn graph_edge_row(edge: &GraphEdge) -> Element {
-    rect()
-        .width(Size::fill())
-        .padding(Gaps::new(6., 9., 6., 9.))
-        .background(theme::color(theme::BG))
-        .with_corner_radius(7.)
-        .a11y_alt(format!("Graph edge {} to {}", edge.source, edge.target))
-        .child(
-            label()
-                .font_size(12.)
-                .text(format!("{}  →  {}", edge.source, edge.target)),
-        )
-        .child(
-            label()
-                .font_size(11.)
-                .color(theme::color(theme::MUTED))
-                .text(format!(
-                    "{} · {:.2} · {}",
-                    edge_type_label(edge.edge_type),
-                    edge.weight,
-                    edge.reason
-                )),
-        )
         .into_element()
 }
 
@@ -1074,26 +954,6 @@ fn match_label(kind: SearchMatchType) -> &'static str {
         SearchMatchType::Keyword => "Keyword",
         SearchMatchType::Concept => "Concept",
         SearchMatchType::Unknown => "Local match",
-    }
-}
-
-fn node_kind_label(kind: GraphNodeKind) -> &'static str {
-    match kind {
-        GraphNodeKind::Note => "note",
-        GraphNodeKind::Folder => "folder",
-        GraphNodeKind::Other => "other",
-    }
-}
-
-fn edge_type_label(kind: crate::search_graph_contract::GraphEdgeType) -> &'static str {
-    match kind {
-        crate::search_graph_contract::GraphEdgeType::Semantic => "semantic",
-        crate::search_graph_contract::GraphEdgeType::ExplicitLink => "explicit-link",
-        crate::search_graph_contract::GraphEdgeType::Folder => "folder",
-        crate::search_graph_contract::GraphEdgeType::Tag => "tag",
-        crate::search_graph_contract::GraphEdgeType::Lexical => "lexical",
-        crate::search_graph_contract::GraphEdgeType::Related => "related",
-        crate::search_graph_contract::GraphEdgeType::Other => "other",
     }
 }
 
