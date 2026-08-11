@@ -44,9 +44,31 @@ jobs:
           if [ "$status" -ne 0 ]; then
             python3 - <<'PY'
           from pathlib import Path
-          text = Path('/tmp/freya-tests.log').read_text(errors='replace')
-          tail = '\n'.join(text.splitlines()[-120:])
-          escaped = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          import re
+          raw = Path('/tmp/freya-tests.log').read_text(errors='replace')
+          ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+          lines = [ansi.sub('', line) for line in raw.splitlines()]
+          interesting = []
+          markers = (
+              ' FAILED', 'panicked at', 'failures:', 'test result: FAILED',
+              'NotFound', 'assertion ', 'Error:', 'error[E', 'error:'
+          )
+          for index, line in enumerate(lines):
+              if any(marker in line for marker in markers):
+                  start = max(0, index - 2)
+                  end = min(len(lines), index + 4)
+                  interesting.extend(lines[start:end])
+          if not interesting:
+              interesting = lines[-40:]
+          # Preserve order while removing duplicate context lines.
+          compact = []
+          seen = set()
+          for line in interesting:
+              if line not in seen:
+                  compact.append(line)
+                  seen.add(line)
+          message = '\n'.join(compact[-80:])
+          escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
           print(f'::error title=Freya test failure::{escaped}')
           PY
           fi
