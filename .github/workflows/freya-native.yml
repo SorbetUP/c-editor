@@ -35,41 +35,60 @@ jobs:
       - name: Check Freya shell
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
-      - name: Test Freya shell
+      - name: Test Freya library
+        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1
+
+      - name: Test Freya integration suites independently
         shell: bash
         run: |
-          set +e
-          cargo test --manifest-path Elephant/freya/Cargo.toml -- --test-threads=1 2>&1 | tee /tmp/freya-tests.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            python3 - <<'PY'
-          from pathlib import Path
+          set -uo pipefail
+          failures=0
+          for file in Elephant/freya/tests/*.rs; do
+            suite="$(basename "$file" .rs)"
+            echo "::group::Freya suite: $suite"
+            set +e
+            timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test "$suite" -- --test-threads=1 2>&1 | tee "/tmp/freya-${suite}.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then
+              failures=$((failures + 1))
+              if [ "$status" -eq 124 ]; then
+                detail="suite timed out after 180 seconds"
+              else
+                detail="suite exited with status $status"
+              fi
+              python3 - "$suite" "$detail" "/tmp/freya-${suite}.log" <<'PY'
           import re
-          raw = Path('/tmp/freya-tests.log').read_text(errors='replace')
+          import sys
+          from pathlib import Path
+          suite, detail, filename = sys.argv[1:]
+          raw = Path(filename).read_text(errors='replace')
           ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
           lines = [ansi.sub('', line) for line in raw.splitlines()]
-          interesting = []
           markers = (
               ' FAILED', 'panicked at', 'failures:', 'test result: FAILED',
               'NotFound', 'assertion ', 'Error:', 'error[E', 'error:'
           )
+          interesting = []
           for index, line in enumerate(lines):
               if any(marker in line for marker in markers):
-                  start = max(0, index - 2)
-                  end = min(len(lines), index + 4)
-                  interesting.extend(lines[start:end])
+                  interesting.extend(lines[max(0, index - 2):min(len(lines), index + 5)])
           if not interesting:
-              interesting = lines[-40:]
-          # Preserve order while removing duplicate context lines.
+              interesting = lines[-30:]
           compact = []
           seen = set()
           for line in interesting:
               if line not in seen:
                   compact.append(line)
                   seen.add(line)
-          message = '\n'.join(compact[-80:])
+          message = detail + '\n' + '\n'.join(compact[-60:])
           escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print(f'::error title=Freya test failure::{escaped}')
+          print(f'::error title=Freya suite {suite}::{escaped}')
           PY
+            fi
+          done
+          if [ "$failures" -ne 0 ]; then
+            echo "Freya integration failures: $failures"
+            exit 1
           fi
-          exit "$status"
