@@ -49,13 +49,30 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
 
 fn library_toolbar(mut state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
+    let create_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:create");
+    let mut create_enter_state = state;
+    let mut create_leave_state = state;
     let create = rect()
         .width(Size::px(56.))
         .height(Size::px(56.))
         .center()
-        .background(theme::color(theme::PRIMARY))
+        .background(theme::color(if create_hovered {
+            theme::TEXT
+        } else {
+            theme::PRIMARY
+        }))
         .with_corner_radius(11.)
         .on_mouse_up(move |_| state.write().menu_open = true)
+        .on_pointer_enter(move |_| {
+            create_enter_state
+                .write()
+                .set_hovered_target("toolbar:create")
+        })
+        .on_pointer_leave(move |_| {
+            create_leave_state
+                .write()
+                .clear_hovered_target("toolbar:create")
+        })
         .a11y_alt("Create")
         .child(
             label()
@@ -63,22 +80,48 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
                 .color(theme::color(theme::TEXT))
                 .text("+"),
         );
+    let sort_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:sort");
+    let mut sort_enter_state = state;
+    let mut sort_leave_state = state;
     let sort = rect()
         .width(Size::px(52.))
         .height(Size::px(52.))
         .center()
-        .background(theme::color(theme::SURFACE))
+        .background(theme::color(if sort_hovered {
+            theme::SOFT
+        } else {
+            theme::SURFACE
+        }))
         .with_corner_radius(10.)
         .on_mouse_up(move |_| state.write().library.cycle_sort())
+        .on_pointer_enter(move |_| sort_enter_state.write().set_hovered_target("toolbar:sort"))
+        .on_pointer_leave(move |_| {
+            sort_leave_state
+                .write()
+                .clear_hovered_target("toolbar:sort")
+        })
         .a11y_alt(format!("Sort: {}", snapshot.library.sort.as_contract()))
         .child(label().font_size(19.).text("↕"));
+    let view_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:view");
+    let mut view_enter_state = state;
+    let mut view_leave_state = state;
     let view = rect()
         .width(Size::px(52.))
         .height(Size::px(52.))
         .center()
-        .background(theme::color(theme::SURFACE))
+        .background(theme::color(if view_hovered {
+            theme::SOFT
+        } else {
+            theme::SURFACE
+        }))
         .with_corner_radius(10.)
         .on_mouse_up(move |_| state.write().library.cycle_view())
+        .on_pointer_enter(move |_| view_enter_state.write().set_hovered_target("toolbar:view"))
+        .on_pointer_leave(move |_| {
+            view_leave_state
+                .write()
+                .clear_hovered_target("toolbar:view")
+        })
         .a11y_alt(if snapshot.library.view_mode == ViewMode::Grid {
             "Show notes as list"
         } else {
@@ -108,6 +151,12 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
 pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
     let item = |action, icon, title, description| {
         let mut state = state;
+        let hover_key = format!("create-menu:{title}");
+        let mut enter_state = state;
+        let mut leave_state = state;
+        let enter_key = hover_key.clone();
+        let leave_key = hover_key.clone();
+        let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
         rect()
             .width(Size::fill())
             .height(Size::px(64.))
@@ -115,10 +164,17 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
             .horizontal()
             .spacing(12.)
             .with_corner_radius(10.)
+            .background(theme::color(if hovered {
+                theme::SOFT
+            } else {
+                theme::SURFACE
+            }))
             .on_mouse_up(move |_| {
                 state.write().menu_open = false;
                 state.write().create(action);
             })
+            .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
+            .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
             .a11y_alt(title)
             .child(label().font_size(21.).text(icon))
             .child(
@@ -129,6 +185,7 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
             )
             .into_element()
     };
+    let mut close_state = state;
     rect()
         .position(
             Position::new_absolute()
@@ -142,6 +199,11 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
         .with_corner_radius(14.)
         .layer(Layer::OverlayLevel(10))
+        .on_global_key_down(move |event: Event<KeyboardEventData>| {
+            if event.key == Key::Named(NamedKey::Escape) {
+                close_state.write().menu_open = false;
+            }
+        })
         .child(
             label()
                 .padding(Gaps::new_all(8.))
@@ -208,6 +270,12 @@ fn library_card(entry: &LibraryEntry, mode: ViewMode, state: State<ShellState>) 
     } else {
         theme::LIST_CARD_HEIGHT
     };
+    let hover_key = format!("card:{path}");
+    let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let enter_key = hover_key.clone();
+    let leave_key = hover_key.clone();
+    let mut enter_state = state;
+    let mut leave_state = state;
     let mut state_for_open = state;
     let path_for_open = path.clone();
     rect()
@@ -218,9 +286,23 @@ fn library_card(entry: &LibraryEntry, mode: ViewMode, state: State<ShellState>) 
         })
         .height(Size::px(height))
         .padding(Gaps::new_all(10.))
-        .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::color(if hovered {
+            theme::SOFT
+        } else {
+            theme::SURFACE
+        }))
+        .border(
+            Border::new()
+                .fill(theme::color(if hovered {
+                    theme::BORDER_STRONG
+                } else {
+                    theme::BORDER
+                }))
+                .width(1.),
+        )
         .with_corner_radius(10.)
+        .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
+        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
         .on_mouse_up(move |_| {
             if is_folder {
                 state_for_open.write().open_directory(path_for_open.clone());

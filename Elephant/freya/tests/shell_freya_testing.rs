@@ -154,3 +154,70 @@ fn converted_settings_search_graph_and_editor_surfaces_are_reachable() {
     assert!(accessible_nodes(&runner, "Heading 1").len() >= 1);
     assert!(accessible_nodes(&runner, "Paragraph").len() >= 1);
 }
+
+#[test]
+fn editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let original = fs::read_to_string(fixture.path().join("Alpha.md")).unwrap();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Alpha");
+    runner.sync_and_update();
+    click_label(&mut runner, "Paragraph");
+    runner.write_text("!");
+    runner.sync_and_update();
+    click_label(&mut runner, "Save");
+    runner.sync_and_update();
+    click_label(&mut runner, "Close");
+    runner.sync_and_update();
+    assert_eq!(accessible_nodes(&runner, "Paragraph").len(), 0);
+
+    let saved = fs::read_to_string(fixture.path().join("Alpha.md")).unwrap();
+    assert_ne!(saved, original, "typing must change the persisted note");
+    assert!(
+        saved.contains('!'),
+        "the typed character must reach Muya and disk"
+    );
+}
+
+#[test]
+fn shell_hover_changes_the_real_surface_and_escape_closes_the_create_menu() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    let create = require_labeled_node(&runner, "Create");
+    let before = freya::prelude::Rect::try_downcast(create.element().as_ref())
+        .expect("Create must be backed by a rectangle")
+        .style
+        .background;
+    let area = create.layout().area;
+    runner.move_cursor(((area.min_x() + 4.) as f64, (area.min_y() + 4.) as f64));
+    runner.sync_and_update();
+    let after = freya::prelude::Rect::try_downcast(
+        require_labeled_node(&runner, "Create").element().as_ref(),
+    )
+    .expect("Create must remain a rectangle after hover")
+    .style
+    .background;
+    assert_ne!(
+        before, after,
+        "hover must produce a visible surface transition"
+    );
+
+    click_label(&mut runner, "Create");
+    assert_eq!(accessible_nodes(&runner, "Note").len(), 1);
+    runner.press_key(freya::prelude::Key::Named(freya::prelude::NamedKey::Escape));
+    assert_eq!(accessible_nodes(&runner, "Note").len(), 0);
+}

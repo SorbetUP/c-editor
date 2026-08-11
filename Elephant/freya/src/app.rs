@@ -30,6 +30,7 @@ struct ShellState {
     page: Option<VaultPage>,
     library: LibraryState,
     menu_open: bool,
+    hovered_target: Option<String>,
     vault_menu_open: bool,
     search_open: bool,
     settings_open: bool,
@@ -47,6 +48,7 @@ impl ShellState {
             page: None,
             library: LibraryState::default(),
             menu_open: false,
+            hovered_target: None,
             vault_menu_open: false,
             search_open: false,
             settings_open: false,
@@ -184,6 +186,16 @@ impl ShellState {
                 );
                 self.error = Some(error.to_string());
             }
+        }
+    }
+
+    fn set_hovered_target(&mut self, target: impl Into<String>) {
+        self.hovered_target = Some(target.into());
+    }
+
+    fn clear_hovered_target(&mut self, target: &str) {
+        if self.hovered_target.as_deref() == Some(target) {
+            self.hovered_target = None;
         }
     }
 }

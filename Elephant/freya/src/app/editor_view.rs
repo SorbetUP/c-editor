@@ -5,9 +5,13 @@
 //! truth for undo/save, while this module walks its parsed Muya tree and turns
 //! blocks and inline nodes into Freya paragraphs and containers.
 
-use freya::prelude::*;
+use freya::{
+    prelude::*,
+    text_edit::{use_editable, EditableConfig, EditableEvent, EditorLine, TextEditor},
+};
 use muya_core::{
     model::{BlockKind, InlineKind, InlineMarkKind, ListKind, NodeKind},
+    selection::{Selection, SelectionPoint},
     Document, NodeId,
 };
 
@@ -34,13 +38,128 @@ enum ScriptStyle {
     Subscript,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 struct BlockTextStyle {
     font_size: f32,
     bold: bool,
     italic: bool,
     code: bool,
     color: (u8, u8, u8, u8),
+}
+
+#[derive(Clone, PartialEq)]
+struct EditableInlineBlock {
+    state: State<ShellState>,
+    node_id: NodeId,
+    accessibility_label: String,
+    style: BlockTextStyle,
+}
+
+impl Component for EditableInlineBlock {
+    fn render(&self) -> impl IntoElement {
+        let snapshot = self.state.read().clone();
+        let Some(editor) = snapshot.editor.as_ref() else {
+            return route_notice("NoteEditorHost", "No note open").into_element();
+        };
+
+        let mut spans = Vec::new();
+        collect_inline_children(
+            editor.session().document(),
+            self.node_id,
+            InlineStyle::default(),
+            &mut spans,
+        );
+        if spans.is_empty() {
+            spans.push(styled_span(String::new(), InlineStyle::default()));
+        }
+        let value = spans
+            .iter()
+            .map(|span| span.text.as_ref())
+            .collect::<String>();
+        let mut editable = use_editable(|| value.clone(), EditableConfig::new);
+        let a11y_id = use_a11y();
+        let holder = use_state(ParagraphHolder::default);
+
+        if editable.editor().read().committed_text() != value {
+            let mut inner = editable.editor_mut().write();
+            inner.set(&value);
+            inner.clear_selection();
+        }
+
+        let cursor_index = editable.editor().read().cursor_pos();
+        let highlights = editable
+            .editor()
+            .read()
+            .get_visible_selection(EditorLine::SingleParagraph);
+        let mut state = self.state;
+        let node_id = self.node_id;
+        let previous_value = value.clone();
+        let on_key_down = move |event: Event<KeyboardEventData>| {
+            editable.process_event(EditableEvent::KeyDown {
+                key: &event.key,
+                modifiers: event.modifiers,
+            });
+            let next_value = editable.editor().read().committed_text();
+            if next_value == previous_value {
+                return;
+            }
+            if let Err(error) = apply_inline_delta(state, node_id, &previous_value, &next_value) {
+                editable.editor_mut().write().set(&previous_value);
+                state.write().error = Some(error.clone());
+                eprintln!("[freya][editor] action:failure action=edit error={error}");
+            } else {
+                eprintln!(
+                    "[freya][editor] action:complete action=edit node={:?}",
+                    node_id
+                );
+            }
+        };
+        let on_key_up = move |event: Event<KeyboardEventData>| {
+            editable.process_event(EditableEvent::KeyUp { key: &event.key });
+        };
+        let on_mouse_down = move |event: Event<MouseEventData>| {
+            a11y_id.request_focus();
+            editable.process_event(EditableEvent::Down {
+                location: event.element_location,
+                editor_line: EditorLine::SingleParagraph,
+                holder: &holder.read(),
+            });
+        };
+        let on_mouse_move = move |event: Event<MouseEventData>| {
+            editable.process_event(EditableEvent::Move {
+                location: event.element_location,
+                editor_line: EditorLine::SingleParagraph,
+                holder: &holder.read(),
+            });
+        };
+        let on_pointer_up = move |_| editable.process_event(EditableEvent::Release);
+
+        let mut view = paragraph()
+            .a11y_id(a11y_id)
+            .width(Size::fill())
+            .holder(holder.read().clone())
+            .cursor_index(cursor_index)
+            .highlights(highlights.map(|selection| vec![selection]))
+            .spans_iter(spans.into_iter())
+            .a11y_alt(self.accessibility_label.clone())
+            .on_mouse_down(on_mouse_down)
+            .on_mouse_move(on_mouse_move)
+            .on_global_pointer_press(on_pointer_up)
+            .on_key_down(on_key_down)
+            .on_key_up(on_key_up)
+            .font_size(self.style.font_size)
+            .color(theme::color(self.style.color));
+        if self.style.bold {
+            view = view.font_weight(FontWeight::BOLD);
+        }
+        if self.style.italic {
+            view = view.font_slant(FontSlant::Italic);
+        }
+        if self.style.code {
+            view = view.font_family("monospace");
+        }
+        view.into_element()
+    }
 }
 
 pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
@@ -93,9 +212,21 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
         })
         .a11y_alt("Save")
         .child(label().text("Save"));
+    let close = rect()
+        .width(Size::px(72.))
+        .height(Size::px(36.))
+        .center()
+        .background(theme::color(theme::SOFT))
+        .with_corner_radius(8.)
+        .on_mouse_up(move |_| {
+            eprintln!("[freya][editor] action:complete action=close");
+            state.write().editor = None;
+        })
+        .a11y_alt("Close")
+        .child(label().text("Close"));
 
     let document = editor.session().document();
-    let document_view = render_document(document);
+    let document_view = render_document(state, document);
 
     rect()
         .width(Size::fill())
@@ -107,7 +238,8 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
                 .horizontal()
                 .spacing(8.)
                 .child(undo)
-                .child(save),
+                .child(save)
+                .child(close),
         )
         .child(
             rect()
@@ -122,14 +254,14 @@ pub(super) fn note_editor_host(mut state: State<ShellState>) -> Element {
         .into_element()
 }
 
-fn render_document(document: &Document) -> Element {
-    render_block_children(document, document.root)
+fn render_document(state: State<ShellState>, document: &Document) -> Element {
+    render_block_children(state, document, document.root)
 }
 
-fn render_block_children(document: &Document, parent: NodeId) -> Element {
+fn render_block_children(state: State<ShellState>, document: &Document, parent: NodeId) -> Element {
     let children = document
         .children(parent)
-        .map(|node| render_block(document, node.id))
+        .map(|node| render_block(state, document, node.id))
         .collect::<Vec<_>>();
 
     rect()
@@ -139,17 +271,17 @@ fn render_block_children(document: &Document, parent: NodeId) -> Element {
         .into_element()
 }
 
-fn render_block(document: &Document, node_id: NodeId) -> Element {
+fn render_block(state: State<ShellState>, document: &Document, node_id: NodeId) -> Element {
     let Some(node) = document.node(node_id) else {
         return label().text("[Muya node unavailable]").into_element();
     };
 
     match &node.kind {
         NodeKind::Block(BlockKind::Paragraph) => {
-            render_inline_block(document, node_id, "Paragraph", BlockTextStyle::default())
+            render_inline_block(state, node_id, "Paragraph", BlockTextStyle::default())
         }
         NodeKind::Block(BlockKind::Heading { level }) => render_inline_block(
-            document,
+            state,
             node_id,
             &format!("Heading {level}"),
             BlockTextStyle {
@@ -166,13 +298,15 @@ fn render_block(document: &Document, node_id: NodeId) -> Element {
                     .fill(theme::color(theme::BORDER_STRONG))
                     .width(1.),
             )
-            .child(render_block_children(document, node_id))
+            .child(render_block_children(state, document, node_id))
             .a11y_alt("Block quote")
             .into_element(),
         NodeKind::Block(BlockKind::List { kind, start }) => {
-            render_list(document, node_id, *kind, start.unwrap_or(1))
+            render_list(state, document, node_id, *kind, start.unwrap_or(1))
         }
-        NodeKind::Block(BlockKind::ListItem { .. }) => render_block_children(document, node_id),
+        NodeKind::Block(BlockKind::ListItem { .. }) => {
+            render_block_children(state, document, node_id)
+        }
         NodeKind::Block(BlockKind::CodeBlock { language, .. }) => {
             let mut children = Vec::new();
             if let Some(language) = language.as_deref().filter(|value| !value.is_empty()) {
@@ -186,7 +320,7 @@ fn render_block(document: &Document, node_id: NodeId) -> Element {
                 );
             }
             children.push(render_inline_block(
-                document,
+                state,
                 node_id,
                 "Code block",
                 BlockTextStyle {
@@ -218,7 +352,7 @@ fn render_block(document: &Document, node_id: NodeId) -> Element {
             .children(
                 document
                     .children(node_id)
-                    .map(|child| render_block(document, child.id))
+                    .map(|child| render_block(state, document, child.id))
                     .collect::<Vec<_>>(),
             )
             .a11y_alt("Table")
@@ -230,7 +364,7 @@ fn render_block(document: &Document, node_id: NodeId) -> Element {
             .children(
                 document
                     .children(node_id)
-                    .map(|child| render_block(document, child.id))
+                    .map(|child| render_block(state, document, child.id))
                     .collect::<Vec<_>>(),
             )
             .into_element(),
@@ -240,7 +374,7 @@ fn render_block(document: &Document, node_id: NodeId) -> Element {
             .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
             .child(if *header {
                 render_inline_block(
-                    document,
+                    state,
                     node_id,
                     "Table header cell",
                     BlockTextStyle {
@@ -249,38 +383,163 @@ fn render_block(document: &Document, node_id: NodeId) -> Element {
                     },
                 )
             } else {
-                render_inline_block(document, node_id, "Table cell", BlockTextStyle::default())
+                render_inline_block(state, node_id, "Table cell", BlockTextStyle::default())
             })
             .into_element(),
         NodeKind::Block(BlockKind::HtmlBlock) => {
-            render_unsupported_block(document, node_id, "HTML block not rendered")
+            render_unsupported_block(state, node_id, "HTML block not rendered")
         }
         NodeKind::Block(BlockKind::MathBlock) => {
-            render_unsupported_block(document, node_id, "Math block not rendered")
+            render_unsupported_block(state, node_id, "Math block not rendered")
         }
         NodeKind::Block(BlockKind::FrontMatter { .. }) => {
-            render_unsupported_block(document, node_id, "Front matter is not an editor block")
+            render_unsupported_block(state, node_id, "Front matter is not an editor block")
         }
         NodeKind::Block(BlockKind::FootnoteDefinition { label }) => render_unsupported_block(
-            document,
+            state,
             node_id,
             &format!("Footnote definition not rendered: {label}"),
         ),
         NodeKind::Block(BlockKind::ReferenceDefinition { label }) => render_unsupported_block(
-            document,
+            state,
             node_id,
             &format!("Reference definition not rendered: {label}"),
         ),
-        NodeKind::Block(BlockKind::Diagram { language }) => render_unsupported_block(
-            document,
-            node_id,
-            &format!("Diagram not rendered: {language}"),
-        ),
-        NodeKind::Document | NodeKind::Inline(_) => render_block_children(document, node_id),
+        NodeKind::Block(BlockKind::Diagram { language }) => {
+            render_unsupported_block(state, node_id, &format!("Diagram not rendered: {language}"))
+        }
+        NodeKind::Document | NodeKind::Inline(_) => render_block_children(state, document, node_id),
     }
 }
 
-fn render_list(document: &Document, node_id: NodeId, kind: ListKind, start: u64) -> Element {
+struct TextDelta {
+    start_utf16: u32,
+    end_utf16: u32,
+    inserted: String,
+}
+
+fn text_delta(before: &str, after: &str) -> Option<TextDelta> {
+    if before == after {
+        return None;
+    }
+    let before_chars = before.chars().collect::<Vec<_>>();
+    let after_chars = after.chars().collect::<Vec<_>>();
+    let mut prefix = 0;
+    while prefix < before_chars.len()
+        && prefix < after_chars.len()
+        && before_chars[prefix] == after_chars[prefix]
+    {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < before_chars.len().saturating_sub(prefix)
+        && suffix < after_chars.len().saturating_sub(prefix)
+        && before_chars[before_chars.len() - suffix - 1]
+            == after_chars[after_chars.len() - suffix - 1]
+    {
+        suffix += 1;
+    }
+    let start_utf16 = before_chars[..prefix]
+        .iter()
+        .map(|character| character.len_utf16() as u32)
+        .sum();
+    let end_utf16 = before_chars[..before_chars.len() - suffix]
+        .iter()
+        .map(|character| character.len_utf16() as u32)
+        .sum();
+    Some(TextDelta {
+        start_utf16,
+        end_utf16,
+        inserted: after_chars[prefix..after_chars.len() - suffix]
+            .iter()
+            .collect(),
+    })
+}
+
+fn editable_text_nodes(document: &Document, parent: NodeId, nodes: &mut Vec<(NodeId, String)>) {
+    for child in document.children(parent) {
+        match &child.kind {
+            NodeKind::Inline(InlineKind::Text { value }) => {
+                nodes.push((child.id, value.clone()));
+            }
+            NodeKind::Document | NodeKind::Block(_) | NodeKind::Inline(_) => {
+                editable_text_nodes(document, child.id, nodes);
+            }
+        }
+    }
+}
+
+fn apply_inline_delta(
+    mut state: State<ShellState>,
+    block_id: NodeId,
+    before: &str,
+    after: &str,
+) -> Result<(), String> {
+    let delta = text_delta(before, after).ok_or_else(|| "empty editor delta".to_string())?;
+    let mut shell = state.write();
+    let editor = shell
+        .editor
+        .as_mut()
+        .ok_or_else(|| "cannot edit without an open note".to_string())?;
+    let mut nodes = Vec::new();
+    editable_text_nodes(editor.session().document(), block_id, &mut nodes);
+    let flattened = nodes
+        .iter()
+        .map(|(_, value)| value.as_str())
+        .collect::<String>();
+    if flattened != before {
+        return Err("editor changed while the previous keystroke was pending".to_string());
+    }
+    let (start_node_index, start_offset) = segment_at_offset(&nodes, delta.start_utf16)
+        .ok_or_else(|| "editor selection has no Muya text target".to_string())?;
+    let (end_node_index, end_offset) = segment_at_offset(&nodes, delta.end_utf16)
+        .ok_or_else(|| "editor selection has no Muya text target".to_string())?;
+    if start_node_index != end_node_index {
+        return Err(format!(
+            "selection crosses Muya inline nodes in block {:?}",
+            block_id
+        ));
+    }
+    let (node, _current) = &nodes[start_node_index];
+    editor
+        .set_selection(Selection {
+            anchor: SelectionPoint {
+                node: *node,
+                offset_utf16: start_offset,
+            },
+            focus: SelectionPoint {
+                node: *node,
+                offset_utf16: end_offset,
+            },
+        })
+        .map_err(|error| error.to_string())?;
+    editor
+        .dispatch_text(delta.inserted)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn segment_at_offset(segments: &[(NodeId, String)], offset_utf16: u32) -> Option<(usize, u32)> {
+    let mut cursor = 0;
+    for (index, (_, text)) in segments.iter().enumerate() {
+        let end = cursor + text.encode_utf16().count() as u32;
+        if offset_utf16 <= end {
+            return Some((index, offset_utf16 - cursor));
+        }
+        cursor = end;
+    }
+    segments
+        .last()
+        .map(|(_, text)| (segments.len() - 1, text.encode_utf16().count() as u32))
+}
+
+fn render_list(
+    state: State<ShellState>,
+    document: &Document,
+    node_id: NodeId,
+    kind: ListKind,
+    start: u64,
+) -> Element {
     let items = document
         .children(node_id)
         .enumerate()
@@ -296,7 +555,7 @@ fn render_list(document: &Document, node_id: NodeId, kind: ListKind, start: u64)
                         .color(theme::color(theme::MUTED))
                         .text(marker),
                 )
-                .child(render_block_children(document, item.id))
+                .child(render_block_children(state, document, item.id))
                 .into_element()
         })
         .collect::<Vec<_>>();
@@ -339,36 +598,21 @@ fn list_accessibility_label(kind: ListKind) -> &'static str {
 }
 
 fn render_inline_block(
-    document: &Document,
+    state: State<ShellState>,
     node_id: NodeId,
     accessibility_label: &str,
     style: BlockTextStyle,
 ) -> Element {
-    let mut spans = Vec::new();
-    collect_inline_children(document, node_id, InlineStyle::default(), &mut spans);
-    if spans.is_empty() {
-        spans.push(styled_span(String::new(), InlineStyle::default()));
+    EditableInlineBlock {
+        state,
+        node_id,
+        accessibility_label: accessibility_label.to_string(),
+        style,
     }
-
-    let mut view = paragraph()
-        .width(Size::fill())
-        .font_size(style.font_size)
-        .color(theme::color(style.color))
-        .spans_iter(spans.into_iter())
-        .a11y_alt(accessibility_label.to_string());
-    if style.bold {
-        view = view.font_weight(FontWeight::BOLD);
-    }
-    if style.italic {
-        view = view.font_slant(FontSlant::Italic);
-    }
-    if style.code {
-        view = view.font_family("monospace");
-    }
-    view.into_element()
+    .into_element()
 }
 
-fn render_unsupported_block(document: &Document, node_id: NodeId, message: &str) -> Element {
+fn render_unsupported_block(state: State<ShellState>, node_id: NodeId, message: &str) -> Element {
     rect()
         .width(Size::fill())
         .spacing(4.)
@@ -383,7 +627,7 @@ fn render_unsupported_block(document: &Document, node_id: NodeId, message: &str)
                 .text(message.to_string()),
         )
         .child(render_inline_block(
-            document,
+            state,
             node_id,
             message,
             BlockTextStyle {
@@ -549,7 +793,7 @@ fn heading_font_size(level: u8) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::EditorSession;
+    use crate::editor::{EditorDocument, EditorSession};
 
     fn spans_for(markdown: &str) -> Vec<Span<'static>> {
         let session = EditorSession::from_markdown(markdown);
@@ -619,10 +863,17 @@ mod tests {
 
     #[test]
     fn render_document_walks_structured_blocks_without_using_markdown_lines() {
-        let session = EditorSession::from_markdown(
-            "# Heading\n\n> quote\n\n- item\n- [x] done\n\n```rust\nlet x = 1;\n```\n\n---",
-        );
-        let _rendered = render_document(session.document());
+        let markdown =
+            "# Heading\n\n> quote\n\n- item\n- [x] done\n\n```rust\nlet x = 1;\n```\n\n---";
+        let session = EditorSession::from_markdown(markdown);
+        let runner = freya_testing::prelude::launch_test(move || {
+            let state = use_state(move || {
+                let mut shell = ShellState::empty();
+                shell.editor = Some(EditorDocument::from_markdown(markdown));
+                shell
+            });
+            note_editor_host(state)
+        });
         let block_kinds = session
             .document()
             .children(session.document().root)
@@ -646,5 +897,29 @@ mod tests {
         assert!(block_kinds
             .iter()
             .any(|kind| matches!(kind, BlockKind::ThematicBreak)));
+        for label in [
+            "Heading 1",
+            "Block quote",
+            "Unordered list",
+            "Code block",
+            "Thematic break",
+        ] {
+            assert!(
+                runner
+                    .find(|_, element| {
+                        (element.accessibility().builder.label() == Some(label)).then_some(())
+                    })
+                    .is_some(),
+                "structured block {label:?} must be present in the Freya tree"
+            );
+        }
+    }
+
+    #[test]
+    fn editor_delta_uses_utf16_offsets_for_non_bmp_text() {
+        let delta = text_delta("A😀B", "A😃B").expect("the emoji replacement is an edit");
+        assert_eq!(delta.start_utf16, 1);
+        assert_eq!(delta.end_utf16, 3);
+        assert_eq!(delta.inserted, "😃");
     }
 }

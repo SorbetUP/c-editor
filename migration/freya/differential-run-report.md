@@ -2,7 +2,7 @@
 
 Date: 2026-08-11
 Branch: `nsb/freya-native-migration`
-Revision under test: `84b3784272c083b72316f5591c524f032f8ff0cf` plus the uncommitted differential harness files listed below
+Revision under test: branch head at validation time; the delivery SHA is recorded in the final handoff below.
 Platform: macOS, arm64
 
 ## Status
@@ -43,6 +43,19 @@ node tools/freya-differential/compare.mjs \
 Result: `ok`; 64/64 images compared, 0 missing, 0 extra, 0 changed pixels.
 This proves the capture and comparator, not cross-runtime parity.
 
+After the editor conversion tranche, the complete Freya crate suite also ran
+sequentially with:
+
+```text
+cargo test --manifest-path Elephant/freya/Cargo.toml -- --nocapture --test-threads=1
+```
+
+Result: `79 passed` across 6 suites. The new `freya-testing` editor scenario
+opens `Alpha.md`, types through the editable Muya paragraph, saves through the
+real `EditorDocument`, and verifies the bytes on disk. A separate scenario
+moves over Create, verifies the actual rectangle background changes, opens the
+menu, and closes it with Escape.
+
 The comparator's red-path was also exercised by removing one temporal PNG from
 a copied candidate sequence. It exited with code 1 and reported
 `sequence-missing` for `create-menu/frames/frame-004.png`; the missing frame was
@@ -63,7 +76,7 @@ pnpm test:desktop:acceptance
 ```
 
 The real Tauri binary started, printed
-`ELEPHANT_ACCEPTANCE_TAURI_PORT=52135`, installed the acceptance bridge and
+`ELEPHANT_ACCEPTANCE_TAURI_PORT=52709`, installed the acceptance bridge and
 reached `[acceptance-tauri] renderer:ready`. It then exited with code 1 at the
 existing Create-menu acceptance assertion:
 
@@ -104,9 +117,10 @@ silently substituted for the requested Playwright path.
 
 The shared scenario records these as hard gaps in the current Freya shell:
 
-- editable Muya target and real text input/save path;
+- complete Muya editing parity beyond the proven single/same-text-node path
+  (cross-inline-node selection, composition, clipboard/drop, Enter/block
+  boundaries, autosave and close persistence remain unproven);
 - addressable scroll state and scroll-frame comparison;
-- close-note control;
 - drag-start/drag-over/drop behavior;
 - complete Tauri visual capture and the same action timeline;
 - restart comparison and persisted state equivalence across both runtimes.
@@ -123,5 +137,9 @@ replaced by direct state mutation or a placeholder control.
 - `Elephant/freya/tests/differential_freya_capture.rs`
 - `tools/freya-differential/compare.mjs`
 - `tools/freya-differential/README.md`
+- `Elephant/freya/src/app/editor_view.rs`
+- `Elephant/freya/tests/shell_freya_testing.rs`
+- `migration/freya/editor-parity-blockers.md`
+- `migration/freya/shell-parity-blockers.md`
 
 No existing Vue/Tauri implementation was removed or bypassed.

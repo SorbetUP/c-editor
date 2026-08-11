@@ -82,13 +82,22 @@ fn vault_action(mut state: State<ShellState>) -> Element {
         .as_ref()
         .map(|vault| format!("{} - open vault switcher", vault.descriptor().name))
         .unwrap_or_else(|| "No vault - open vault switcher".to_string());
+    let hovered = state.read().hovered_target.as_deref() == Some("rail:vault");
+    let mut enter_state = state;
+    let mut leave_state = state;
     rect()
         .width(Size::fill())
         .height(Size::px(34.))
         .center()
-        .background(theme::color(theme::SOFT))
+        .background(theme::color(if hovered {
+            theme::BORDER_STRONG
+        } else {
+            theme::SOFT
+        }))
         .with_corner_radius(7.)
         .on_mouse_up(move |_| state.write().vault_menu_open = true)
+        .on_pointer_enter(move |_| enter_state.write().set_hovered_target("rail:vault"))
+        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target("rail:vault"))
         .a11y_alt(title)
         .child(label().font_size(18.).text("⌂"))
         .into_element()
@@ -99,11 +108,21 @@ fn rail_action(
     icon: &'static str,
     mut state: State<ShellState>,
 ) -> Element {
+    let hover_key = format!("rail:{label_text}");
+    let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let enter_key = hover_key.clone();
+    let leave_key = hover_key.clone();
+    let mut enter_state = state;
+    let mut leave_state = state;
     rect()
         .width(Size::fill())
         .height(Size::px(34.))
         .center()
-        .background(theme::color(theme::SURFACE))
+        .background(theme::color(if hovered {
+            theme::SOFT
+        } else {
+            theme::SURFACE
+        }))
         .with_corner_radius(7.)
         .on_mouse_up(move |_| match label_text {
             "Search" => {
@@ -121,6 +140,8 @@ fn rail_action(
                 state.write().sidebar_visible = !visible;
             }
         })
+        .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
+        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
         .a11y_alt(label_text)
         .child(
             label()
@@ -190,6 +211,9 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
             .height(Size::fill())
             .into_element();
     }
+    let all_notes_hovered = snapshot.hovered_target.as_deref() == Some("sidebar:all");
+    let mut all_notes_enter = state;
+    let mut all_notes_leave = state;
     let all_notes = rect()
         .width(Size::fill())
         .height(Size::px(38.))
@@ -197,9 +221,15 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
         .padding(Gaps::new(0., 12., 0., 12.))
         .horizontal()
         .cross_align(Alignment::Center)
-        .background(theme::color(theme::SOFT))
+        .background(theme::color(if all_notes_hovered {
+            theme::BORDER_STRONG
+        } else {
+            theme::SOFT
+        }))
         .with_corner_radius(8.)
         .on_mouse_up(move |_| state.write().open_directory("".to_string()))
+        .on_pointer_enter(move |_| all_notes_enter.write().set_hovered_target("sidebar:all"))
+        .on_pointer_leave(move |_| all_notes_leave.write().clear_hovered_target("sidebar:all"))
         .a11y_alt("All notes")
         .child(label().font_size(17.).text("▣"))
         .child(
@@ -259,12 +289,19 @@ fn sidebar_entry(entry: &VaultEntry, mut state: State<ShellState>) -> Element {
     let path = entry.path.clone();
     let title = entry.title.clone();
     let is_directory = entry.is_directory;
+    let hover_key = format!("sidebar:{path}");
+    let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let enter_key = hover_key.clone();
+    let leave_key = hover_key.clone();
+    let mut enter_state = state;
+    let mut leave_state = state;
     rect()
         .width(Size::fill())
         .height(Size::px(36.))
         .padding(Gaps::new(0., 8., 0., 14.))
         .horizontal()
         .cross_align(Alignment::Center)
+        .background(theme::color(if hovered { theme::SOFT } else { theme::BG }))
         .on_mouse_up(move |_| {
             if is_directory {
                 state.write().open_directory(path.clone());
@@ -272,6 +309,8 @@ fn sidebar_entry(entry: &VaultEntry, mut state: State<ShellState>) -> Element {
                 state.write().open_note(&entry);
             }
         })
+        .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
+        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
         .a11y_alt(title.clone())
         .child(
             label()
