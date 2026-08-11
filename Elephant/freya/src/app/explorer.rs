@@ -182,6 +182,10 @@ impl ExplorerState {
         self.search.request_id = self.search.request_id.saturating_add(1);
         self.search.phase = ExplorerPhase::Loading;
         self.pending
+            .push(ExplorerAction::Search(SearchCommand::SetQuery(
+                request.query.clone(),
+            )));
+        self.pending
             .push(ExplorerAction::Search(SearchCommand::Submit(request)));
     }
 
@@ -258,6 +262,12 @@ impl ExplorerState {
         self.search.clear();
         self.pending
             .push(ExplorerAction::Search(SearchCommand::ClearQuery));
+    }
+
+    pub fn close_search(&mut self) {
+        self.search.clear();
+        self.pending
+            .push(ExplorerAction::Search(SearchCommand::Close));
     }
 
     pub fn select_search_result(&mut self, index: usize) {
@@ -345,11 +355,19 @@ impl ExplorerState {
     pub fn set_graph_filter(&mut self, query: impl Into<String>) {
         self.graph.filters.query = query.into();
         self.graph.refresh_phase();
+        self.pending
+            .push(ExplorerAction::Graph(GraphCommand::SetFilterQuery(
+                self.graph.filters.query.clone(),
+            )));
     }
 
     pub fn reset_graph_filter(&mut self) {
         self.graph.filters.query.clear();
         self.graph.refresh_phase();
+        self.pending
+            .push(ExplorerAction::Graph(GraphCommand::SetFilterQuery(
+                String::new(),
+            )));
     }
 
     pub fn visible_graph_nodes(&self) -> Vec<&GraphNode> {
@@ -518,8 +536,11 @@ fn search_surface(
     mut state: State<ExplorerState>,
     snapshot: &ExplorerState,
     input: Input,
-    _query: State<String>,
+    query: State<String>,
 ) -> Element {
+    let mut key_state = state;
+    let mut query_state = query;
+    let search_input = rect().a11y_alt("Search input").child(input);
     let mode = rect()
         .height(Size::px(30.))
         .padding(Gaps::new(0., 10., 0., 10.))
@@ -542,7 +563,7 @@ fn search_surface(
         .width(Size::fill())
         .horizontal()
         .spacing(8.)
-        .child(input)
+        .child(search_input)
         .child(mode)
         .child(clear);
 
@@ -551,6 +572,20 @@ fn search_surface(
         .height(Size::fill())
         .padding(Gaps::new(0., 12., 12., 12.))
         .spacing(8.)
+        .on_global_key_down(move |event: Event<KeyboardEventData>| match event.key {
+            Key::Named(NamedKey::Escape) => {
+                let had_query = !query_state.read().trim().is_empty();
+                query_state.set(String::new());
+                if had_query {
+                    key_state.write().clear_search();
+                } else {
+                    key_state.write().close_search();
+                }
+            }
+            Key::Named(NamedKey::ArrowDown) => key_state.write().move_search_selection(1),
+            Key::Named(NamedKey::ArrowUp) => key_state.write().move_search_selection(-1),
+            _ => {}
+        })
         .child(bar)
         .child(search_state_content(state, snapshot))
         .into_element()
@@ -726,7 +761,7 @@ fn graph_surface(
         .width(Size::fill())
         .horizontal()
         .spacing(8.)
-        .child(input)
+        .child(rect().a11y_alt("Graph filter input").child(input))
         .child(refresh)
         .child(reset);
     rect()
@@ -984,6 +1019,31 @@ mod tests {
         assert_eq!(
             state.take_pending(),
             vec![ExplorerAction::Search(SearchCommand::ClearQuery)]
+        );
+    }
+
+    #[test]
+    fn search_and_graph_inputs_emit_typed_host_commands() {
+        let mut state = ExplorerState::new();
+        state.submit_search("  rust  ");
+        assert_eq!(
+            state.take_pending(),
+            vec![
+                ExplorerAction::Search(SearchCommand::SetQuery("rust".to_string())),
+                ExplorerAction::Search(SearchCommand::Submit(SearchRequest {
+                    query: "rust".to_string(),
+                    mode: SearchMode::Exact,
+                    limit: SEARCH_QUERY_LIMIT_DEFAULT,
+                })),
+            ]
+        );
+
+        state.set_graph_filter("native");
+        assert_eq!(
+            state.take_pending(),
+            vec![ExplorerAction::Graph(GraphCommand::SetFilterQuery(
+                "native".to_string()
+            ))]
         );
     }
 
