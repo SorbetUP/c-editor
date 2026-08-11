@@ -1,0 +1,109 @@
+import { writeFileSync } from 'node:fs'
+import path from 'node:path'
+
+import { dispatchNativeAction, inspectAccessibility } from './native-window.mjs'
+
+export class MissingPhysicalTargetError extends Error {
+  constructor (actionId, message) {
+    super(`${actionId}: ${message}`)
+    this.name = 'MissingPhysicalTargetError'
+    this.actionId = actionId
+  }
+}
+const roleMap = { button: 'AXButton', menuitem: 'AXMenuItem', textbox: 'AXTextField' }
+const textOf = (element) => [element.title, element.description, element.value].filter(Boolean).join(' ')
+const area = (rect) => Math.max(0, Number(rect?.width) || 0) * Math.max(0, Number(rect?.height) || 0)
+const center = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
+
+const elementsFor = (report, target, actionId) => {
+  const tauri = target?.tauri || {}
+  const candidates = Array.isArray(report?.elements) ? report.elements.filter((element) => element.rect && area(element.rect) > 1) : []
+  const expectedRole = roleMap[tauri.role]
+  let matches = candidates
+  if (expectedRole) matches = matches.filter((element) => element.role === expectedRole)
+  const exactName = tauri.name ?? tauri.value
+  if (exactName) matches = matches.filter((element) => textOf(element) === exactName)
+  if (tauri.placeholder) matches = matches.filter((element) => textOf(element).includes(tauri.placeholder))
+  if (tauri.hasText) matches = matches.filter((element) => textOf(element).includes(tauri.hasText))
+  if (tauri.selector?.includes('aria-label="Search"')) matches = matches.filter((element) => textOf(element) === 'Search')
+  if (tauri.selector?.includes('en-note-editor-shell')) matches = matches.filter((element) => element.role === 'AXWebArea' || element.role === 'AXGroup')
+  if (tauri.selector?.includes('muya-runtime-editor')) matches = matches.filter((element) => ['AXTextArea', 'AXTextField', 'AXWebArea'].includes(element.role))
+  if (tauri.selector?.includes('en-rail-sidebar-toggle')) matches = matches.filter((element) => /sidebar|hide/i.test(textOf(element)))
+  if (tauri.selector?.includes('en-rail-nav')) matches = matches.filter((element) => textOf(element) === 'Search')
+  if (matches.length === 1) return matches[0]
+  if (matches.length > 1) {
+    const ranked = [...matches].sort((left, right) => area(right.rect) - area(left.rect))
+    if (area(ranked[0].rect) > area(ranked[1].rect) * 1.2) return ranked[0]
+  }
+  throw new MissingPhysicalTargetError(actionId, `no unambiguous macOS Accessibility target for ${JSON.stringify(tauri)}`)
+}
+
+const pointPath = (rect, shape = []) => {
+  const point = center(rect)
+  return shape.map((name) => {
+    if (name === 'center-plus-x-24') return { x: point.x + 24, y: point.y }
+    if (name === 'center-plus-y-120') return { x: point.x, y: point.y + 120 }
+    if (name === 'center-plus-y-240') return { x: point.x, y: point.y + 240 }
+    if (name === 'left') return { x: rect.x + rect.width * 0.2, y: point.y }
+    if (name === 'right') return { x: rect.x + rect.width * 0.8, y: point.y }
+    return point
+  })
+}
+
+const dragPoints = (source, drop) => {
+  const start = center(source)
+  const end = center(drop)
+  return [start, { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }, end]
+}
+
+const dispatch = (request, requestDir, events) => {
+  const filename = path.join(requestDir, `${String(events.length).padStart(3, '0')}-${request.operation}.json`)
+  writeFileSync(filename, `${JSON.stringify(request, null, 2)}\n`, 'utf8')
+  const startedAt = Date.now()
+  const result = dispatchNativeAction({ requestFile: filename })
+  const endedAt = Date.now()
+  events.push({ operation: request.operation, request: { ...request, requestFile: filename }, startedAt, endedAt, result })
+}
+
+export const observeAccessibility = (pid) => inspectAccessibility({ pid })
+
+export const executePhysicalAction = ({ action, pid, requestDir }) => {
+  const report = inspectAccessibility({ pid })
+  if (!report.accessibilityTrusted) throw new MissingPhysicalTargetError(action.id, 'macOS Accessibility trust is unavailable; bridge control is forbidden')
+  const events = []
+  const target = action.target?.tauri
+  if (action.event === 'press-key') {
+    dispatch({ operation: 'press-key', key: action.key, repeatCount: action.repeat || 1 }, requestDir, events)
+  } else if (action.event === 'write-text') {
+    const element = elementsFor(report, target, action.id)
+    dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
+    for (const key of action.keysBeforeText || []) {
+      dispatch({ operation: 'press-key', key, control: key.startsWith('Control+') }, requestDir, events)
+    }
+    dispatch({ operation: 'write-text', text: action.input || action.text || '' }, requestDir, events)
+  } else if (action.event === 'drag') {
+    const source = elementsFor(report, target?.source, action.id)
+    const dropTarget = elementsFor(report, target?.dropTarget, action.id)
+    dispatch({ operation: 'drag', points: dragPoints(source.rect, dropTarget.rect) }, requestDir, events)
+  } else if (action.event === 'scroll') {
+    const element = elementsFor(report, target, action.id)
+    const points = pointPath(element.rect, action.pointerPath || ['center'])
+    dispatch({ operation: 'move-pointer', points }, requestDir, events)
+    dispatch({ operation: 'scroll', points: [points.at(-1)], deltaY: action.delta?.y || 0 }, requestDir, events)
+  } else if (action.event === 'move-pointer') {
+    const element = elementsFor(report, target, action.id)
+    dispatch({ operation: 'move-pointer', points: pointPath(element.rect, action.pointerPath || ['center']) }, requestDir, events)
+  } else if (action.event === 'click') {
+    const element = elementsFor(report, target, action.id)
+    dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
+  } else if (action.event) {
+    throw new MissingPhysicalTargetError(action.id, `unsupported shared physical event ${action.event}`)
+  }
+  return {
+    accessibilityTrusted: report.accessibilityTrusted,
+    events,
+    controlPlane: 'native-cg-event',
+    bridgeFallback: false,
+    observedTargets: events.flatMap((event) => event.request.points || [])
+  }
+}
