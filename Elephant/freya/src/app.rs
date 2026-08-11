@@ -16,6 +16,7 @@ mod shell_gestures;
 mod shell_history;
 mod shell_preferences;
 mod shell_runtime;
+mod vault_picker;
 
 use freya::prelude::*;
 use std::{env, path::PathBuf};
@@ -81,12 +82,62 @@ impl ShellState {
     }
 
     fn load() -> Self {
-        let Some(raw_root) = env::var_os("ELEPHANT_FREYA_VAULT") else {
-            let mut state = Self::empty();
-            state.error = Some("No vault selected. Set ELEPHANT_FREYA_VAULT.".to_string());
-            return state;
-        };
-        shell_runtime::load_from_root(PathBuf::from(raw_root))
+        // Keep the environment override for deterministic tests and developer
+        // workflows, but it is no longer required for normal application use.
+        if let Some(raw_root) = env::var_os("ELEPHANT_FREYA_VAULT") {
+            return shell_runtime::load_from_root(PathBuf::from(raw_root));
+        }
+
+        match vault_picker::remembered_vault() {
+            Ok(Some(root)) => {
+                let loaded = shell_runtime::load_from_root(root);
+                if loaded.vault.is_some() {
+                    loaded
+                } else {
+                    let mut state = Self::empty();
+                    state.error = loaded.error;
+                    state
+                }
+            }
+            Ok(None) => Self::empty(),
+            Err(error) => {
+                let mut state = Self::empty();
+                state.error = Some(format!(
+                    "Unable to restore the previously selected vault: {error}"
+                ));
+                state
+            }
+        }
+    }
+
+    fn open_vault(&mut self, root: PathBuf) {
+        eprintln!(
+            "[freya][vault] action:open-start path={}",
+            root.display()
+        );
+        let mut next = shell_runtime::load_from_root(root);
+        if let Some(canonical_root) = next
+            .vault
+            .as_ref()
+            .map(|vault| vault.root().to_path_buf())
+        {
+            if let Err(error) = vault_picker::remember_vault(&canonical_root) {
+                eprintln!("[freya][vault] action:remember-failure error={error}");
+                next.error = Some(format!(
+                    "Vault opened, but Elephant could not remember it for next launch: {error}"
+                ));
+            }
+            eprintln!(
+                "[freya][vault] action:open-complete path={}",
+                canonical_root.display()
+            );
+        } else {
+            eprintln!(
+                "[freya][vault] action:open-failure error={}",
+                next.error.as_deref().unwrap_or("unknown error")
+            );
+        }
+        *self = next;
     }
 
     fn reload_directory(&mut self, relative_path: &str) {
@@ -171,6 +222,13 @@ impl ShellState {
     }
 }
 
+fn choose_vault(mut state: State<ShellState>) {
+    let Some(root) = vault_picker::pick_vault() else {
+        return;
+    };
+    state.write().open_vault(root);
+}
+
 pub fn app() -> impl IntoElement {
     let state = use_state(ShellState::load);
     app_shell(state)
@@ -195,7 +253,7 @@ fn app_shell(state: State<ShellState>) -> Element {
     explorer::bind_live_search(explorer_state, explorer_query);
     let snapshot = state.read().clone();
     if snapshot.vault.is_none() {
-        return empty_vault_picker(snapshot.error.as_deref());
+        return empty_vault_picker(state);
     }
     explorer_runtime::drain_explorer_actions(state, explorer_state);
     let snapshot = state.read().clone();
@@ -239,7 +297,9 @@ fn app_shell(state: State<ShellState>) -> Element {
     }
 }
 
-fn empty_vault_picker(error: Option<&str>) -> Element {
+fn empty_vault_picker(state: State<ShellState>) -> Element {
+    let error = state.read().error.clone();
+    let picker_state = state;
     rect()
         .width(Size::fill())
         .height(Size::fill())
@@ -256,11 +316,20 @@ fn empty_vault_picker(error: Option<&str>) -> Element {
                 .spacing(12.)
                 .child(label().font_size(22.).text("Choose a vault"))
                 .child(
-                    label().color(theme::color(theme::MUTED)).text(
-                        error
-                            .unwrap_or("Set ELEPHANT_FREYA_VAULT to open an existing vault.")
-                            .to_string(),
-                    ),
+                    label()
+                        .color(theme::color(theme::MUTED))
+                        .text("Select an existing Elephant vault folder to continue."),
+                )
+                .maybe_child(error.map(|message| {
+                    label()
+                        .color(theme::color(theme::MUTED))
+                        .text(message)
+                        .into_element()
+                }))
+                .child(
+                    Button::new()
+                        .on_press(move |_| choose_vault(picker_state))
+                        .child("Choose folder"),
                 ),
         )
         .into_element()
