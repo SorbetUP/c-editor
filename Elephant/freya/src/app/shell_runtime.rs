@@ -92,3 +92,44 @@ fn error_state(error: String) -> ShellState {
     state.error = Some(error);
     state
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault_adapter::vault_layout;
+    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    fn temporary_vault() -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock must be after Unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("elephant-freya-select-vault-{stamp}"));
+        fs::create_dir_all(&root).expect("create selected vault fixture");
+        fs::write(root.join("Existing.md"), "# Existing\n").expect("seed existing user note");
+        root
+    }
+
+    #[test]
+    fn selecting_a_folder_uses_the_same_vault_initialization_contract_as_tauri() {
+        let root = temporary_vault();
+        let state = select_root(root.clone());
+
+        assert!(state.vault.is_some(), "selected vault must become active");
+        assert!(state.error.is_none(), "valid folder selection must not surface an error");
+        assert!(
+            vault_layout::config_file(&root, vault_layout::WORKSPACE_FILE).is_file(),
+            "workspace metadata must be initialized before the selected vault is exposed"
+        );
+        assert!(
+            root.join("Getting Started").join("Welcome.md").is_file(),
+            "the canonical initialization path must create the same welcome note as Tauri"
+        );
+        assert!(
+            root.join("Existing.md").is_file(),
+            "initialization must preserve existing user content"
+        );
+
+        fs::remove_dir_all(root).expect("clean selected vault fixture");
+    }
+}
