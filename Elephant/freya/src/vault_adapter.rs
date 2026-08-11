@@ -57,6 +57,8 @@ mod config {
 pub(crate) mod entries;
 #[path = "../../backend/tauri/src/vault/metadata.rs"]
 pub(crate) mod metadata;
+#[path = "../../backend/tauri/src/fts.rs"]
+pub(crate) mod production_fts;
 #[path = "../../backend/tauri/src/vault/types.rs"]
 pub(crate) mod types;
 
@@ -365,6 +367,53 @@ impl VaultAdapter {
 
     pub fn list_directory(&self, relative_path: impl Into<String>) -> AdapterResult<VaultPage> {
         self.list(PageRequest::new(relative_path))
+    }
+
+    pub fn find_entry(&self, relative_path: &str) -> AdapterResult<VaultEntry> {
+        let relative_path = self.validate_visible_path(relative_path, false)?;
+        let parent = parent_relative_path(&relative_path);
+        let mut offset = 0;
+        loop {
+            let page = self.list(
+                PageRequest::new(parent)
+                    .with_window(offset, MAX_PAGE_SIZE)
+                    .without_preview(),
+            )?;
+            if let Some(entry) = page
+                .entries
+                .into_iter()
+                .find(|entry| entry.path == relative_path)
+            {
+                return Ok(entry);
+            }
+            let Some(next_offset) = page.next_offset else {
+                break;
+            };
+            offset = next_offset;
+        }
+        Err(AdapterError::new(format!(
+            "Search result is no longer present: {relative_path}"
+        )))
+    }
+
+    pub fn rebuild_search_index(&self) -> AdapterResult<production_fts::IndexRefreshStatus> {
+        let index = production_fts::FtsIndex::open(self.root())
+            .map_err(|error| AdapterError::new(format!("Unable to open search index: {error}")))?;
+        index
+            .rebuild_from_files(&self.descriptor.id, self.root())
+            .map_err(|error| AdapterError::new(format!("Unable to rebuild search index: {error}")))
+    }
+
+    pub fn search_index(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> AdapterResult<Vec<production_fts::Hit>> {
+        let index = production_fts::FtsIndex::open(self.root())
+            .map_err(|error| AdapterError::new(format!("Unable to open search index: {error}")))?;
+        index
+            .search(query, limit.clamp(1, MAX_PAGE_SIZE))
+            .map_err(|error| AdapterError::new(format!("Unable to query search index: {error}")))
     }
 
     pub fn create_note(

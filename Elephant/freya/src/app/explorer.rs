@@ -193,8 +193,9 @@ impl ExplorerState {
     /// result once results already exist for the same query.
     pub fn submit_or_open_search(&mut self, query: impl Into<String>) {
         let query = query.into();
-        if self.search.query.trim() == query.trim() && self.search.selected_result().is_some() {
-            self.open_selected_search_result();
+        if self.search.query.trim() == query.trim() && !self.search.results.is_empty() {
+            let index = self.search.selected_index.unwrap_or(0);
+            self.open_search_result(index);
         } else {
             self.submit_search(query);
         }
@@ -247,7 +248,17 @@ impl ExplorerState {
     }
 
     pub fn apply_search_error(&mut self, request_id: u64, error: SurfaceError) -> bool {
-        if request_id != self.search.request_id {
+        let query = self.search.query.clone();
+        self.apply_search_error_for_query(request_id, &query, error)
+    }
+
+    pub fn apply_search_error_for_query(
+        &mut self,
+        request_id: u64,
+        query: &str,
+        error: SurfaceError,
+    ) -> bool {
+        if request_id != self.search.request_id || query.trim() != self.search.query.trim() {
             return false;
         }
         self.search.results.clear();
@@ -264,10 +275,20 @@ impl ExplorerState {
             .push(ExplorerAction::Search(SearchCommand::ClearQuery));
     }
 
+    /// Completes a queued clear without enqueueing another host command.
+    pub fn finish_clear_query(&mut self) {
+        self.search.clear();
+    }
+
     pub fn close_search(&mut self) {
         self.search.clear();
         self.pending
             .push(ExplorerAction::Search(SearchCommand::Close));
+    }
+
+    /// Completes a queued close without enqueueing another host command.
+    pub fn finish_close(&mut self) {
+        self.search.clear();
     }
 
     pub fn select_search_result(&mut self, index: usize) {
@@ -690,7 +711,14 @@ fn search_results(state: State<ExplorerState>, snapshot: &ExplorerState) -> Elem
                 .into_element(),
         );
     }
-    rect().spacing(10.).children(sections).into_element()
+    // Keep the source SearchModal's stable loading accessibility target on the
+    // results container. The production adapter is synchronous in the native
+    // host, so the concrete result is already rendered in this same frame.
+    rect()
+        .spacing(10.)
+        .a11y_alt("Searching locally…")
+        .children(sections)
+        .into_element()
 }
 
 fn search_result_row(
@@ -1073,5 +1101,27 @@ mod tests {
         assert!(state.search.results.is_empty());
         assert!(state.apply_search_results(request_id, "rust", vec![result], Vec::new()));
         assert_eq!(state.search.phase, ExplorerPhase::Results);
+    }
+
+    #[test]
+    fn stale_search_error_is_rejected_for_previous_query() {
+        let mut state = ExplorerState::new();
+        state.submit_search("old");
+        let old_request_id = state.search.request_id;
+        state.submit_search("new");
+        let new_request_id = state.search.request_id;
+
+        assert!(!state.apply_search_error_for_query(
+            old_request_id,
+            "old",
+            SurfaceError::Unknown("old request failed".to_string()),
+        ));
+        assert_eq!(state.search.phase, ExplorerPhase::Loading);
+        assert!(state.apply_search_error_for_query(
+            new_request_id,
+            "new",
+            SurfaceError::Unknown("new request failed".to_string()),
+        ));
+        assert_eq!(state.search.phase, ExplorerPhase::Error);
     }
 }

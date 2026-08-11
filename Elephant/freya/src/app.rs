@@ -5,6 +5,7 @@
 
 mod editor_view;
 mod explorer;
+mod explorer_runtime;
 mod library;
 mod navigation;
 mod settings;
@@ -189,6 +190,8 @@ fn app_shell(state: State<ShellState>) -> Element {
     if snapshot.vault.is_none() {
         return empty_vault_picker(snapshot.error.as_deref());
     }
+    explorer_runtime::drain_explorer_actions(state, explorer_state);
+    let snapshot = state.read().clone();
     let contract = source_contracts::contract(ComponentId::AppShell)
         .expect("AppShell source contract must remain registered");
     let content = if snapshot.settings_open {
