@@ -246,6 +246,25 @@ pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
     app_shell(state)
 }
 
+/// Owns the sidebar's hook lifecycle independently from the root shell.
+///
+/// `sidebar_nav` uses `use_a11y()`. The sidebar is mounted only after a vault
+/// exists, so executing that hook directly from `app_shell` changes the root
+/// component's hook count when the user picks a vault. Freya correctly treats
+/// that as a hook-order violation. A component boundary gives the sidebar its
+/// own stable lifecycle and lets it be mounted/unmounted conditionally.
+#[derive(PartialEq)]
+struct SidebarNavHost {
+    state: State<ShellState>,
+    palette: theme::ThemePalette,
+}
+
+impl Component for SidebarNavHost {
+    fn render(&self) -> impl IntoElement {
+        navigation::sidebar_nav(self.state, self.palette)
+    }
+}
+
 fn app_shell(state: State<ShellState>) -> Element {
     let settings_state = use_state(settings::SettingsViewState::default);
     let settings_effects = settings_state.read().effects();
@@ -287,7 +306,7 @@ fn app_shell(state: State<ShellState>) -> Element {
                 .height(Size::fill())
                 .horizontal()
                 .child(navigation::icon_rail(state, palette, &settings_effects))
-                .child(navigation::sidebar_nav(state, palette))
+                .child(SidebarNavHost { state, palette }.into_element())
                 .child(content),
         )
         .a11y_alt(contract.provenance.component.source_name());
