@@ -8,6 +8,8 @@
 //! its explicit idle state.
 
 use freya::prelude::*;
+use freya::sdk::use_timeout;
+use std::time::Duration;
 
 use crate::{
     search_graph_contract::{
@@ -159,6 +161,31 @@ pub struct ExplorerState {
     pending: Vec<ExplorerAction>,
 }
 
+/// Mirrors SearchModal.vue's live query watcher: text changes are debounced
+/// before the existing production FTS submit path is queued. The query state
+/// is the value owned by Freya's Input, so this remains live without requiring
+/// an extra Enter action that the Vue surface does not require.
+pub fn bind_live_search(mut state: State<ExplorerState>, query: State<String>) {
+    let debounce = use_timeout(|| Duration::from_millis(220));
+
+    let mut reset_timer = debounce;
+    use_side_effect_with_deps(&*query.read(), move |_| {
+        reset_timer.reset();
+    });
+
+    let mut fire_timer = debounce;
+    let query_for_fire = query;
+    use_side_effect(move || {
+        if !fire_timer.elapsed() {
+            return;
+        }
+        fire_timer.reset();
+
+        let value = query_for_fire.peek().clone();
+        state.write().set_search_query_live(value);
+    });
+}
+
 impl ExplorerState {
     pub fn new() -> Self {
         Self {
@@ -192,6 +219,25 @@ impl ExplorerState {
             )));
         self.pending
             .push(ExplorerAction::Search(SearchCommand::Submit(request)));
+    }
+
+    /// Applies the query watcher behavior without treating Enter as the
+    /// search trigger. The timer lives at the Freya binding boundary; this
+    /// method keeps the production request/state transition in ExplorerState.
+    pub fn set_search_query_live(&mut self, query: impl Into<String>) {
+        let query = query.into();
+        if query.trim().is_empty() {
+            if !self.search.query.trim().is_empty()
+                || !self.search.results.is_empty()
+                || !self.search.concepts.is_empty()
+            {
+                self.clear_search();
+            }
+            return;
+        }
+        if query.trim() != self.search.query.trim() {
+            self.submit_search(query);
+        }
     }
 
     /// Enter in the real SearchModal searches first and opens the selected
@@ -579,7 +625,11 @@ fn search_surface(
 ) -> Element {
     let mut key_state = state;
     let mut query_state = query;
-    let search_input = rect().a11y_alt("Search input").child(input);
+    let input_value = query.read().clone();
+    let search_input = rect()
+        .a11y_alt("Search input")
+        .a11y_builder(move |node| node.set_value(input_value))
+        .child(input);
     let mode = rect()
         .height(Size::px(30.))
         .padding(Gaps::new(0., 10., 0., 10.))
@@ -595,7 +645,10 @@ fn search_surface(
         .center()
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| state.write().clear_search())
+        .on_mouse_up(move |_| {
+            query_state.set(String::new());
+            state.write().clear_search();
+        })
         .a11y_alt("Clear search")
         .child(label().text("Clear"));
     let bar = rect()

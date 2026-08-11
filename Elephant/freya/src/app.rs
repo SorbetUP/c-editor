@@ -186,6 +186,7 @@ fn app_shell(state: State<ShellState>) -> Element {
     let explorer_state = use_state(explorer::ExplorerState::new);
     let explorer_query = use_state(String::new);
     let explorer_graph_query = use_state(String::new);
+    explorer::bind_live_search(explorer_state, explorer_query);
     let snapshot = state.read().clone();
     if snapshot.vault.is_none() {
         return empty_vault_picker(snapshot.error.as_deref());

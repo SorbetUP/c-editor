@@ -11,7 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 elephantnote-knowledge-core = { path = "../backend/knowledge-core" }
-freya = "0.4.1"
+freya = { version = "0.4.1", features = ["sdk"] }
 muya-core = { path = "../crates/muya-core" }
 rusqlite = { version = "0.32", features = ["bundled", "bundled-full"] }
 serde = { version = "1", features = ["derive"] }

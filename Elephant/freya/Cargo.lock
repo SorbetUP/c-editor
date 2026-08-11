@@ -1373,6 +1373,7 @@ dependencies = [
  "freya-edit",
  "freya-engine",
  "freya-performance-plugin",
+ "freya-sdk",
  "freya-winit",
  "torin",
 ]
