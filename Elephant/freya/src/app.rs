@@ -8,18 +8,21 @@ mod explorer;
 mod library;
 mod navigation;
 mod settings;
+mod shell_runtime;
 
 use freya::prelude::*;
 use std::{env, path::PathBuf};
 
 use crate::{
     editor::EditorDocument,
-    library_contract::{LibraryState, RelativePath},
+    library_contract::LibraryState,
     navigation_contract::{SidebarWidth, WorkspaceView},
     source_contracts::{self, ComponentId},
     theme,
-    vault_adapter::{PageRequest, VaultAdapter, VaultEntry, VaultPage},
+    vault_adapter::{PageRequest, VaultAdapter, VaultPage},
 };
+
+use shell_runtime::{NavigationTarget, RailDragState, SidebarResizeState};
 
 #[derive(Clone, Debug)]
 struct ShellState {
@@ -36,6 +39,12 @@ struct ShellState {
     settings_open: bool,
     editor: Option<EditorDocument>,
     error: Option<String>,
+    navigation_history: Vec<NavigationTarget>,
+    navigation_index: usize,
+    rail_order: Vec<String>,
+    rail_drag: Option<RailDragState>,
+    rail_drop_target: Option<String>,
+    sidebar_resize: Option<SidebarResizeState>,
 }
 
 impl ShellState {
@@ -54,6 +63,12 @@ impl ShellState {
             settings_open: false,
             editor: None,
             error: None,
+            navigation_history: Vec::new(),
+            navigation_index: 0,
+            rail_order: shell_runtime::default_rail_order(),
+            rail_drag: None,
+            rail_drop_target: None,
+            sidebar_resize: None,
         }
     }
 
@@ -63,22 +78,7 @@ impl ShellState {
             state.error = Some("No vault selected. Set ELEPHANT_FREYA_VAULT.".to_string());
             return state;
         };
-        Self::load_from_root(PathBuf::from(raw_root))
-    }
-
-    fn load_from_root(root: PathBuf) -> Self {
-        let mut state = Self::empty();
-        match VaultAdapter::open(root) {
-            Ok(vault) => {
-                state.library.active_vault_id = Some(crate::library_contract::VaultId::new(
-                    vault.descriptor().id.clone(),
-                ));
-                state.vault = Some(vault);
-                state.reload_directory("");
-            }
-            Err(error) => state.error = Some(error.to_string()),
-        }
-        state
+        shell_runtime::load_from_root(PathBuf::from(raw_root))
     }
 
     fn reload_directory(&mut self, relative_path: &str) {
@@ -97,43 +97,6 @@ impl ShellState {
                 self.error = None;
             }
             Err(error) => self.error = Some(error.to_string()),
-        }
-    }
-
-    fn open_directory(&mut self, path: String) {
-        self.view = WorkspaceView::Notes;
-        self.editor = None;
-        self.library.current_path = RelativePath::from(path.as_str());
-        self.reload_directory(&path);
-    }
-
-    fn open_note(&mut self, entry: &VaultEntry) {
-        eprintln!(
-            "[freya][editor] action:start action=open_note path={}",
-            entry.path
-        );
-        let Some(vault) = self.vault.as_ref() else {
-            self.error = Some("No vault selected.".to_string());
-            eprintln!("[freya][editor] action:failure action=open_note reason=no_vault");
-            return;
-        };
-        let path = vault.root().join(&entry.path);
-        match EditorDocument::load(&path) {
-            Ok(document) => {
-                self.editor = Some(document);
-                self.error = None;
-                eprintln!(
-                    "[freya][editor] action:complete action=open_note path={}",
-                    entry.path
-                );
-            }
-            Err(error) => {
-                eprintln!(
-                    "[freya][editor] action:failure action=open_note path={} error={error}",
-                    entry.path
-                );
-                self.error = Some(error.to_string());
-            }
         }
     }
 
@@ -209,7 +172,7 @@ pub fn app() -> impl IntoElement {
 /// adapter while injecting a clean fixture root.
 pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
     let root = root.into();
-    let state = use_state(move || ShellState::load_from_root(root.clone()));
+    let state = use_state(move || shell_runtime::load_from_root(root.clone()));
     app_shell(state)
 }
 
@@ -236,7 +199,7 @@ fn app_shell(state: State<ShellState>) -> Element {
         .height(Size::fill())
         .background(theme::color(theme::BG))
         .color(theme::color(theme::TEXT))
-        .child(navigation::top_vault_bar())
+        .child(navigation::top_vault_bar(state))
         .child(
             rect()
                 .width(Size::fill())

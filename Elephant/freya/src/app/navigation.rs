@@ -6,7 +6,11 @@ use crate::{theme, vault_adapter::VaultEntry};
 
 use super::ShellState;
 
-pub(super) fn top_vault_bar() -> Element {
+pub(super) fn top_vault_bar(state: State<ShellState>) -> Element {
+    let can_go_back = state.read().can_go_back();
+    let can_go_forward = state.read().can_go_forward();
+    let mut back_state = state;
+    let mut forward_state = state;
     rect()
         .height(Size::px(theme::TOPBAR_HEIGHT))
         .width(Size::fill())
@@ -27,6 +31,8 @@ pub(super) fn top_vault_bar() -> Element {
                         .width(Size::px(24.))
                         .height(Size::px(24.))
                         .center()
+                        .opacity(if can_go_back { 1. } else { 0.3 })
+                        .on_mouse_up(move |_| back_state.write().navigate_back())
                         .a11y_alt("Retour")
                         .child(label().font_size(18.).text("‹")),
                 )
@@ -35,6 +41,8 @@ pub(super) fn top_vault_bar() -> Element {
                         .width(Size::px(24.))
                         .height(Size::px(24.))
                         .center()
+                        .opacity(if can_go_forward { 1. } else { 0.3 })
+                        .on_mouse_up(move |_| forward_state.write().navigate_forward())
                         .a11y_alt("Avancer")
                         .child(label().font_size(18.).text("›")),
                 ),
@@ -50,27 +58,36 @@ pub(super) fn top_vault_bar() -> Element {
 }
 
 pub(super) fn icon_rail(state: State<ShellState>) -> Element {
-    let sidebar_visible = state.read().sidebar_visible;
+    let snapshot = state.read().clone();
     let mut rail = rect()
         .width(Size::px(theme::RAIL_WIDTH))
         .height(Size::fill())
         .background(theme::color(theme::SURFACE))
         .padding(Gaps::new_all(7.))
         .spacing(6.);
+    let actions = snapshot
+        .rail_order
+        .iter()
+        .filter_map(|item| match item.as_str() {
+            "sidebar-toggle" => Some((
+                "sidebar-toggle",
+                if snapshot.sidebar_visible {
+                    "Hide sidebar"
+                } else {
+                    "Show sidebar"
+                },
+                "◧",
+            )),
+            "search" => Some(("search", "Search", "⌕")),
+            _ => None,
+        })
+        .map(|(item_id, label_text, icon)| rail_action(item_id, label_text, icon, state))
+        .collect::<Vec<_>>();
     rail = rail
-        .child(rail_action(
-            if sidebar_visible {
-                "Hide sidebar"
-            } else {
-                "Show sidebar"
-            },
-            "◧",
-            state,
-        ))
-        .child(rail_action("Search", "⌕", state))
+        .children(actions)
         .child(rect().expanded())
         .child(vault_action(state))
-        .child(rail_action("Settings", "⚙", state))
+        .child(rail_action("settings", "Settings", "⚙", state))
         .maybe_child(state.read().vault_menu_open.then(|| vault_switcher(state)));
     rail.into_element()
 }
@@ -104,44 +121,91 @@ fn vault_action(mut state: State<ShellState>) -> Element {
 }
 
 fn rail_action(
+    item_id: &'static str,
     label_text: &'static str,
     icon: &'static str,
     mut state: State<ShellState>,
 ) -> Element {
     let hover_key = format!("rail:{label_text}");
     let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let drop_target = state.read().rail_drop_target.as_deref() == Some(item_id);
+    let dragging = state
+        .read()
+        .rail_drag
+        .as_ref()
+        .is_some_and(|drag| drag.source == item_id && drag.moved);
     let enter_key = hover_key.clone();
     let leave_key = hover_key.clone();
     let mut enter_state = state;
     let mut leave_state = state;
+    let mut drag_state = state;
+    let mut move_state = state;
+    let mut release_state = state;
+    let mut focus_state = state;
     rect()
         .width(Size::fill())
         .height(Size::px(34.))
         .center()
-        .background(theme::color(if hovered {
+        .background(theme::color(if drop_target {
+            theme::BORDER_STRONG
+        } else if hovered {
             theme::SOFT
         } else {
             theme::SURFACE
         }))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| match label_text {
-            "Search" => {
-                let mut shell = state.write();
-                shell.search_open = !shell.search_open;
-                shell.settings_open = false;
-            }
-            "Settings" => {
-                let mut shell = state.write();
-                shell.settings_open = !shell.settings_open;
-                shell.search_open = false;
-            }
-            _ => {
-                let visible = state.read().sidebar_visible;
-                state.write().sidebar_visible = !visible;
+        .opacity(if dragging { 0.55 } else { 1. })
+        .on_pointer_down(move |event: Event<PointerEventData>| {
+            if event.is_primary() {
+                focus_state.write().begin_rail_drag(
+                    item_id,
+                    event.global_location().x,
+                    event.global_location().y,
+                );
             }
         })
-        .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
-        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
+        .on_pointer_move(move |event: Event<PointerEventData>| {
+            if event.is_primary() {
+                move_state.write().update_rail_drag(
+                    item_id,
+                    event.global_location().x,
+                    event.global_location().y,
+                );
+            }
+        })
+        .on_mouse_up(move |event: Event<MouseEventData>| {
+            let was_drag = release_state.write().finish_rail_drag(item_id);
+            if was_drag {
+                return;
+            }
+            match label_text {
+                "Search" => {
+                    let mut shell = release_state.write();
+                    shell.search_open = !shell.search_open;
+                    shell.settings_open = false;
+                }
+                "Settings" => {
+                    let mut shell = release_state.write();
+                    shell.settings_open = !shell.settings_open;
+                    shell.search_open = false;
+                }
+                _ => release_state.write().toggle_sidebar(),
+            }
+            let _ = event;
+        })
+        .on_pointer_enter(move |event: Event<PointerEventData>| {
+            enter_state.write().set_hovered_target(enter_key.clone());
+            if event.is_primary() {
+                drag_state.write().update_rail_drag(
+                    item_id,
+                    event.global_location().x,
+                    event.global_location().y,
+                );
+            }
+        })
+        .on_pointer_leave(move |_| {
+            leave_state.write().clear_hovered_target(&leave_key);
+        })
         .a11y_alt(label_text)
         .child(
             label()
@@ -204,6 +268,7 @@ fn vault_switcher(mut state: State<ShellState>) -> Element {
 }
 
 pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
+    let resizer_a11y_id = use_a11y();
     let snapshot = state.read().clone();
     if !snapshot.sidebar_visible {
         return rect()
@@ -249,10 +314,74 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    rect()
+    let mut resize_press_state = state;
+    let mut resize_move_state = state;
+    let mut resize_release_state = state;
+    let mut resize_key_state = state;
+    let mut resize_enter_state = state;
+    let mut resize_leave_state = state;
+    let resizer = rect()
+        .width(Size::px(12.))
+        .height(Size::fill())
+        .center()
+        .background(theme::color(theme::BG))
+        .child(
+            rect()
+                .width(Size::px(3.))
+                .height(Size::px(64.))
+                .background(theme::color(
+                    if snapshot.hovered_target.as_deref() == Some("sidebar:resizer") {
+                        theme::PRIMARY
+                    } else {
+                        theme::BG
+                    },
+                ))
+                .with_corner_radius(999.),
+        )
+        .a11y_id(resizer_a11y_id)
+        .a11y_alt("Resize sidebar")
+        .on_pointer_enter(move |_| {
+            resize_enter_state
+                .write()
+                .set_hovered_target("sidebar:resizer");
+        })
+        .on_pointer_leave(move |_| {
+            resize_leave_state
+                .write()
+                .clear_hovered_target("sidebar:resizer");
+        })
+        .on_pointer_down(move |event: Event<PointerEventData>| {
+            if event.is_primary() {
+                resizer_a11y_id.request_focus();
+                resize_press_state
+                    .write()
+                    .begin_sidebar_resize(event.global_location().x);
+            }
+        })
+        .on_global_pointer_move(move |event: Event<PointerEventData>| {
+            if event.is_primary() {
+                resize_move_state
+                    .write()
+                    .update_sidebar_resize(event.global_location().x);
+            }
+        })
+        .on_global_pointer_press(move |event: Event<PointerEventData>| {
+            if event.is_primary() {
+                resize_release_state
+                    .write()
+                    .finish_sidebar_resize(event.global_location().x);
+            }
+        })
+        .on_key_down(move |event: Event<KeyboardEventData>| match event.key {
+            Key::Named(NamedKey::ArrowLeft) => resize_key_state.write().resize_sidebar_by(-16.),
+            Key::Named(NamedKey::ArrowRight) => resize_key_state.write().resize_sidebar_by(16.),
+            _ => {}
+        });
+    let sidebar = rect()
         .width(Size::px(f32::from(snapshot.sidebar_width.get())))
         .height(Size::fill())
         .background(theme::color(theme::BG))
+        .a11y_alt("Sidebar")
         .child(all_notes)
         .child(
             rect()
@@ -280,7 +409,13 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>) -> Element {
                 .width(Size::fill())
                 .height(Size::fill())
                 .children(entries),
-        )
+        );
+    rect()
+        .width(Size::px(f32::from(snapshot.sidebar_width.get()) + 12.))
+        .height(Size::fill())
+        .horizontal()
+        .child(sidebar)
+        .child(resizer)
         .into_element()
 }
 
