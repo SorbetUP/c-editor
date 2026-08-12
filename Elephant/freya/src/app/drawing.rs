@@ -285,7 +285,7 @@ fn drawing_shell(
     let submit_canvas_state = canvas_state;
     let save_status = status;
     let submit_status = status;
-    let key_canvas_state = canvas_state;
+    let mut key_canvas_state = canvas_state;
     let key_status = status;
     let key_path = relative_path;
     let key_title = title;
@@ -313,14 +313,13 @@ fn drawing_shell(
                 })
                 .on_pre_key_down(|event: Event<KeyboardEventData>| {
                     let command = event.modifiers.ctrl() || event.modifiers.meta();
-                    if command
-                        && matches!(
-                            &event.key,
-                            Key::Character(value) if value.eq_ignore_ascii_case("s")
-                        )
-                    {
-                        // Let the shell own the save shortcut even while the name input is focused.
-                        return false;
+                    if command {
+                        if let Key::Character(value) = &event.key {
+                            if value.to_ascii_lowercase() == "s" {
+                                // Let the shell own the save shortcut even while the name input is focused.
+                                return false;
+                            }
+                        }
                     }
                     match &event.key {
                         Key::Named(NamedKey::Enter)
@@ -496,7 +495,8 @@ fn save_scene(
         .map(|vault| vault.root().to_path_buf());
     let library_path = shell_snapshot.library.current_path.as_str().to_owned();
     let old_path = relative_path.read().clone();
-    let requested_title = title.read().trim().to_owned();
+    let current_title = title.read().clone();
+    let requested_title = current_title.trim().to_owned();
     let requested_title = if requested_title.is_empty() {
         "Untitled Drawing".to_owned()
     } else {
@@ -512,7 +512,7 @@ fn save_scene(
     let (target_path, target_title) = if rename_allowed {
         match storage::rename_standalone_scene(&root, &old_path, &requested_title) {
             Ok(renamed) => {
-                if renamed.relative_path != old_path || renamed.title != *title.read() {
+                if renamed.relative_path != old_path || renamed.title != current_title {
                     sync_active_identity(&old_path, &renamed.relative_path, &renamed.title);
                     *relative_path.write() = renamed.relative_path.clone();
                     *title.write() = renamed.title.clone();
@@ -531,7 +531,7 @@ fn save_scene(
             }
         }
     } else {
-        (old_path, title.read().clone())
+        (old_path, current_title)
     };
 
     let mut canvas_snapshot = canvas_state.read().clone();
