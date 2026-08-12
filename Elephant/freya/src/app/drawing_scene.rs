@@ -152,6 +152,9 @@ enum Interaction {
         index: usize,
         before: Box<DrawingScene>,
     },
+    Erase {
+        before: Box<DrawingScene>,
+    },
     Pan {
         start_pointer: [f32; 2],
         start_pan: [f32; 2],
@@ -257,7 +260,7 @@ impl DrawingCanvasState {
         let world = self.to_world(point);
         match self.active_tool {
             DrawingTool::Selection => self.begin_selection(point, world),
-            DrawingTool::Eraser => self.erase_at(world),
+            DrawingTool::Eraser => self.begin_erase(world),
             DrawingTool::Rectangle
             | DrawingTool::Ellipse
             | DrawingTool::Line
@@ -318,17 +321,29 @@ impl DrawingCanvasState {
         self.bump_revision();
     }
 
-    fn erase_at(&mut self, world: [f32; 2]) {
+    fn begin_erase(&mut self, world: [f32; 2]) {
+        self.interaction = Interaction::Erase {
+            before: Box::new(self.document.clone()),
+        };
+        self.selected = None;
+        self.erase_during_interaction(world);
+    }
+
+    fn erase_during_interaction(&mut self, world: [f32; 2]) {
+        if !matches!(self.interaction, Interaction::Erase { .. }) {
+            return;
+        }
         let Some(index) = self.hit_test(world) else {
             return;
         };
-        let before = self.document.clone();
         if let Some(element) = self.document.elements.get_mut(index) {
+            if element.is_deleted {
+                return;
+            }
             element.is_deleted = true;
             touch_element(element);
+            self.bump_revision();
         }
-        self.selected = None;
-        self.commit_history(before);
     }
 
     pub(crate) fn move_pointer(&mut self, point: [f32; 2]) {
@@ -380,6 +395,7 @@ impl DrawingCanvasState {
                     }
                 }
             }
+            Interaction::Erase { .. } => self.erase_during_interaction(world),
             Interaction::Pan {
                 start_pointer,
                 start_pan,
@@ -408,6 +424,12 @@ impl DrawingCanvasState {
                     self.redo.clear();
                 }
             }
+            Interaction::Erase { before } => {
+                if before.as_ref() != &self.document {
+                    self.undo.push(*before);
+                    self.redo.clear();
+                }
+            }
             Interaction::Pan { .. } | Interaction::None => {}
         }
         self.bump_revision();
@@ -424,7 +446,8 @@ impl DrawingCanvasState {
         match std::mem::replace(&mut self.interaction, Interaction::None) {
             Interaction::MoveElement { before, .. }
             | Interaction::DrawElement { before, .. }
-            | Interaction::Freedraw { before, .. } => self.document = *before,
+            | Interaction::Freedraw { before, .. }
+            | Interaction::Erase { before } => self.document = *before,
             Interaction::Pan { start_pan, .. } => self.viewport.pan = start_pan,
             Interaction::None => {}
         }
@@ -809,7 +832,30 @@ mod tests {
         assert!(state.document.elements[2].points.len() >= 3);
         state.set_tool(DrawingTool::Eraser);
         state.begin_pointer([20., 17.]);
+        state.end_pointer();
         assert!(state.document.elements[0].is_deleted);
+    }
+
+    #[test]
+    fn eraser_drag_is_bounded_by_pointer_lifecycle_and_undoes_as_one_gesture() {
+        let mut state = empty_state();
+        for x in [0., 80.] {
+            state.set_tool(DrawingTool::Rectangle);
+            state.begin_pointer([x, 0.]);
+            state.move_pointer([x + 40., 40.]);
+            state.end_pointer();
+        }
+        state.set_tool(DrawingTool::Eraser);
+        state.move_pointer([20., 20.]);
+        assert!(!state.document.elements[0].is_deleted);
+        state.begin_pointer([20., 20.]);
+        state.move_pointer([100., 20.]);
+        state.end_pointer();
+        assert!(state.document.elements[0].is_deleted);
+        assert!(state.document.elements[1].is_deleted);
+        assert!(state.undo());
+        assert!(!state.document.elements[0].is_deleted);
+        assert!(!state.document.elements[1].is_deleted);
     }
 
     #[test]
