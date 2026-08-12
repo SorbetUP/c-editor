@@ -68,12 +68,14 @@ jobs:
           cache: pnpm
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
-      - name: Install pinned Tauri CLI
+      - name: Install pinned Rust CLIs
         shell: bash
         run: |
           set -euo pipefail
           cargo install tauri-cli --version 2.11.4 --locked
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked
           cargo tauri --version
+          wasm-bindgen --version
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
