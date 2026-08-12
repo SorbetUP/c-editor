@@ -23,6 +23,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Linux graphics dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev \
+            libfontconfig1-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libgles2-mesa-dev \
+            libwayland-dev
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
 
