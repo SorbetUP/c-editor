@@ -5,8 +5,8 @@ use freya::prelude::*;
 
 use crate::{
     library_contract::{
-        EntryKind as ContractKind, EntryTitle, EntryType, LibraryEntry, RelativePath, SortMode,
-        ViewMode,
+        EntryKind as ContractKind, EntryOpenTarget, EntryTitle, EntryType, LibraryEntry,
+        RelativePath, SortMode, ViewMode,
     },
     navigation_contract::WorkspaceView,
     theme,
@@ -286,6 +286,57 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
 
     let mut close_state = state;
     let mut escape_state = state;
+    let backdrop = rect()
+        .position(
+            Position::new_absolute()
+                .left(0.)
+                .right(0.)
+                .top(0.)
+                .bottom(0.),
+        )
+        .width(Size::fill())
+        .height(Size::fill())
+        .on_mouse_up(move |_| close_state.write().menu_open = false);
+
+    let popover = rect()
+        .position(Position::new_absolute().right(20.).bottom(86.))
+        .width(Size::px(280.))
+        .padding(Gaps::new_all(8.))
+        .background(theme::color(theme::SURFACE))
+        .border(
+            Border::new()
+                .fill(theme::color(theme::BORDER_STRONG))
+                .width(1.),
+        )
+        .with_corner_radius(14.)
+        .a11y_alt("Create")
+        .child(
+            label()
+                .padding(Gaps::new(8., 10., 6., 10.))
+                .font_size(12.)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(theme::MUTED))
+                .text("CREATE"),
+        )
+        .child(item(
+            crate::library_contract::CreateAction::Note,
+            LibraryIcon::FilePlus2,
+            "Note",
+            "Create a new note",
+        ))
+        .child(item(
+            crate::library_contract::CreateAction::Drawing,
+            LibraryIcon::Excalidraw,
+            "Drawing",
+            "Open a new Excalidraw canvas",
+        ))
+        .child(item(
+            crate::library_contract::CreateAction::Folder,
+            LibraryIcon::FolderPlus,
+            "Folder",
+            "Organize notes in a folder",
+        ));
+
     rect()
         .position(
             Position::new_absolute()
@@ -297,53 +348,13 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
         .width(Size::fill())
         .height(Size::fill())
         .layer(Layer::OverlayLevel(20))
-        .on_mouse_up(move |_| close_state.write().menu_open = false)
         .on_global_key_down(move |event: Event<KeyboardEventData>| {
             if event.key == Key::Named(NamedKey::Escape) {
                 escape_state.write().menu_open = false;
             }
         })
-        .child(
-            rect()
-                .position(Position::new_absolute().right(20.).bottom(86.))
-                .width(Size::px(280.))
-                .padding(Gaps::new_all(8.))
-                .background(theme::color(theme::SURFACE))
-                .border(
-                    Border::new()
-                        .fill(theme::color(theme::BORDER_STRONG))
-                        .width(1.),
-                )
-                .with_corner_radius(14.)
-                .on_mouse_up(|event: Event<MouseEventData>| event.stop_propagation())
-                .a11y_alt("Create")
-                .child(
-                    label()
-                        .padding(Gaps::new(8., 10., 6., 10.))
-                        .font_size(12.)
-                        .font_weight(FontWeight::BOLD)
-                        .color(theme::color(theme::MUTED))
-                        .text("CREATE"),
-                )
-                .child(item(
-                    crate::library_contract::CreateAction::Note,
-                    LibraryIcon::FilePlus2,
-                    "Note",
-                    "Create a new note",
-                ))
-                .child(item(
-                    crate::library_contract::CreateAction::Drawing,
-                    LibraryIcon::Excalidraw,
-                    "Drawing",
-                    "Open a new Excalidraw canvas",
-                ))
-                .child(item(
-                    crate::library_contract::CreateAction::Folder,
-                    LibraryIcon::FolderPlus,
-                    "Folder",
-                    "Organize notes in a folder",
-                )),
-        )
+        .child(backdrop)
+        .child(popover)
         .into_element()
 }
 
@@ -443,6 +454,7 @@ fn render_library_card(
     let is_drawing =
         is_drawing_path(&path) || matches!(entry.effective_kind(), ContractKind::Drawing);
     let is_folder = matches!(entry.effective_kind(), ContractKind::Folder);
+    let open_target = state.read().library.open_entry(entry);
     let title = display_title(entry.title.as_str(), is_drawing);
     let menu_snapshot = card_menu_state.read().clone();
     let renaming = menu_snapshot.renaming;
@@ -521,7 +533,6 @@ fn render_library_card(
 
     let mut menu_state_for_secondary = card_menu_state;
     let mut state_for_open = state;
-    let path_for_open = path.clone();
     let mut click_menu_state = card_menu_state;
     let click_rename_value = rename_value;
 
@@ -578,35 +589,40 @@ fn render_library_card(
             menu.renaming = false;
             drop(menu);
 
-            if is_drawing {
-                drawing::open_existing(state_for_open, &path_for_open);
-            } else if is_folder {
-                state_for_open.write().open_directory(path_for_open.clone());
-            } else {
-                let vault_entry = {
-                    let snapshot = state_for_open.read();
-                    snapshot
-                        .page
-                        .as_ref()
-                        .and_then(|page| {
-                            page.entries
-                                .iter()
-                                .find(|entry| entry.path == path_for_open)
-                        })
-                        .cloned()
-                };
-                if let Some(vault_entry) = vault_entry {
-                    state_for_open.write().open_note(&vault_entry);
-                } else {
-                    eprintln!(
-                        "[freya][library] action:failure action=open path={} reason=missing_page_entry",
-                        path_for_open
-                    );
-                    state_for_open.write().error = Some(format!(
-                        "Library entry is no longer present in the current directory: {}",
-                        path_for_open
-                    ));
+            match &open_target {
+                EntryOpenTarget::Drawing(target) => {
+                    drawing::open_existing(state_for_open, target.as_str());
                 }
+                EntryOpenTarget::Folder(target) => {
+                    state_for_open.write().open_directory(target.as_str().to_string());
+                }
+                EntryOpenTarget::Note(target) => {
+                    let vault_entry = {
+                        let snapshot = state_for_open.read();
+                        snapshot
+                            .page
+                            .as_ref()
+                            .and_then(|page| {
+                                page.entries
+                                    .iter()
+                                    .find(|entry| entry.path == target.as_str())
+                            })
+                            .cloned()
+                    };
+                    if let Some(vault_entry) = vault_entry {
+                        state_for_open.write().open_note(&vault_entry);
+                    } else {
+                        eprintln!(
+                            "[freya][library] action:failure action=open path={} reason=missing_page_entry",
+                            target.as_str()
+                        );
+                        state_for_open.write().error = Some(format!(
+                            "Library entry is no longer present in the current directory: {}",
+                            target.as_str()
+                        ));
+                    }
+                }
+                EntryOpenTarget::Ignored => {}
             }
         })
         .a11y_alt(title)
