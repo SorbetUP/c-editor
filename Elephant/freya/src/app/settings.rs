@@ -20,10 +20,6 @@ mod settings_runtime;
 
 pub(super) use settings_runtime::SettingsRuntimeState;
 
-/// Visible state supplied by the host while a section-owned surface loads.
-///
-/// The text is supplied rather than invented by this renderer.  The helpers
-/// below preserve the exact Vaults messages currently used by SettingsPanel.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SettingsSurfaceState {
     Ready,
@@ -33,7 +29,6 @@ pub enum SettingsSurfaceState {
 }
 
 impl SettingsSurfaceState {
-    /// Exact loading copy from `SettingsPanel.vue`'s Vaults branch.
     pub fn loading_vaults() -> Self {
         Self::Loading {
             title: "Loading vaults".to_owned(),
@@ -41,8 +36,6 @@ impl SettingsSurfaceState {
         }
     }
 
-    /// Exact error title from `SettingsPanel.vue`; the detail is the store's
-    /// visible error text.
     pub fn vaults_error(detail: impl Into<String>) -> Self {
         Self::Error {
             title: "Vaults could not be loaded".to_owned(),
@@ -50,7 +43,6 @@ impl SettingsSurfaceState {
         }
     }
 
-    /// Exact empty-state copy from `SettingsPanel.vue`'s Vaults branch.
     pub fn no_vault_registered() -> Self {
         Self::Empty {
             title: "No vault registered".to_owned(),
@@ -65,7 +57,6 @@ impl Default for SettingsSurfaceState {
     }
 }
 
-/// State boundary for the native view and its real vault/profile persistence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SettingsViewState {
     pub settings: SettingsState,
@@ -106,6 +97,10 @@ impl SettingsViewState {
         self.runtime.set_text_preference(key, value);
     }
 
+    pub(super) fn set_integer_preference(&mut self, key: &str, value: i64) {
+        self.runtime.set_integer_preference(key, value);
+    }
+
     pub(super) fn toggle_rail_hidden(&mut self, item: &str) {
         self.runtime
             .toggle_string_list_value("iconRailHidden", item);
@@ -139,70 +134,98 @@ impl Default for SettingsViewState {
     }
 }
 
-/// Render the native settings panel.
-///
-/// This is deliberately a standalone entry point: the caller owns the
-/// `State<SettingsViewState>` and can later connect real section actions when
-/// the corresponding host contracts are integrated.
-pub fn settings_panel(state: State<SettingsViewState>) -> Element {
-    let snapshot = state.read().clone();
-    let palette = snapshot.effects().palette();
-    let active_section = snapshot.settings.active_section.clone();
-    let search_value = State::create(snapshot.settings.query.clone());
-    let mut search_state = state;
-    let search = Input::new(search_value)
-        .width(Size::px(220.))
-        .placeholder("Search all settings")
-        .on_submit(move |query: String| {
-            search_state.write().settings.set_query(&query);
-        });
-
-    rect()
-        .width(Size::fill())
-        .height(Size::fill())
-        .background(theme::token_color(palette, theme::ThemeToken::Bg))
-        .color(theme::token_color(palette, theme::ThemeToken::Text))
-        .padding(Gaps::new_all(16.))
-        .spacing(14.)
-        .a11y_alt("ElephantNote settings")
-        .child(settings_controls::settings_header(search, palette))
-        .maybe_child(snapshot.runtime.feedback.clone().map(|message| {
-            rect()
-                .width(Size::fill())
-                .padding(Gaps::new(6., 10., 6., 10.))
-                .a11y_alt("Settings feedback")
-                .child(
-                    label()
-                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
-                        .text(message),
-                )
-                .into_element()
-        }))
-        .child(
-            rect()
-                .width(Size::fill())
-                .height(Size::fill())
-                .horizontal()
-                .spacing(14.)
-                .child(settings_controls::section_navigation(
-                    &active_section,
-                    state,
-                    palette,
-                ))
-                .child(settings_controls::section_content(
-                    state,
-                    &active_section,
-                    &snapshot.surface,
-                    &snapshot.settings.query,
-                )),
-        )
-        .into_element()
+#[derive(PartialEq)]
+struct SettingsPanelComponent {
+    state: State<SettingsViewState>,
 }
 
-/// Pure helper for the eventual host's settings search integration.
-///
-/// Keeping the query routed through `settings_contract` avoids a second
-/// implementation of the Vue search matching rules in this view module.
+impl Component for SettingsPanelComponent {
+    fn render(&self) -> impl IntoElement {
+        let state = self.state;
+        let snapshot = state.read().clone();
+        let palette = snapshot.effects().palette();
+        let active_section = snapshot.settings.active_section.clone();
+        let initial_query = snapshot.settings.query.clone();
+        let search_value = use_state(move || initial_query);
+        let query = search_value.read().clone();
+        let mut search_state = state;
+        let search = Input::new(search_value)
+            .width(Size::fill())
+            .placeholder("Search all settings")
+            .on_submit(move |query: String| {
+                search_state.write().settings.set_query(&query);
+            });
+
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .padding(Gaps::new_all(16.))
+            .background(theme::token_color(palette, theme::ThemeToken::Bg))
+            .color(theme::token_color(palette, theme::ThemeToken::Text))
+            .center()
+            .a11y_alt("Settings backdrop")
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .max_width(Size::px(1020.))
+                    .height(Size::fill())
+                    .max_height(Size::px(780.))
+                    .background(theme::token_color(palette, theme::ThemeToken::Surface))
+                    .border(
+                        Border::new()
+                            .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                            .width(1.),
+                    )
+                    .with_corner_radius(22.)
+                    .a11y_alt("ElephantNote settings")
+                    .child(settings_controls::settings_header(search, palette))
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::px(1.))
+                            .background(theme::token_color(palette, theme::ThemeToken::Border)),
+                    )
+                    .child(
+                        rect()
+                            .width(Size::fill())
+                            .height(Size::fill())
+                            .horizontal()
+                            .child(settings_controls::section_navigation(
+                                &active_section,
+                                state,
+                                search_value,
+                                palette,
+                            ))
+                            .child(
+                                rect()
+                                    .width(Size::px(1.))
+                                    .height(Size::fill())
+                                    .background(theme::token_color(
+                                        palette,
+                                        theme::ThemeToken::Border,
+                                    )),
+                            )
+                            .child(settings_controls::section_content(
+                                state,
+                                &active_section,
+                                &snapshot.surface,
+                                &query,
+                                search_value,
+                            )),
+                    ),
+            )
+    }
+}
+
+/// Render Settings with the same major geometry as `settings-redesign.css`:
+/// up to 1020x780 with a 16px viewport gutter, a 64px header, 196px left
+/// navigation and a 22px radius. The search input lives inside a dedicated
+/// component scope so its writable state survives normal rerenders without
+/// relying on a conditional host hook.
+pub fn settings_panel(state: State<SettingsViewState>) -> Element {
+    SettingsPanelComponent { state }.into_element()
+}
+
 pub fn search_labels(query: &str) -> Vec<&'static SettingIndexEntry> {
     search_core_settings(query)
 }
@@ -215,7 +238,6 @@ mod tests {
     #[test]
     fn selection_uses_the_existing_contract_transition() {
         let mut state = SettingsViewState::default();
-
         assert_eq!(state.settings.active_section, "appearance");
         assert_eq!(state.select_section("editor"), SectionTransition::Selected);
         assert_eq!(state.settings.active_section, "editor");

@@ -32,13 +32,62 @@ jobs:
           workspaces: |
             Elephant/freya -> target
 
+      - name: Check Freya formatting
+        run: cargo fmt --manifest-path Elephant/freya/Cargo.toml -- --check
+
       - name: Check Freya shell
+        id: freya-check
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
       - name: Test Freya library
-        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1
+        id: freya-library
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 2>&1 | tee /tmp/freya-lib.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            if [ "$status" -eq 124 ]; then
+              detail="library tests timed out after 180 seconds"
+            else
+              detail="library tests exited with status $status"
+            fi
+            python3 - "$detail" /tmp/freya-lib.log <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          detail, filename = sys.argv[1:]
+          raw = Path(filename).read_text(errors='replace')
+          ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+          lines = [ansi.sub('', line) for line in raw.splitlines()]
+          markers = (
+              ' FAILED', 'panicked at', 'failures:', 'test result: FAILED',
+              'NotFound', 'assertion ', 'Error:', 'error[E', 'error:'
+          )
+          interesting = []
+          for index, line in enumerate(lines):
+              if any(marker in line for marker in markers):
+                  interesting.extend(lines[max(0, index - 2):min(len(lines), index + 5)])
+          if not interesting:
+              interesting = lines[-40:]
+          compact = []
+          seen = set()
+          for line in interesting:
+              if line not in seen:
+                  compact.append(line)
+                  seen.add(line)
+          message = detail + '\n' + '\n'.join(compact[-80:])
+          escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=Freya library tests::{escaped}')
+          PY
+          fi
+          exit "$status"
 
       - name: Test Freya integration suites independently
+        if: ${{ !cancelled() && steps.freya-check.outcome == 'success' }}
         shell: bash
         run: |
           set -uo pipefail
@@ -92,6 +141,10 @@ jobs:
             echo "Freya integration failures: $failures"
             exit 1
           fi
+
+      - name: Fail when Freya library tests failed
+        if: ${{ always() && steps.freya-library.outcome == 'failure' }}
+        run: exit 1
 
   macos-check:
     name: Freya macOS compile

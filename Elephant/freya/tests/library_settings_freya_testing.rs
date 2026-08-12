@@ -87,6 +87,38 @@ fn accessible_nodes(runner: &TestingRunner, label: &str) -> Vec<TestingNode> {
     })
 }
 
+fn ensure_label_visible(runner: &mut TestingRunner, label: &str) {
+    let is_visible = |runner: &TestingRunner| {
+        accessible_nodes(runner, label)
+            .into_iter()
+            .next()
+            .map(|node| {
+                let area = node.layout().visible_area();
+                area.size.width > 1. && area.size.height > 1.
+            })
+            .unwrap_or(false)
+    };
+
+    if is_visible(runner) {
+        return;
+    }
+    for _ in 0..8 {
+        runner.scroll((900., 700.), (0., 500.));
+        runner.sync_and_update();
+        if is_visible(runner) {
+            return;
+        }
+    }
+    for _ in 0..16 {
+        runner.scroll((900., 700.), (0., -500.));
+        runner.sync_and_update();
+        if is_visible(runner) {
+            return;
+        }
+    }
+    panic!("no visible Freya node has accessible label {label:?}");
+}
+
 fn click_library_card(runner: &mut TestingRunner, label: &str) {
     let node = library_card_node(runner, label);
     let area = node.layout().area;
@@ -262,6 +294,7 @@ fn settings_control_persists_canonical_preferences_and_restores_on_restart() {
     runner.sync_and_update();
     click_label(&mut runner, "Select Editor settings");
     runner.sync_and_update();
+    ensure_label_visible(&mut runner, "Enable autosave");
     let before = Rect::try_downcast(
         accessible_nodes(&runner, "Enable autosave")[0]
             .element()
@@ -307,6 +340,7 @@ fn settings_control_persists_canonical_preferences_and_restores_on_restart() {
     restarted.sync_and_update();
     click_label(&mut restarted, "Select Editor settings");
     restarted.sync_and_update();
+    ensure_label_visible(&mut restarted, "Enable autosave");
     let restored = Rect::try_downcast(
         accessible_nodes(&restarted, "Enable autosave")[0]
             .element()

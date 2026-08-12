@@ -1,9 +1,8 @@
 //! Persistence and value transforms for the native settings surface.
 //!
-//! The renderer deliberately consumes this small runtime boundary instead of
-//! defining a second Freya-only preferences schema.  The keys, defaults, and
-//! UI transforms are the contracts observed in `settings_contract`; the JSON
-//! shape is the flat object used by the Tauri preferences service.
+//! The renderer consumes the existing portable preference keys instead of
+//! defining a Freya-only schema. The JSON object remains forward-compatible:
+//! unknown keys are preserved when a supported setting is changed.
 
 use crate::settings_contract::{DefaultValue, UiValueTransform, ValueKind, SETTINGS_PREFERENCES};
 use serde_json::{Map, Value};
@@ -13,7 +12,6 @@ const PROFILE_OVERRIDE_ENV: &str = "ELEPHANT_FREYA_PROFILE";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SettingsRuntimeState {
-    /// The complete flat preferences object, including keys unknown to Freya.
     pub preferences: Map<String, Value>,
     pub persistence_path: PathBuf,
     pub feedback: Option<String>,
@@ -49,12 +47,14 @@ impl SettingsRuntimeState {
             .value_for(contract)
             .and_then(|value| value.as_bool())
             .unwrap_or(false);
-        matches!(
+        if matches!(
             contract.map(|item| item.transform),
             Some(UiValueTransform::InvertedBoolean)
-        )
-        .then_some(!raw)
-        .unwrap_or(raw)
+        ) {
+            !raw
+        } else {
+            raw
+        }
     }
 
     pub fn text_value(&self, key: &str) -> String {
@@ -115,6 +115,9 @@ impl SettingsRuntimeState {
         let Some(contract) = contract_for(key) else {
             return;
         };
+        if contract.value_kind != ValueKind::Boolean {
+            return;
+        }
         let next_ui_value = !self.bool_value(key);
         let next_raw_value = if contract.transform == UiValueTransform::InvertedBoolean {
             !next_ui_value
@@ -130,9 +133,28 @@ impl SettingsRuntimeState {
         let Some(contract) = contract_for(key) else {
             return;
         };
+        if !matches!(
+            contract.value_kind,
+            ValueKind::String | ValueKind::SingleCharacter
+        ) {
+            return;
+        }
         let value = apply_text_transform(value, contract.transform);
         self.preferences
             .insert(key.to_owned(), Value::String(value));
+        self.persist();
+    }
+
+    pub fn set_integer_preference(&mut self, key: &str, value: i64) {
+        let Some(contract) = contract_for(key) else {
+            return;
+        };
+        if contract.value_kind != ValueKind::Integer {
+            return;
+        }
+        let value = apply_integer_transform(value, contract.transform);
+        self.preferences
+            .insert(key.to_owned(), Value::Number(value.into()));
         self.persist();
     }
 
@@ -161,6 +183,9 @@ impl SettingsRuntimeState {
     }
 
     pub fn cycle_auto_save_delay(&mut self) {
+        if !self.is_enabled("autoSaveDelay") {
+            return;
+        }
         let next = match self.integer_value("autoSaveDelay") {
             250 => 500,
             500 => 1000,
@@ -168,9 +193,7 @@ impl SettingsRuntimeState {
             2000 => 5000,
             _ => 250,
         };
-        self.preferences
-            .insert("autoSaveDelay".to_owned(), Value::Number(next.into()));
-        self.persist();
+        self.set_integer_preference("autoSaveDelay", next);
     }
 
     fn value_for(
@@ -299,5 +322,175 @@ fn apply_integer_transform(value: i64, transform: UiValueTransform) -> i64 {
 fn write_atomically(path: &PathBuf, raw: &[u8]) -> io::Result<()> {
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, raw)?;
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
     fs::rename(temporary, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_path(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!(
+                "elephant-freya-settings-{}-{stamp}",
+                std::process::id()
+            ))
+            .join(format!("{name}.json"))
+    }
+
+    fn cleanup(path: &PathBuf) {
+        let _ = fs::remove_dir_all(path.parent().expect("test directory"));
+    }
+
+    #[test]
+    fn theme_and_editor_preferences_are_reloaded_from_disk() {
+        let path = test_path("round-trip");
+        let mut state = SettingsRuntimeState::load_from(path.clone());
+        state.set_text_preference("theme", "nord-dark".to_owned());
+        state.toggle_bool("autoPairBracket");
+        state.set_integer_preference("noteEditorMargin", 44);
+
+        let reloaded = SettingsRuntimeState::load_from(path.clone());
+        assert_eq!(reloaded.text_value("theme"), "nord-dark");
+        assert!(!reloaded.bool_value("autoPairBracket"));
+        assert_eq!(reloaded.integer_value("noteEditorMargin"), 44);
+        assert!(reloaded.load_error.is_none());
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn source_transforms_are_persisted_not_only_reflected_in_widget_state() {
+        let path = test_path("transforms");
+        let mut state = SettingsRuntimeState::load_from(path.clone());
+        state.toggle_bool("hideQuickInsertHint");
+        state.set_text_preference("quickInsertTrigger", "//".to_owned());
+        state.set_integer_preference("noteEditorMargin", 100);
+
+        let raw = fs::read_to_string(&path).expect("persisted preferences");
+        let persisted: Value = serde_json::from_str(&raw).expect("valid persisted json");
+        assert_eq!(persisted["hideQuickInsertHint"], Value::Bool(true));
+        assert_eq!(
+            persisted["quickInsertTrigger"],
+            Value::String("/".to_owned())
+        );
+        assert_eq!(persisted["noteEditorMargin"], Value::Number(48.into()));
+
+        let reloaded = SettingsRuntimeState::load_from(path.clone());
+        assert!(!reloaded.bool_value("hideQuickInsertHint"));
+        assert_eq!(reloaded.text_value("quickInsertTrigger"), "/");
+        assert_eq!(reloaded.integer_value("noteEditorMargin"), 48);
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn updates_keep_unknown_forward_compatible_preferences() {
+        let path = test_path("unknown-key");
+        fs::create_dir_all(path.parent().expect("test directory")).expect("create test dir");
+        fs::write(
+            &path,
+            r#"{"futureSetting":{"enabled":true},"theme":"light"}"#,
+        )
+        .expect("seed preferences");
+
+        let mut state = SettingsRuntimeState::load_from(path.clone());
+        state.set_text_preference("theme", "dark".to_owned());
+        let reloaded = SettingsRuntimeState::load_from(path.clone());
+        assert_eq!(reloaded.text_value("theme"), "dark");
+        assert_eq!(
+            reloaded.preferences.get("futureSetting"),
+            Some(&serde_json::json!({"enabled": true}))
+        );
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn disabled_autosave_delay_cannot_be_changed_through_runtime() {
+        let path = test_path("disabled-delay");
+        let mut state = SettingsRuntimeState::load_from(path.clone());
+        state.set_integer_preference("autoSaveDelay", 5000);
+        assert!(!state.bool_value("autoSave"));
+        assert!(!state.is_enabled("autoSaveDelay"));
+
+        state.cycle_auto_save_delay();
+        assert_eq!(state.integer_value("autoSaveDelay"), 5000);
+
+        state.toggle_bool("autoSave");
+        assert!(state.is_enabled("autoSaveDelay"));
+        state.cycle_auto_save_delay();
+        assert_eq!(state.integer_value("autoSaveDelay"), 250);
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn icon_rail_hidden_round_trips_as_a_string_list() {
+        let path = test_path("icon-rail-hidden");
+        let mut state = SettingsRuntimeState::load_from(path.clone());
+        state.toggle_string_list_value("iconRailHidden", "search");
+        state.toggle_string_list_value("iconRailHidden", "vault");
+
+        let reloaded = SettingsRuntimeState::load_from(path.clone());
+        assert_eq!(
+            reloaded.string_list_value("iconRailHidden"),
+            vec!["search".to_owned(), "vault".to_owned()]
+        );
+
+        let mut reloaded = reloaded;
+        reloaded.toggle_string_list_value("iconRailHidden", "search");
+        assert_eq!(
+            SettingsRuntimeState::load_from(path.clone()).string_list_value("iconRailHidden"),
+            vec!["vault".to_owned()]
+        );
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn setters_ignore_unknown_keys_and_wrong_value_kinds() {
+        let path = test_path("type-safety");
+        let mut state = SettingsRuntimeState::load_from(path.clone());
+
+        state.toggle_bool("theme");
+        state.set_text_preference("autoSave", "true".to_owned());
+        state.set_integer_preference("quickInsertTrigger", 9);
+        state.set_string_list_preference("theme", vec!["dark".to_owned()]);
+        state.set_text_preference("not-a-setting", "ignored".to_owned());
+
+        assert!(state.preferences.is_empty());
+        assert!(!path.exists(), "invalid setters must not write a file");
+
+        cleanup(&path);
+    }
+
+    #[test]
+    fn malformed_or_non_object_preferences_surface_load_errors() {
+        let malformed = test_path("malformed");
+        fs::create_dir_all(malformed.parent().expect("test directory")).expect("create test dir");
+        fs::write(&malformed, "{broken").expect("seed malformed json");
+        let malformed_state = SettingsRuntimeState::load_from(malformed.clone());
+        assert!(malformed_state.load_error.is_some());
+        cleanup(&malformed);
+
+        let array = test_path("array");
+        fs::create_dir_all(array.parent().expect("test directory")).expect("create test dir");
+        fs::write(&array, "[]").expect("seed non-object json");
+        let array_state = SettingsRuntimeState::load_from(array.clone());
+        assert_eq!(
+            array_state.load_error.as_deref(),
+            Some("Preferences must be a JSON object.")
+        );
+        cleanup(&array);
+    }
 }

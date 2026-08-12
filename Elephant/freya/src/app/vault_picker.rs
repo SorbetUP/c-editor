@@ -1,10 +1,8 @@
 //! Native vault selection and app-level startup persistence for the Freya shell.
 //!
-//! This deliberately lives outside the vault itself: a user must be able to
-//! choose a vault before Elephant knows where that vault's `.elephantnote`
-//! metadata is. The selected path is stored in the platform's normal config
-//! directory and remains only a convenience hint; `VaultAdapter::open` still
-//! validates/canonicalizes the directory every time it is opened.
+//! The chooser remains the operating-system picker. Elephant only persists a
+//! successfully opened path as a startup hint; the vault adapter still owns
+//! canonicalization and validation when the shell opens it.
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,12 +19,6 @@ struct StartupState {
     last_vault: PathBuf,
 }
 
-/// Open the operating-system's native directory chooser.
-///
-/// On desktop, `rfd` uses the platform dialog/desktop portal. Cancellation is
-/// not an error. Mobile intentionally returns an explicit error until the
-/// Android/iOS storage adapter is wired; it must never masquerade as a working
-/// picker.
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",
@@ -68,14 +60,15 @@ pub(super) fn pick_vault() -> Result<Option<PathBuf>, String> {
     ))
 }
 
-/// Read the last successfully opened vault, if one was persisted and still
-/// exists. A stale path never prevents the picker from being displayed.
 pub(super) fn remembered_vault() -> Result<Option<PathBuf>, String> {
-    let path = startup_state_path()?;
+    read_remembered_vault_from(&startup_state_path()?)
+}
+
+fn read_remembered_vault_from(path: &Path) -> Result<Option<PathBuf>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let raw = fs::read_to_string(&path)
+    let raw = fs::read_to_string(path)
         .map_err(|error| format!("read startup state {}: {error}", path.display()))?;
     let state: StartupState = serde_json::from_str(&raw)
         .map_err(|error| format!("parse startup state {}: {error}", path.display()))?;
@@ -94,7 +87,10 @@ pub(super) fn remembered_vault() -> Result<Option<PathBuf>, String> {
 
 /// Persist only after `VaultAdapter::open` has succeeded.
 pub(super) fn remember_vault(root: &Path) -> Result<(), String> {
-    let path = startup_state_path()?;
+    remember_vault_at(&startup_state_path()?, root)
+}
+
+fn remember_vault_at(path: &Path, root: &Path) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("startup state path has no parent: {}", path.display()))?;
@@ -111,14 +107,12 @@ pub(super) fn remember_vault(root: &Path) -> Result<(), String> {
     fs::write(&temporary, encoded)
         .map_err(|error| format!("write startup state {}: {error}", temporary.display()))?;
 
-    // Windows does not replace an existing destination with rename(). Remove
-    // the tiny previous state file first; failure is surfaced rather than
-    // silently ignoring persistence.
+    #[cfg(target_os = "windows")]
     if path.exists() {
-        fs::remove_file(&path)
+        fs::remove_file(path)
             .map_err(|error| format!("replace startup state {}: {error}", path.display()))?;
     }
-    fs::rename(&temporary, &path)
+    fs::rename(&temporary, path)
         .map_err(|error| format!("install startup state {}: {error}", path.display()))?;
     eprintln!(
         "[freya][vault-picker] remember-complete path={} vault={}",
@@ -172,6 +166,18 @@ fn platform_config_dir() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_root(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "elephant-freya-vault-picker-{name}-{}-{stamp}",
+            std::process::id()
+        ))
+    }
 
     #[test]
     fn startup_state_round_trips_paths_with_spaces() {
@@ -184,5 +190,93 @@ mod tests {
             serde_json::from_str(&encoded).expect("deserialize startup state");
         assert_eq!(decoded.version, 1);
         assert_eq!(decoded.last_vault, state.last_vault);
+    }
+
+    #[test]
+    fn successful_selection_hint_is_reloaded_from_real_state_file() {
+        let root = test_root("round-trip");
+        let vault = root.join("Vault With Spaces");
+        let state_file = root.join("config").join(STATE_FILE);
+        fs::create_dir_all(&vault).expect("create vault fixture");
+
+        remember_vault_at(&state_file, &vault).expect("persist startup hint");
+        let restored = read_remembered_vault_from(&state_file).expect("reload startup hint");
+        assert_eq!(restored.as_deref(), Some(vault.as_path()));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn repeated_selection_replaces_the_hint_with_the_latest_valid_vault() {
+        let root = test_root("replace");
+        let first = root.join("First Vault");
+        let second = root.join("Second Vault");
+        let state_file = root.join("config").join(STATE_FILE);
+        fs::create_dir_all(&first).expect("create first vault");
+        fs::create_dir_all(&second).expect("create second vault");
+
+        remember_vault_at(&state_file, &first).expect("persist first startup hint");
+        remember_vault_at(&state_file, &second).expect("replace startup hint");
+
+        assert_eq!(
+            read_remembered_vault_from(&state_file).expect("reload replaced hint"),
+            Some(second)
+        );
+        assert!(
+            !state_file.with_extension("json.tmp").exists(),
+            "successful replacement must not leave a temporary file"
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_selection_hint_returns_to_picker_instead_of_failing_startup() {
+        let root = test_root("stale");
+        let state_file = root.join("config").join(STATE_FILE);
+        let missing_vault = root.join("Missing Vault");
+        fs::create_dir_all(state_file.parent().expect("config parent")).expect("create config");
+        remember_vault_at(&state_file, &missing_vault).expect("persist stale hint");
+
+        assert_eq!(
+            read_remembered_vault_from(&state_file).expect("read stale hint"),
+            None
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unsupported_startup_state_version_is_ignored_safely() {
+        let root = test_root("future-version");
+        let vault = root.join("Vault");
+        let state_file = root.join("config").join(STATE_FILE);
+        fs::create_dir_all(&vault).expect("create vault");
+        fs::create_dir_all(state_file.parent().expect("config parent")).expect("create config");
+        fs::write(
+            &state_file,
+            serde_json::json!({"version": 99, "lastVault": vault}).to_string(),
+        )
+        .expect("write future state");
+
+        assert_eq!(
+            read_remembered_vault_from(&state_file).expect("future versions are ignored"),
+            None
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn malformed_startup_state_reports_a_parse_error() {
+        let root = test_root("malformed");
+        let state_file = root.join("config").join(STATE_FILE);
+        fs::create_dir_all(state_file.parent().expect("config parent")).expect("create config");
+        fs::write(&state_file, "{broken").expect("write malformed state");
+
+        let error = read_remembered_vault_from(&state_file).expect_err("malformed state must fail");
+        assert!(error.contains("parse startup state"));
+
+        let _ = fs::remove_dir_all(root);
     }
 }
