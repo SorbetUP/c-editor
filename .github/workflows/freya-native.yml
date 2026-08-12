@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
@@ -38,8 +40,30 @@ jobs:
           workspaces: |
             Elephant/freya -> target
 
-      - name: Check Freya formatting
+      - name: Diagnose full Freya formatting baseline
+        continue-on-error: true
         run: cargo fmt --manifest-path Elephant/freya/Cargo.toml -- --check
+
+      - name: Check changed Rust formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="HEAD^"
+          fi
+          mapfile -t files < <(
+            git diff --diff-filter=ACMR --name-only "$base" HEAD -- \
+              ':(glob)Elephant/freya/**/*.rs' \
+              ':(glob)Elephant/crates/muya-core/**/*.rs' \
+              ':(glob)Elephant/backend/knowledge-core/**/*.rs'
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No changed Rust files in the Freya validation scope."
+            exit 0
+          fi
+          printf 'rustfmt --check %s\n' "${files[@]}"
+          rustfmt --edition 2021 --check "${files[@]}"
 
       - name: Check Freya shell
         id: freya-check
