@@ -8,6 +8,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+const LONG_NOTE_TITLE: &str = "A deliberately long library note title used to exercise card wrapping";
+
 struct FixtureVault {
     root: PathBuf,
 }
@@ -34,6 +36,26 @@ impl FixtureVault {
             "# MissingAction\n\nThis file will disappear before delete.\n",
         )
         .expect("write missing action fixture note");
+        fs::write(root.join("A.md"), "# A\n\nShort fixture name.\n")
+            .expect("write short-name fixture note");
+        fs::write(
+            root.join(format!("{LONG_NOTE_TITLE}.md")),
+            format!("# {LONG_NOTE_TITLE}\n\nLong-name fixture note.\n"),
+        )
+        .expect("write long-name fixture note");
+
+        let folder = root.join("Folder");
+        let subfolder = folder.join("Subfolder");
+        fs::create_dir_all(&subfolder).expect("create nested fixture folders");
+        fs::write(folder.join("Inside.md"), "# Inside\n\nFolder fixture.\n")
+            .expect("write folder fixture note");
+        fs::write(
+            subfolder.join("Nested.md"),
+            "# Nested\n\nSubfolder fixture.\n",
+        )
+        .expect("write nested fixture note");
+        fs::create_dir_all(root.join("Empty Folder")).expect("create empty fixture folder");
+
         Self { root }
     }
 
@@ -157,6 +179,34 @@ fn hover_library_card(runner: &mut TestingRunner, label: &str) {
     runner.sync_and_update();
 }
 
+fn focused_rename_input(runner: &TestingRunner, current_title: &str) -> TestingNode {
+    accessible_nodes(runner, current_title)
+        .into_iter()
+        .min_by(|left, right| {
+            left.layout()
+                .area
+                .size
+                .area()
+                .partial_cmp(&right.layout().area.size.area())
+                .expect("rename input areas must be ordered")
+        })
+        .unwrap_or_else(|| panic!("rename input is not visible for {current_title:?}"))
+}
+
+fn replace_prefilled_rename(runner: &mut TestingRunner, current_title: &str, next_title: &str) {
+    let input = focused_rename_input(runner, current_title);
+    let area = input.layout().area;
+    runner.click_cursor((
+        (area.max_x() - 3.) as f64,
+        ((area.min_y() + area.max_y()) / 2.) as f64,
+    ));
+    runner.press_key(Key::Named(NamedKey::End));
+    for _ in current_title.chars() {
+        runner.press_key(Key::Named(NamedKey::Backspace));
+    }
+    runner.write_text(next_title);
+}
+
 #[test]
 fn clicking_a_note_that_disappears_surfaces_the_real_open_error() {
     let fixture = FixtureVault::new();
@@ -201,19 +251,25 @@ fn card_actions_are_overlayed_and_rename_and_delete_use_the_real_vault() {
 
     click_smallest_label(&mut runner, "Rename");
     runner.sync_and_update();
-    let input = accessible_nodes(&runner, "Rename Rename")
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| panic!("the source rename input must be keyboard accessible"));
-    let input_area = input.layout().area;
-    runner.click_cursor((
-        ((input_area.min_x() + input_area.max_x()) / 2.) as f64,
-        ((input_area.min_y() + input_area.max_y()) / 2.) as f64,
-    ));
-    runner.write_text("Renamed");
+    let prefilled_input = focused_rename_input(&runner, "Rename");
+    assert!(
+        prefilled_input.layout().area.size.area() < before.size.area(),
+        "the Tauri-parity rename input must be inline inside the existing card"
+    );
+    runner.press_key(Key::Named(NamedKey::Escape));
+    runner.sync_and_update();
+    assert!(fixture.path().join("Rename.md").is_file());
+    assert_eq!(library_card_node(&runner, "Rename").layout().area, before);
+
+    hover_library_card(&mut runner, "Rename");
+    click_label(&mut runner, "Note actions");
+    runner.sync_and_update();
+    click_smallest_label(&mut runner, "Rename");
+    runner.sync_and_update();
+    replace_prefilled_rename(&mut runner, "Rename", "Renamed");
     assert!(
         accessible_nodes(&runner, "Renamed").len() >= 1,
-        "the focused source rename input must receive typed text"
+        "the focused prefilled rename input must receive replacement text"
     );
     runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
@@ -239,6 +295,55 @@ fn card_actions_are_overlayed_and_rename_and_delete_use_the_real_vault() {
         1,
         "a real vault delete failure must remain visible in the library surface"
     );
+}
+
+#[test]
+fn grid_list_nested_folder_back_and_empty_states_use_real_fixture_content() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    assert!(!accessible_nodes(&runner, "A").is_empty());
+    assert!(!accessible_nodes(&runner, LONG_NOTE_TITLE).is_empty());
+    assert!(!accessible_nodes(&runner, "Folder").is_empty());
+    assert!(!accessible_nodes(&runner, "Empty Folder").is_empty());
+
+    click_label(&mut runner, "Show notes as list");
+    runner.sync_and_update();
+    let list_area = library_card_node(&runner, LONG_NOTE_TITLE).layout().area;
+    assert!(
+        ((list_area.max_y() - list_area.min_y()) - 58.).abs() < 0.5,
+        "list cards must keep the Tauri 58px compact height"
+    );
+    click_label(&mut runner, "Show notes as grid");
+    runner.sync_and_update();
+
+    click_library_card(&mut runner, "Folder");
+    runner.sync_and_update();
+    assert!(!accessible_nodes(&runner, "Inside").is_empty());
+    assert!(!accessible_nodes(&runner, "Subfolder").is_empty());
+
+    click_library_card(&mut runner, "Subfolder");
+    runner.sync_and_update();
+    assert!(!accessible_nodes(&runner, "Nested").is_empty());
+    click_label(&mut runner, "Retour");
+    runner.sync_and_update();
+    assert!(!accessible_nodes(&runner, "Inside").is_empty());
+    click_label(&mut runner, "Retour");
+    runner.sync_and_update();
+    assert!(!accessible_nodes(&runner, "Folder").is_empty());
+
+    click_library_card(&mut runner, "Empty Folder");
+    runner.sync_and_update();
+    assert_eq!(accessible_nodes(&runner, "Empty library").len(), 1);
+    click_label(&mut runner, "Retour");
+    runner.sync_and_update();
+    assert!(!accessible_nodes(&runner, LONG_NOTE_TITLE).is_empty());
 }
 
 #[test]
