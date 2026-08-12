@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: freya-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check-and-test:
     name: Freya check and tests
@@ -21,21 +25,14 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Linux graphics dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libfreetype6-dev \
-            libfontconfig1-dev \
-            libegl1-mesa-dev \
-            libgl1-mesa-dev \
-            libgles2-mesa-dev \
-            libwayland-dev
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
@@ -43,47 +40,84 @@ jobs:
           workspaces: |
             Elephant/freya -> target
 
+      - name: Diagnose full Freya formatting baseline
+        continue-on-error: true
+        run: cargo fmt --manifest-path Elephant/freya/Cargo.toml -- --check
+
+      - name: Check changed Rust formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="HEAD^"
+          fi
+          mapfile -t files < <(
+            git diff --diff-filter=ACMR --name-only "$base" HEAD -- \
+              ':(glob)Elephant/freya/**/*.rs' \
+              ':(glob)Elephant/crates/muya-core/**/*.rs' \
+              ':(glob)Elephant/backend/knowledge-core/**/*.rs'
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No changed Rust files in the Freya validation scope."
+            exit 0
+          fi
+          printf 'rustfmt --check %s\n' "${files[@]}"
+          rustfmt --edition 2021 --check "${files[@]}"
+
       - name: Check Freya shell
+        id: freya-check
+        run: cargo check --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Test Freya library
+        id: freya-library
+        continue-on-error: true
         shell: bash
         run: |
           set -uo pipefail
           set +e
-          cargo check --manifest-path Elephant/freya/Cargo.toml 2>&1 | tee /tmp/freya-check.log
+          timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 2>&1 | tee /tmp/freya-lib.log
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
-            python3 - /tmp/freya-check.log <<'PY'
+            if [ "$status" -eq 124 ]; then
+              detail="library tests timed out after 180 seconds"
+            else
+              detail="library tests exited with status $status"
+            fi
+            python3 - "$detail" /tmp/freya-lib.log <<'PY'
           import re
           import sys
           from pathlib import Path
-          filename = sys.argv[1]
+          detail, filename = sys.argv[1:]
           raw = Path(filename).read_text(errors='replace')
           ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
           lines = [ansi.sub('', line) for line in raw.splitlines()]
+          markers = (
+              ' FAILED', 'panicked at', 'failures:', 'test result: FAILED',
+              'NotFound', 'assertion ', 'Error:', 'error[E', 'error:'
+          )
           interesting = []
-          markers = ('error[E', 'error:', 'cannot find', 'mismatched types')
           for index, line in enumerate(lines):
               if any(marker in line for marker in markers):
-                  interesting.extend(lines[max(0, index - 2):min(len(lines), index + 10)])
+                  interesting.extend(lines[max(0, index - 2):min(len(lines), index + 5)])
           if not interesting:
-              interesting = lines[-50:]
+              interesting = lines[-40:]
           compact = []
           seen = set()
           for line in interesting:
               if line not in seen:
                   compact.append(line)
                   seen.add(line)
-          message = '\n'.join(compact[-80:])
+          message = detail + '\n' + '\n'.join(compact[-80:])
           escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print(f'::error title=Freya cargo check::{escaped}')
+          print(f'::error title=Freya library tests::{escaped}')
           PY
-            exit "$status"
           fi
-
-      - name: Test Freya library
-        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1
+          exit "$status"
 
       - name: Test Freya integration suites independently
+        if: ${{ !cancelled() && steps.freya-check.outcome == 'success' }}
         shell: bash
         run: |
           set -uo pipefail
@@ -138,13 +172,17 @@ jobs:
             exit 1
           fi
 
+      - name: Fail when Freya library tests failed
+        if: ${{ always() && steps.freya-library.outcome == 'failure' }}
+        run: exit 1
+
   macos-check:
     name: Freya macOS compile
     runs-on: macos-15
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0

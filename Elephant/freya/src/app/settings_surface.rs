@@ -39,10 +39,7 @@ pub(super) fn surface_state(
         .into_element()
 }
 
-pub(super) fn unavailable_section(
-    section_label: &str,
-    palette: theme::ThemePalette,
-) -> Element {
+pub(super) fn unavailable_section(section_label: &str, palette: theme::ThemePalette) -> Element {
     rect()
         .width(Size::fill())
         .padding(Gaps::new_all(24.))
