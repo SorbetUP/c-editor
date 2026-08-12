@@ -25,7 +25,8 @@ mod library_icons;
 mod library_actions;
 
 use library_actions::{
-    card_action_menu, create_note_and_open, rename_library_entry, CardMenuState,
+    card_action_menu, create_note_and_open, load_more_library_entries, rename_library_entry,
+    CardMenuState,
 };
 use library_icons::{svg_icon, Icon as LibraryIcon};
 
@@ -382,14 +383,23 @@ fn library_grid(state: State<ShellState>) -> Element {
         rect().spacing(6.).children(entries)
     };
 
-    ScrollView::new()
+    let mut paging_state = state;
+    rect()
         .width(Size::fill())
         .height(Size::fill())
+        .on_wheel(move |_| {
+            let _ = load_more_library_entries(paging_state);
+        })
         .child(
-            rect()
+            ScrollView::new()
                 .width(Size::fill())
-                .padding(Gaps::new(72., 10., 10., 10.))
-                .child(surface),
+                .height(Size::fill())
+                .child(
+                    rect()
+                        .width(Size::fill())
+                        .padding(Gaps::new(72., 10., 10., 10.))
+                        .child(surface),
+                ),
         )
         .into_element()
 }
