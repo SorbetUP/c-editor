@@ -5,7 +5,7 @@
 
 use freya::prelude::*;
 
-use crate::{editor::EditorDocument, theme};
+use crate::theme;
 
 use super::library_icons::{svg_icon, Icon as LibraryIcon};
 use super::super::ShellState;
@@ -93,8 +93,8 @@ pub(super) fn card_action_menu(
 
 /// Match the Vue `vaultStore.createNote()` orchestration: create through the
 /// production backend, refresh the current directory, then open the exact note
-/// returned by the backend. No optimistic card is inserted before filesystem
-/// success.
+/// returned by the backend through the shell's normal note-navigation path.
+/// No optimistic card is inserted before filesystem success.
 pub(super) fn create_note_and_open(mut state: State<ShellState>) -> bool {
     let (vault, directory) = {
         let snapshot = state.read();
@@ -109,33 +109,27 @@ pub(super) fn create_note_and_open(mut state: State<ShellState>) -> bool {
         return false;
     };
 
-    eprintln!(
-        "[freya][library] action:start action=Note directory={directory}"
-    );
+    eprintln!("[freya][library] action:start action=Note directory={directory}");
     match vault.create_note(Some(directory.clone()), None, None) {
         Ok(entry) => {
-            let full_path = vault.root().join(&entry.path);
             state.write().reload_directory(&directory);
-            match EditorDocument::load(full_path) {
-                Ok(document) => {
-                    let mut next = state.write();
-                    next.editor = Some(document);
-                    next.error = None;
-                    eprintln!(
-                        "[freya][library] action:complete action=Note path={}",
-                        entry.path
-                    );
-                    true
-                }
-                Err(error) => {
-                    eprintln!(
-                        "[freya][library] action:failure action=open-created-note path={} error={error}",
-                        entry.path
-                    );
-                    state.write().error = Some(error.to_string());
-                    false
-                }
+            state.write().open_note(&entry);
+            let opened = {
+                let snapshot = state.read();
+                snapshot.editor.is_some() && snapshot.error.is_none()
+            };
+            if opened {
+                eprintln!(
+                    "[freya][library] action:complete action=Note path={}",
+                    entry.path
+                );
+            } else {
+                eprintln!(
+                    "[freya][library] action:failure action=open-created-note path={}",
+                    entry.path
+                );
             }
+            opened
         }
         Err(error) => {
             eprintln!("[freya][library] action:failure action=Note error={error}");
