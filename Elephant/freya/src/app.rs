@@ -182,9 +182,15 @@ impl ShellState {
                     None,
                 )
                 .map(|_| ()),
-            crate::library_contract::CreateAction::Folder => vault
-                .create_folder(Some(self.library.current_path.as_str().to_string()))
-                .map(|_| ()),
+            crate::library_contract::CreateAction::Folder => {
+                let parent = self.library.current_path.as_str().trim_matches('/');
+                let relative_path = if parent.is_empty() {
+                    "New Folder".to_string()
+                } else {
+                    format!("{parent}/New Folder")
+                };
+                vault.create_folder(Some(relative_path)).map(|_| ())
+            }
             crate::library_contract::CreateAction::Drawing => {
                 Err(crate::vault_adapter::AdapterError::from(
                     "Drawing requires the Excalidraw web island; no fake native fallback is used."
