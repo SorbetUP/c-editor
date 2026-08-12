@@ -1,17 +1,18 @@
 //! Filesystem boundary for Elephant's Excalidraw scene/preview pair.
 //!
-//! The `.excalidraw` JSON is the canonical editable document. A PNG remains a
-//! compatible optional preview/export sidecar, matching the Vue/Tauri path,
-//! but native editing must not fail merely because that derived preview is
-//! absent or stale. New library drawings are standalone `.excalidraw` files in
-//! the current visible directory so closing the editor never strands an orphan
-//! inside the hidden `.assets` directory.
+//! The `.excalidraw` JSON is the canonical editable document. PNG is a derived
+//! preview/export sidecar, matching the Vue/Tauri path. Native editing remains
+//! tolerant of a missing preview, while every successful native create/save
+//! regenerates it from the canonical scene.
 
 use serde_json::{json, Value};
 use std::{
     fs,
     path::{Component, Path, PathBuf},
 };
+
+#[path = "drawing_export.rs"]
+mod export;
 
 const ASSETS_DIR: &str = ".assets";
 const LIGHT_BACKGROUND: &str = "#ffffff";
@@ -112,6 +113,10 @@ fn create_scene_at(root: &Path, directory: &Path, title: &str) -> Result<Created
             path.display()
         )
     })?;
+    if let Err(error) = write_preview(root, &path, &raw) {
+        let _ = fs::remove_file(&path);
+        return Err(error);
+    }
     Ok(CreatedScene {
         relative_path: relative_from_root(root, &path)?,
         path,
@@ -156,44 +161,108 @@ pub(super) fn write_scene(root: &Path, relative_path: &str, raw: &str) -> Result
     let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let scene_path = scene_path(&canonical_root, relative_path)?;
     validate_scene(raw, &scene_path)?;
+    let png = export::render_png(raw)?;
 
-    let temp_path =
-        scene_path.with_extension(format!("excalidraw.freya-tmp-{}", std::process::id()));
-    if temp_path.exists() {
-        fs::remove_file(&temp_path).map_err(|error| {
-            format!(
-                "Unable to clear stale drawing save {}: {error}",
-                temp_path.display()
-            )
-        })?;
-    }
-    fs::write(&temp_path, raw.as_bytes()).map_err(|error| {
+    let temp_scene = temp_path(&scene_path, "scene");
+    let preview = preview_path(&scene_path);
+    let temp_preview = temp_path(&preview, "preview");
+    clear_stale_temp(&temp_scene)?;
+    clear_stale_temp(&temp_preview)?;
+
+    fs::write(&temp_scene, raw.as_bytes()).map_err(|error| {
         format!(
             "Unable to stage drawing save {}: {error}",
-            temp_path.display()
+            temp_scene.display()
         )
     })?;
+    if let Err(error) = fs::write(&temp_preview, &png) {
+        let _ = fs::remove_file(&temp_scene);
+        return Err(format!(
+            "Unable to stage drawing preview {}: {error}",
+            temp_preview.display()
+        ));
+    }
 
-    if let Err(rename_error) = fs::rename(&temp_path, &scene_path) {
-        // Windows does not replace an existing destination with rename. Keep a
-        // portable fallback while still validating/staging the complete JSON
-        // before the canonical file is touched.
-        fs::write(&scene_path, raw.as_bytes()).map_err(|write_error| {
-            let _ = fs::remove_file(&temp_path);
+    if let Err(error) = replace_file(&temp_scene, &scene_path) {
+        let _ = fs::remove_file(&temp_preview);
+        return Err(error);
+    }
+    // The canonical JSON has already been replaced at this point. Never leave
+    // the old preview silently stale: direct-write fallback is used on
+    // platforms where rename-over-existing is unavailable.
+    replace_file(&temp_preview, &preview).map_err(|error| {
+        format!(
+            "Drawing JSON saved but preview update failed at {}: {error}",
+            preview.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn write_preview(root: &Path, scene_path: &Path, raw: &str) -> Result<(), String> {
+    let preview = preview_path(scene_path);
+    if let Some(parent) = preview.parent() {
+        let canonical_parent = fs::canonicalize(parent).map_err(|error| {
             format!(
-                "Unable to save drawing {} (rename: {rename_error}; write: {write_error})",
-                scene_path.display()
+                "Drawing preview directory unavailable at {}: {error}",
+                parent.display()
             )
         })?;
-        let _ = fs::remove_file(&temp_path);
+        if !canonical_parent.starts_with(root) {
+            return Err(format!(
+                "Refusing drawing preview outside vault: {}",
+                preview.display()
+            ));
+        }
+    }
+    reject_symlink(&preview, "drawing preview")?;
+    let png = export::render_png(raw)?;
+    let temp = temp_path(&preview, "preview");
+    clear_stale_temp(&temp)?;
+    fs::write(&temp, &png).map_err(|error| {
+        format!(
+            "Unable to stage drawing preview {}: {error}",
+            temp.display()
+        )
+    })?;
+    replace_file(&temp, &preview)
+}
+
+fn temp_path(path: &Path, kind: &str) -> PathBuf {
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("tmp");
+    path.with_extension(format!("{extension}.freya-{kind}-tmp-{}", std::process::id()))
+}
+
+fn clear_stale_temp(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| {
+            format!("Unable to clear stale drawing save {}: {error}", path.display())
+        })?;
     }
     Ok(())
 }
 
-pub(super) fn can_rename_standalone_scene(relative_path: &str, has_preview: bool) -> bool {
-    if has_preview {
-        return false;
+fn replace_file(temp: &Path, target: &Path) -> Result<(), String> {
+    if let Err(rename_error) = fs::rename(temp, target) {
+        let bytes = fs::read(temp).map_err(|read_error| {
+            format!(
+                "Unable to replace drawing file {} (rename: {rename_error}; staged read: {read_error})",
+                target.display()
+            )
+        })?;
+        fs::write(target, bytes).map_err(|write_error| {
+            let _ = fs::remove_file(temp);
+            format!(
+                "Unable to replace drawing file {} (rename: {rename_error}; write: {write_error})",
+                target.display()
+            )
+        })?;
+        let _ = fs::remove_file(temp);
     }
+    Ok(())
+}
+
+pub(super) fn can_rename_standalone_scene(relative_path: &str, _has_preview: bool) -> bool {
     let normalized = relative_path.replace('\\', "/");
     let lower = normalized.to_ascii_lowercase();
     lower.ends_with(".excalidraw")
@@ -209,10 +278,15 @@ pub(super) fn rename_standalone_scene(
 ) -> Result<RenamedScene, String> {
     let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let current_path = scene_path(&canonical_root, relative_path)?;
-    if !can_rename_standalone_scene(relative_path, preview_path(&current_path).exists()) {
+    let current_preview = preview_path(&current_path);
+    let has_preview = current_preview.exists();
+    if !can_rename_standalone_scene(relative_path, has_preview) {
         return Err(format!(
             "Refusing to rename image-backed or hidden drawing: {relative_path}"
         ));
+    }
+    if has_preview {
+        optional_preview_size(&canonical_root, &current_path)?;
     }
     let directory = current_path
         .parent()
@@ -230,7 +304,9 @@ pub(super) fn rename_standalone_scene(
     }
 
     let (target, resolved_title) = unique_scene_path(directory, &safe_title);
+    let target_preview = preview_path(&target);
     reject_symlink(&target, "drawing rename target")?;
+    reject_symlink(&target_preview, "drawing preview rename target")?;
     fs::rename(&current_path, &target).map_err(|error| {
         format!(
             "Unable to rename drawing {} to {}: {error}",
@@ -238,6 +314,17 @@ pub(super) fn rename_standalone_scene(
             target.display()
         )
     })?;
+    if has_preview {
+        if let Err(error) = fs::rename(&current_preview, &target_preview) {
+            let rollback = fs::rename(&target, &current_path);
+            return Err(format!(
+                "Unable to rename drawing preview {} to {}: {error}; scene rollback={}",
+                current_preview.display(),
+                target_preview.display(),
+                if rollback.is_ok() { "ok" } else { "failed" }
+            ));
+        }
+    }
     Ok(RenamedScene {
         relative_path: relative_from_root(&canonical_root, &target)?,
         title: resolved_title,
@@ -312,19 +399,26 @@ fn scene_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
     let lower_path = visible_path.to_string_lossy().to_ascii_lowercase();
     let candidate = if lower_path.ends_with(".md") {
         let note_path = root.join(&visible_path);
-        let markdown = fs::read_to_string(&note_path).map_err(|error| {
+        reject_symlink(&note_path, "drawing note")?;
+        let canonical_note = fs::canonicalize(&note_path).map_err(|error| {
+            format!("Drawing note unavailable at {}: {error}", note_path.display())
+        })?;
+        if !canonical_note.starts_with(root) {
+            return Err(format!("Refusing drawing note outside vault: {relative_path}"));
+        }
+        let markdown = fs::read_to_string(&canonical_note).map_err(|error| {
             format!(
                 "Drawing note unavailable at {}: {error}",
-                note_path.display()
+                canonical_note.display()
             )
         })?;
         let asset = markdown_asset_path(&markdown).ok_or_else(|| {
             format!(
                 "Drawing scene unavailable: no .assets PNG link in {}",
-                note_path.display()
+                canonical_note.display()
             )
         })?;
-        note_path
+        canonical_note
             .parent()
             .unwrap_or(root)
             .join(asset)
@@ -493,11 +587,13 @@ mod tests {
     }
 
     #[test]
-    fn storage_roundtrip_and_reopen_do_not_require_png_preview() {
+    fn storage_roundtrip_tolerates_missing_preview_and_regenerates_it_on_save() {
         let vault = TestVault::new();
         let created = create_scene(&vault.0, "Roundtrip").unwrap();
+        let preview = preview_path(&created.path);
         assert!(created.path.is_file());
-        assert!(!preview_path(&created.path).exists());
+        assert!(preview.is_file());
+        fs::remove_file(&preview).unwrap();
 
         let first = read_scene(&vault.0, &created.relative_path).unwrap();
         assert_eq!(first.element_count, 0);
@@ -516,16 +612,19 @@ mod tests {
         scene["futureTopLevelField"] = json!({"preserved": true});
         let raw = serde_json::to_string_pretty(&scene).unwrap();
         write_scene(&vault.0, &created.relative_path, &raw).unwrap();
+        assert!(preview.is_file());
+        assert!(fs::read(&preview).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
 
         let reopened = read_scene(&vault.0, &created.relative_path).unwrap();
         assert_eq!(reopened.element_count, 1);
+        assert!(reopened.preview_size.unwrap_or(0) > 8);
         let reopened_json: Value = serde_json::from_str(&reopened.raw).unwrap();
         assert_eq!(reopened_json["elements"][0]["id"], "rect-1");
         assert_eq!(reopened_json["futureTopLevelField"]["preserved"], true);
     }
 
     #[test]
-    fn native_engine_draw_save_close_reopen_roundtrip() {
+    fn native_engine_draw_save_close_reopen_roundtrip_regenerates_png() {
         let vault = TestVault::new();
         let created = create_scene(&vault.0, "Native Roundtrip").unwrap();
         let loaded = read_scene(&vault.0, &created.relative_path).unwrap();
@@ -546,6 +645,7 @@ mod tests {
 
         let reopened = read_scene(&vault.0, &created.relative_path).unwrap();
         assert_eq!(reopened.element_count, 2);
+        assert!(reopened.preview_size.unwrap_or(0) > 8);
         let reopened_canvas = DrawingCanvasState::from_json(&reopened.raw).unwrap();
         let reopened_json: Value =
             serde_json::from_str(&reopened_canvas.serialize_json().unwrap()).unwrap();
@@ -557,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn standalone_scene_is_created_in_the_visible_current_directory() {
+    fn standalone_scene_is_created_with_preview_in_visible_current_directory() {
         let vault = TestVault::new();
         fs::create_dir_all(vault.0.join("Projects")).unwrap();
 
@@ -565,6 +665,7 @@ mod tests {
 
         assert_eq!(created.relative_path, "Projects/Sketch.excalidraw");
         assert!(vault.0.join(&created.relative_path).is_file());
+        assert!(vault.0.join("Projects/Sketch.png").is_file());
         assert!(!created.relative_path.contains("/.assets/"));
         assert_eq!(
             read_scene(&vault.0, &created.relative_path).unwrap().title,
@@ -580,10 +681,12 @@ mod tests {
     }
 
     #[test]
-    fn standalone_rename_normalizes_extensions_and_avoids_collisions() {
+    fn standalone_rename_moves_scene_and_preview_and_avoids_collisions() {
         let vault = TestVault::new();
         let first = create_standalone_scene(&vault.0, "", "Sketch").unwrap();
         let second = create_standalone_scene(&vault.0, "", "Other").unwrap();
+        let old_preview = vault.0.join("Other.png");
+        assert!(old_preview.is_file());
 
         let renamed =
             rename_standalone_scene(&vault.0, &second.relative_path, "Sketch.excalidraw.png")
@@ -593,19 +696,21 @@ mod tests {
         assert_eq!(renamed.relative_path, "Sketch 2.excalidraw");
         assert!(vault.0.join(&first.relative_path).is_file());
         assert!(vault.0.join(&renamed.relative_path).is_file());
+        assert!(vault.0.join("Sketch 2.png").is_file());
         assert!(!vault.0.join(&second.relative_path).exists());
+        assert!(!old_preview.exists());
     }
 
     #[test]
-    fn image_backed_sidecar_is_not_renamed_without_rewriting_its_owner() {
+    fn hidden_image_backed_sidecar_is_not_renamed_without_rewriting_owner() {
         let vault = TestVault::new();
         let created = create_scene(&vault.0, "Linked").unwrap();
-        assert!(!can_rename_standalone_scene(&created.relative_path, false));
+        assert!(!can_rename_standalone_scene(&created.relative_path, true));
         assert!(rename_standalone_scene(&vault.0, &created.relative_path, "Other").is_err());
     }
 
     #[test]
-    fn create_scene_never_overwrites_existing_drawing() {
+    fn create_scene_never_overwrites_existing_drawing_or_preview() {
         let vault = TestVault::new();
         let first = create_scene(&vault.0, "Untitled Drawing").unwrap();
         let second = create_scene(&vault.0, "Untitled Drawing").unwrap();
@@ -613,6 +718,8 @@ mod tests {
         assert!(second
             .relative_path
             .ends_with("Untitled Drawing 2.excalidraw"));
+        assert!(preview_path(&first.path).is_file());
+        assert!(preview_path(&second.path).is_file());
     }
 
     #[test]
@@ -620,7 +727,7 @@ mod tests {
         let vault = TestVault::new();
         let created = create_scene(&vault.0, "Linked").unwrap();
         let png_relative = created.relative_path.replace(".excalidraw", ".png");
-        fs::write(vault.0.join(&png_relative), b"png").unwrap();
+        assert!(vault.0.join(&png_relative).is_file());
         assert_eq!(
             read_scene(&vault.0, &png_relative).unwrap().title,
             "Linked"
@@ -632,6 +739,20 @@ mod tests {
             read_scene(&vault.0, "drawing-note.md").unwrap().title,
             "Linked"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_markdown_cannot_escape_vault_before_asset_resolution() {
+        use std::os::unix::fs::symlink;
+
+        let vault = TestVault::new();
+        let outside = TestVault::new();
+        let outside_note = outside.0.join("outside.md");
+        fs::write(&outside_note, "![Outside](.assets/outside.png)").unwrap();
+        symlink(&outside_note, vault.0.join("drawing-note.md")).unwrap();
+        let error = read_scene(&vault.0, "drawing-note.md").unwrap_err();
+        assert!(error.contains("symlinked drawing note"));
     }
 
     #[test]
