@@ -376,6 +376,18 @@ fn drawing_shell(
         .overflow(Overflow::Clip)
         .a11y_alt(format!("Drawing editor {title_snapshot}"))
         .on_global_key_down(move |event: Event<KeyboardEventData>| {
+            if rename_allowed && event.key == Key::Named(NamedKey::Enter) {
+                save_scene(
+                    key_shell_state,
+                    key_canvas_state,
+                    key_status,
+                    key_path,
+                    key_title,
+                    true,
+                );
+                event.stop_propagation();
+                return;
+            }
             if event.key == Key::Named(NamedKey::Escape) {
                 if let Some(root) = key_root.as_deref() {
                     clear_active(root);
