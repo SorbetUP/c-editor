@@ -22,7 +22,7 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Apply known deterministic integration fixes
+      - name: Apply known deterministic source fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -43,14 +43,12 @@ jobs:
               'let dir = std::env::temp_dir().join("freya-navigation-visual");',
               'navigation evidence temp dir',
           )
-
           replace_once(
               'Elephant/freya/tests/graph_canvas_freya_testing.rs',
               'let output = PathBuf::from("/private/tmp/elephant-freya-graph-canvas-motion");',
               'let output = std::env::temp_dir().join("elephant-freya-graph-canvas-motion");',
               'graph evidence temp dir',
           )
-
           replace_once(
               'Elephant/freya/tests/editor_rich_interactions_freya_testing.rs',
               'use freya_clipboard::copypasta::{ClipboardProvider, Result as ClipboardResult};',
@@ -69,19 +67,11 @@ jobs:
               'fn install_memory_clipboard(runner: &mut TestingRunner)',
               'clipboard runner type',
           )
-
           replace_once(
               'Elephant/freya/src/app/drawing.rs',
               '''Key::Named(NamedKey::Enter)\n                        | Key::Named(NamedKey::Escape)\n                        | Key::Named(NamedKey::Shift) => true,''',
               '''Key::Named(NamedKey::Enter)\n                        | Key::Named(NamedKey::Escape)\n                        | Key::Named(NamedKey::Shift)\n                        | Key::Named(NamedKey::Home)\n                        | Key::Named(NamedKey::End)\n                        | Key::Named(NamedKey::ArrowLeft)\n                        | Key::Named(NamedKey::ArrowRight) => true,''',
               'drawing input navigation keys',
-          )
-
-          replace_once(
-              '.github/workflows/freya-native.yml',
-              '''            suite="$(basename "$file" .rs)"\n            echo "::group::Freya suite: $suite"''',
-              '''            suite="$(basename "$file" .rs)"\n            if [ "$suite" = "differential_freya_capture" ]; then\n              echo "::notice::Skipping orchestrator-only suite $suite; it is exercised by the differential parity workflow."\n              continue\n            fi\n            echo "::group::Freya suite: $suite"''',
-              'orchestrator-only suite classification',
           )
           PY
 
@@ -96,11 +86,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
-            .github/workflows/freya-native.yml \
             Elephant/freya/src/app/drawing.rs \
             Elephant/freya/tests/navigation_visual_freya_testing.rs \
             Elephant/freya/tests/graph_canvas_freya_testing.rs \
             Elephant/freya/tests/editor_rich_interactions_freya_testing.rs
           git diff --cached --check
-          git commit -m 'fix(freya): unblock integrated parity validation [wave1-known-fixes]'
+          git commit -m 'fix(freya): unblock integrated parity source validation [wave1-known-fixes]'
           git push origin HEAD:parallel/freya-parity-integration-wave1
