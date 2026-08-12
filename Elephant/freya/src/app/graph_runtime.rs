@@ -15,7 +15,7 @@ use crate::{
     vault_adapter::VaultAdapter,
 };
 use elephantnote_knowledge_core::{rebuild_vault, KnowledgeGraph, KnowledgeStore};
-use std::{fmt, path::Path, time::Instant};
+use std::{collections::BTreeMap, fmt, path::Path, time::Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct GraphRuntimeError(String);
@@ -114,16 +114,8 @@ fn map_graph(root: &Path, store: &KnowledgeStore, graph: KnowledgeGraph) -> Grap
         .iter()
         .filter(|node| node.kind == GraphNodeKind::Note)
         .count();
-    let max_links_per_note = nodes
-        .iter()
-        .map(|node| {
-            edges
-                .iter()
-                .filter(|edge| edge.source == node.id || edge.target == node.id)
-                .count()
-        })
-        .max()
-        .unwrap_or(0);
+    let max_links_per_note = max_incident_edges(&nodes, &edges);
+    let edge_count = edges.len();
 
     GraphSnapshot {
         // The historical graph payload has no generatedAt field. Keep this
@@ -135,18 +127,34 @@ fn map_graph(root: &Path, store: &KnowledgeStore, graph: KnowledgeGraph) -> Grap
         // the contract so callers cannot mistake the adapter for a fallback.
         source: GraphDataSource::KnowledgeCore,
         nodes,
-        edges: edges.clone(),
+        edges,
         clusters,
         stats: GraphStats {
             total_notes,
-            total_candidate_edges: edges.len(),
-            rendered_edges: edges.len(),
+            total_candidate_edges: edge_count,
+            rendered_edges: edge_count,
             max_links_per_note,
-            max_edges: edges.len(),
+            max_edges: edge_count,
         },
         index_path: store.database_path().to_string_lossy().replace('\\', "/"),
         search_status: None,
     }
+}
+
+/// Computes the same incident-edge maximum as the previous per-node scan, but
+/// in O(V + E) instead of O(V * E). This matters for the production contract,
+/// which explicitly allows thousands of nodes and edges.
+fn max_incident_edges(nodes: &[GraphNode], edges: &[GraphEdge]) -> usize {
+    let mut degree_by_id = BTreeMap::<&str, usize>::new();
+    for edge in edges {
+        *degree_by_id.entry(edge.source.as_str()).or_default() += 1;
+        *degree_by_id.entry(edge.target.as_str()).or_default() += 1;
+    }
+    nodes
+        .iter()
+        .map(|node| degree_by_id.get(node.id.as_str()).copied().unwrap_or(0))
+        .max()
+        .unwrap_or(0)
 }
 
 fn map_node(node: elephantnote_knowledge_core::KnowledgeGraphNode) -> GraphNode {
@@ -241,6 +249,53 @@ mod tests {
             format!("# Note {index:03}\n\n{body}\n"),
         )
         .expect("write markdown note");
+    }
+
+    fn contract_note(id: &str) -> GraphNode {
+        GraphNode {
+            id: id.to_string(),
+            relative_path: id.to_string(),
+            title: id.to_string(),
+            kind: GraphNodeKind::Note,
+            folder: String::new(),
+            tags: Vec::new(),
+            summary: String::new(),
+            headings: Vec::new(),
+            key_terms: Vec::new(),
+            updated_at: String::new(),
+            weak_title: false,
+            source_count: 0,
+            chunk_count: 1,
+            position: None,
+        }
+    }
+
+    fn contract_edge(id: &str, source: &str, target: &str) -> GraphEdge {
+        GraphEdge {
+            id: id.to_string(),
+            source: source.to_string(),
+            target: target.to_string(),
+            edge_type: GraphEdgeType::ExplicitLink,
+            reason: "test".to_string(),
+            weight: 1.0,
+        }
+    }
+
+    #[test]
+    fn incident_edge_stats_are_linear_and_preserve_existing_semantics() {
+        let nodes = vec![
+            contract_note("a.md"),
+            contract_note("b.md"),
+            contract_note("c.md"),
+            contract_note("isolated.md"),
+        ];
+        let edges = vec![
+            contract_edge("ab", "a.md", "b.md"),
+            contract_edge("ac", "a.md", "c.md"),
+            contract_edge("bc", "b.md", "c.md"),
+        ];
+        assert_eq!(max_incident_edges(&nodes, &edges), 2);
+        assert_eq!(max_incident_edges(&nodes, &[]), 0);
     }
 
     #[test]
