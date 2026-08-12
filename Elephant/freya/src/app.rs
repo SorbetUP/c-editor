@@ -34,7 +34,10 @@ use shell_gestures::{RailDragState, SidebarResizeState};
 use shell_history::NavigationTarget;
 
 const SHELL_DIVIDER_WIDTH: f32 = 1.;
-const TOPBAR_DRAG_REGION_LEFT: f32 = 180.;
+const TOPBAR_DRAG_HIDDEN_LEFT: f32 = 180.;
+const TOPBAR_NAV_LEFT_DESKTOP: f32 = 56.;
+const TOPBAR_NAV_LEFT_MACOS: f32 = 84.;
+const TOPBAR_NAV_WIDTH: f32 = 76.;
 
 #[derive(Clone, Debug)]
 struct ShellState {
@@ -285,30 +288,6 @@ impl Component for SidebarNavHost {
     }
 }
 
-/// Freya's platform hook is isolated in a permanently mounted child component
-/// so the root shell does not gain a conditional hook when a vault is opened.
-#[derive(PartialEq)]
-struct TopBarDragRegion;
-
-impl Component for TopBarDragRegion {
-    fn render(&self) -> impl IntoElement {
-        let platform = freya::hooks::use_platform();
-        rect()
-            .position(
-                Position::new_absolute()
-                    .left(TOPBAR_DRAG_REGION_LEFT)
-                    .right(0.)
-                    .top(0.),
-            )
-            .height(Size::px(theme::TOPBAR_HEIGHT))
-            .on_pointer_down(move |event: Event<PointerEventData>| {
-                if event.is_primary() {
-                    platform.drag_window();
-                }
-            })
-    }
-}
-
 fn vertical_shell_divider(palette: theme::ThemePalette) -> Element {
     rect()
         .position(Position::new_absolute().right(0.).top(0.).bottom(0.))
@@ -317,13 +296,45 @@ fn vertical_shell_divider(palette: theme::ThemePalette) -> Element {
         .into_element()
 }
 
-fn top_bar_host(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+fn top_bar_drag_region(left: f32) -> Element {
     rect()
+        .position(Position::new_absolute().left(left).right(0.).top(0.))
+        .height(Size::px(theme::TOPBAR_HEIGHT))
+        .window_drag()
+        .into_element()
+}
+
+fn top_bar_drag_leading_region(width: f32) -> Element {
+    rect()
+        .position(Position::new_absolute().left(0.).top(0.))
+        .width(Size::px(width))
+        .height(Size::px(theme::TOPBAR_HEIGHT))
+        .window_drag()
+        .into_element()
+}
+
+fn top_bar_host(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    let sidebar_visible = state.read().sidebar_visible;
+    let topbar = rect()
         .width(Size::fill())
         .height(Size::px(theme::TOPBAR_HEIGHT))
-        .child(navigation::top_vault_bar(state, palette))
-        .child(TopBarDragRegion.into_element())
-        .into_element()
+        .child(navigation::top_vault_bar(state, palette));
+
+    if sidebar_visible {
+        let nav_left = if cfg!(target_os = "macos") {
+            TOPBAR_NAV_LEFT_MACOS
+        } else {
+            TOPBAR_NAV_LEFT_DESKTOP
+        };
+        topbar
+            .child(top_bar_drag_leading_region(nav_left))
+            .child(top_bar_drag_region(nav_left + TOPBAR_NAV_WIDTH))
+            .into_element()
+    } else {
+        topbar
+            .child(top_bar_drag_region(TOPBAR_DRAG_HIDDEN_LEFT))
+            .into_element()
+    }
 }
 
 fn icon_rail_host(
@@ -459,6 +470,9 @@ mod tests {
         assert_eq!(theme::RAIL_ACTION_SIZE, 34.);
         assert_eq!(theme::SIDEBAR_DEFAULT_WIDTH, 232.);
         assert_eq!(SHELL_DIVIDER_WIDTH, 1.);
-        assert_eq!(TOPBAR_DRAG_REGION_LEFT, 180.);
+        assert_eq!(TOPBAR_DRAG_HIDDEN_LEFT, 180.);
+        assert_eq!(TOPBAR_NAV_LEFT_DESKTOP, 56.);
+        assert_eq!(TOPBAR_NAV_LEFT_MACOS, 84.);
+        assert_eq!(TOPBAR_NAV_WIDTH, 76.);
     }
 }
