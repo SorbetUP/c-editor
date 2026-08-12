@@ -76,7 +76,15 @@ pub(super) fn integer_stepper(
     suffix: &'static str,
 ) -> Element {
     settings_preference_controls::integer_stepper(
-        state, title, description, key, value, minimum, maximum, step, suffix,
+        state,
+        title,
+        description,
+        key,
+        value,
+        minimum,
+        maximum,
+        step,
+        suffix,
     )
 }
 
@@ -87,9 +95,7 @@ pub(super) fn theme_variant(
     theme_id: &'static str,
     active: bool,
 ) -> Element {
-    settings_preference_controls::theme_variant(
-        state, label_text, description, theme_id, active,
-    )
+    settings_preference_controls::theme_variant(state, label_text, description, theme_id, active)
 }
 
 pub(super) fn navigation_visibility(
