@@ -48,11 +48,11 @@ fn dark_text() -> Color {
     Color::from_rgb(238, 242, 255)
 }
 
-/// Drawing sessions are scoped to a vault instead of being a process-wide singleton.
+/// Active native drawing editors are scoped to their vault root.
 ///
-/// Freya tests intentionally create several app instances in parallel, and desktop
-/// users may also have multiple vault-backed windows during a process lifetime. A
-/// single global `Option<DrawingSession>` lets one window steal another one's editor.
+/// A process-wide singleton lets one window or test fixture steal another
+/// vault's editor. Keeping a session per root also matches Elephant's ability
+/// to keep multiple vault-backed windows alive in one process.
 static ACTIVE_DRAWINGS: Mutex<Vec<(PathBuf, DrawingSession)>> = Mutex::new(Vec::new());
 
 #[derive(Clone, Debug, PartialEq)]
@@ -316,7 +316,7 @@ fn drawing_shell(
                 .flat()
                 .compact()
                 .width(Size::px(220.))
-                .on_submit(move |_| {
+                .on_submit(move |submitted_title: String| {
                     save_scene(
                         submit_shell_state,
                         submit_canvas_state,
@@ -324,6 +324,7 @@ fn drawing_shell(
                         submit_path,
                         submit_title,
                         true,
+                        Some(submitted_title),
                     );
                 })
                 .on_pre_key_down(|event: Event<KeyboardEventData>| {
@@ -376,18 +377,6 @@ fn drawing_shell(
         .overflow(Overflow::Clip)
         .a11y_alt(format!("Drawing editor {title_snapshot}"))
         .on_global_key_down(move |event: Event<KeyboardEventData>| {
-            if rename_allowed && event.key == Key::Named(NamedKey::Enter) {
-                save_scene(
-                    key_shell_state,
-                    key_canvas_state,
-                    key_status,
-                    key_path,
-                    key_title,
-                    true,
-                );
-                event.stop_propagation();
-                return;
-            }
             if event.key == Key::Named(NamedKey::Escape) {
                 if let Some(root) = key_root.as_deref() {
                     clear_active(root);
@@ -416,6 +405,7 @@ fn drawing_shell(
                                 key_path,
                                 key_title,
                                 rename_allowed,
+                                None,
                             );
                             event.stop_propagation();
                         }
@@ -487,6 +477,7 @@ fn drawing_shell(
                                     save_path,
                                     save_title,
                                     rename_allowed,
+                                    None,
                                 );
                                 event.stop_propagation();
                             },
@@ -518,6 +509,7 @@ fn save_scene(
     mut relative_path: State<String>,
     mut title: State<String>,
     rename_allowed: bool,
+    submitted_title: Option<String>,
 ) {
     let shell_snapshot = shell_state.read().clone();
     let root = shell_snapshot
@@ -527,7 +519,10 @@ fn save_scene(
     let library_path = shell_snapshot.library.current_path.as_str().to_owned();
     let old_path = relative_path.read().clone();
     let current_title = title.read().clone();
-    let requested_title = current_title.trim().to_owned();
+    let requested_title = submitted_title
+        .unwrap_or_else(|| current_title.clone())
+        .trim()
+        .to_owned();
     let requested_title = if requested_title.is_empty() {
         "Untitled Drawing".to_owned()
     } else {
