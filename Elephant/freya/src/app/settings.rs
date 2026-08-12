@@ -197,13 +197,9 @@ impl Component for SettingsPanelComponent {
                                 palette,
                             ))
                             .child(
-                                rect()
-                                    .width(Size::px(1.))
-                                    .height(Size::fill())
-                                    .background(theme::token_color(
-                                        palette,
-                                        theme::ThemeToken::Border,
-                                    )),
+                                rect().width(Size::px(1.)).height(Size::fill()).background(
+                                    theme::token_color(palette, theme::ThemeToken::Border),
+                                ),
                             )
                             .child(settings_controls::section_content(
                                 state,
