@@ -651,11 +651,16 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .maybe_child(error_view)
         .child(toolbar)
         .child(
-            ScrollView::new_controlled(scroll_controller)
+            rect()
                 .width(Size::fill())
                 .height(Size::fill())
                 .a11y_alt("Editor scroll")
-                .child(centered_body),
+                .child(
+                    ScrollView::new_controlled(scroll_controller)
+                        .width(Size::fill())
+                        .height(Size::fill())
+                        .child(centered_body),
+                ),
         )
         .child(footer)
         .a11y_alt("NoteEditorHost")
