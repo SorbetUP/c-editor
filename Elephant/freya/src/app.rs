@@ -33,6 +33,9 @@ use crate::{
 use shell_gestures::{RailDragState, SidebarResizeState};
 use shell_history::NavigationTarget;
 
+const SHELL_DIVIDER_WIDTH: f32 = 1.;
+const TOPBAR_DRAG_REGION_LEFT: f32 = 180.;
+
 #[derive(Clone, Debug)]
 struct ShellState {
     view: WorkspaceView,
@@ -261,8 +264,88 @@ struct SidebarNavHost {
 
 impl Component for SidebarNavHost {
     fn render(&self) -> impl IntoElement {
-        navigation::sidebar_nav(self.state, self.palette)
+        let snapshot = self.state.read().clone();
+        // Keep `sidebar_nav` unconditionally invoked inside this component: it
+        // owns `use_a11y()`, so hiding the sidebar must never change hook order.
+        let sidebar = navigation::sidebar_nav(self.state, self.palette);
+        let width = if snapshot.sidebar_visible {
+            f32::from(snapshot.sidebar_width.get())
+        } else {
+            0.
+        };
+        rect()
+            .width(Size::px(width))
+            .height(Size::fill())
+            .child(sidebar)
+            .maybe_child(
+                snapshot
+                    .sidebar_visible
+                    .then(|| vertical_shell_divider(self.palette)),
+            )
     }
+}
+
+/// Freya's platform hook is isolated in a permanently mounted child component
+/// so the root shell does not gain a conditional hook when a vault is opened.
+#[derive(PartialEq)]
+struct TopBarDragRegion;
+
+impl Component for TopBarDragRegion {
+    fn render(&self) -> impl IntoElement {
+        let platform = use_platform();
+        rect()
+            .position(
+                Position::new_absolute()
+                    .left(TOPBAR_DRAG_REGION_LEFT)
+                    .right(0.)
+                    .top(0.),
+            )
+            .height(Size::px(theme::TOPBAR_HEIGHT))
+            .on_pointer_down(move |event: Event<PointerEventData>| {
+                if event.is_primary() {
+                    platform.drag_window();
+                }
+            })
+    }
+}
+
+fn horizontal_shell_divider(palette: theme::ThemePalette) -> Element {
+    rect()
+        .position(Position::new_absolute().left(0.).right(0.).bottom(0.))
+        .height(Size::px(SHELL_DIVIDER_WIDTH))
+        .background(theme::token_color(palette, theme::ThemeToken::Border))
+        .into_element()
+}
+
+fn vertical_shell_divider(palette: theme::ThemePalette) -> Element {
+    rect()
+        .position(Position::new_absolute().right(0.).top(0.).bottom(0.))
+        .width(Size::px(SHELL_DIVIDER_WIDTH))
+        .background(theme::token_color(palette, theme::ThemeToken::Border))
+        .into_element()
+}
+
+fn top_bar_host(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    rect()
+        .width(Size::fill())
+        .height(Size::px(theme::TOPBAR_HEIGHT))
+        .child(navigation::top_vault_bar(state, palette))
+        .child(TopBarDragRegion.into_element())
+        .child(horizontal_shell_divider(palette))
+        .into_element()
+}
+
+fn icon_rail_host(
+    state: State<ShellState>,
+    palette: theme::ThemePalette,
+    effects: &settings_effects::SettingsEffects,
+) -> Element {
+    rect()
+        .width(Size::px(theme::RAIL_WIDTH))
+        .height(Size::fill())
+        .child(navigation::icon_rail(state, palette, effects))
+        .child(vertical_shell_divider(palette))
+        .into_element()
 }
 
 fn app_shell(state: State<ShellState>) -> Element {
@@ -299,13 +382,13 @@ fn app_shell(state: State<ShellState>) -> Element {
         .height(Size::fill())
         .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .color(theme::token_color(palette, theme::ThemeToken::Text))
-        .child(navigation::top_vault_bar(state, palette))
+        .child(top_bar_host(state, palette))
         .child(
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
                 .horizontal()
-                .child(navigation::icon_rail(state, palette, &settings_effects))
+                .child(icon_rail_host(state, palette, &settings_effects))
                 .child(SidebarNavHost { state, palette }.into_element())
                 .child(content),
         )
@@ -372,4 +455,19 @@ pub(super) fn route_notice(title: &str, body: &str) -> Element {
                 .text(body.to_string()),
         )
         .into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_chrome_overlays_preserve_active_tauri_geometry() {
+        assert_eq!(theme::TOPBAR_HEIGHT, 28.);
+        assert_eq!(theme::RAIL_WIDTH, 56.);
+        assert_eq!(theme::RAIL_ACTION_SIZE, 34.);
+        assert_eq!(theme::SIDEBAR_DEFAULT_WIDTH, 232.);
+        assert_eq!(SHELL_DIVIDER_WIDTH, 1.);
+        assert_eq!(TOPBAR_DRAG_REGION_LEFT, 180.);
+    }
 }
