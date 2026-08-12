@@ -124,6 +124,10 @@ jobs:
           failures=0
           for file in Elephant/freya/tests/*.rs; do
             suite="$(basename "$file" .rs)"
+            if [ "$suite" = "differential_freya_capture" ]; then
+              echo "::notice::Skipping orchestrator-only suite $suite; it is exercised by the differential parity workflow."
+              continue
+            fi
             echo "::group::Freya suite: $suite"
             set +e
             timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test "$suite" -- --test-threads=1 2>&1 | tee "/tmp/freya-${suite}.log"
