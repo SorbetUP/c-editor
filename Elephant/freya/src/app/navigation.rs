@@ -12,8 +12,11 @@ use super::{
     ShellState,
 };
 
-const TAURI_TOPBAR_HEIGHT: f32 = 32.;
+// `app-shell-runtime-fixes.css` is imported after `app-shell.css`, so these are
+// the final runtime dimensions rather than the earlier parity overrides.
+const TAURI_TOPBAR_HEIGHT: f32 = 28.;
 const TAURI_TOPBAR_NAV_WIDTH: f32 = 92.;
+const TAURI_RAIL_WIDTH: f32 = 48.;
 const TREE_ROW_HEIGHT: f32 = 36.;
 const TREE_DEPTH_INDENT: f32 = 14.;
 const TREE_ROW_HORIZONTAL_PADDING: f32 = 10.;
@@ -208,7 +211,7 @@ pub(super) fn icon_rail(
         ));
 
     rect()
-        .width(Size::px(theme::RAIL_WIDTH))
+        .width(Size::px(TAURI_RAIL_WIDTH))
         .height(Size::fill())
         .background(theme::token_color(palette, theme::ThemeToken::Sidebar))
         .padding(Gaps::new(rail_padding_top, 0., 0., 0.))
@@ -899,8 +902,9 @@ mod tests {
 
     #[test]
     fn tauri_navigation_metrics_are_kept_explicit() {
-        assert_eq!(TAURI_TOPBAR_HEIGHT, 32.);
+        assert_eq!(TAURI_TOPBAR_HEIGHT, 28.);
         assert_eq!(TAURI_TOPBAR_NAV_WIDTH, 92.);
+        assert_eq!(TAURI_RAIL_WIDTH, 48.);
         assert_eq!(TREE_ROW_HEIGHT, 36.);
         assert_eq!(TREE_DEPTH_INDENT, 14.);
         assert_eq!(TREE_TOGGLE_SIZE, 22.);
