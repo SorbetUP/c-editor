@@ -30,7 +30,7 @@ jobs:
   visual-parity:
     name: Tauri reference vs Freya
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
     steps:
       - name: Checkout candidate
         uses: actions/checkout@v4
@@ -68,6 +68,8 @@ jobs:
           cache: pnpm
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: wasm32-unknown-unknown
       - name: Install pinned Rust CLIs
         shell: bash
         run: |
