@@ -89,7 +89,7 @@ fn read_shell_preferences(fixture: &FixtureVault) -> Value {
 }
 
 #[test]
-fn navigation_history_updates_visible_controls_and_round_trips_back_forward() {
+fn navigation_history_keeps_root_tree_expansion_and_round_trips_back_forward() {
     let fixture = FixtureVault::new();
     let root = fixture.path().to_path_buf();
     let (mut runner, ()) = TestingRunner::new(
@@ -101,22 +101,38 @@ fn navigation_history_updates_visible_controls_and_round_trips_back_forward() {
 
     assert_eq!(rect_opacity(&runner, "Retour"), Some(0.3));
     assert_eq!(rect_opacity(&runner, "Avancer"), Some(0.3));
+    assert!(accessible_nodes(&runner, "Alpha").len() >= 1);
+    assert!(accessible_nodes(&runner, "Plan").is_empty());
 
     click_label(&mut runner, "Projects");
     runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Alpha").len() >= 1);
     assert!(accessible_nodes(&runner, "Plan").len() >= 1);
+    assert!(accessible_nodes(&runner, "Collapse Projects").len() >= 1);
     assert_eq!(rect_opacity(&runner, "Retour"), Some(1.0));
 
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
     assert!(accessible_nodes(&runner, "Alpha").len() >= 1);
-    assert!(accessible_nodes(&runner, "Plan").is_empty());
+    assert!(
+        accessible_nodes(&runner, "Plan").len() >= 1,
+        "Tauri SidebarTreeEntry keeps an explicitly expanded folder open when navigation returns to root"
+    );
     assert_eq!(rect_opacity(&runner, "Avancer"), Some(1.0));
+
+    click_label(&mut runner, "Collapse Projects");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Plan").is_empty());
+    assert!(accessible_nodes(&runner, "Expand Projects").len() >= 1);
 
     click_label(&mut runner, "Avancer");
     runner.sync_and_update();
-    assert!(accessible_nodes(&runner, "Plan").len() >= 1);
-    assert!(accessible_nodes(&runner, "Alpha").is_empty());
+    assert!(accessible_nodes(&runner, "Alpha").len() >= 1);
+    assert!(
+        accessible_nodes(&runner, "Plan").len() >= 1,
+        "the active folder branch must auto-expand after a history state change"
+    );
+    assert!(accessible_nodes(&runner, "Collapse Projects").len() >= 1);
 }
 
 #[test]
