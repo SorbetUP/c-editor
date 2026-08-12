@@ -309,14 +309,6 @@ impl Component for TopBarDragRegion {
     }
 }
 
-fn horizontal_shell_divider(palette: theme::ThemePalette) -> Element {
-    rect()
-        .position(Position::new_absolute().left(0.).right(0.).bottom(0.))
-        .height(Size::px(SHELL_DIVIDER_WIDTH))
-        .background(theme::token_color(palette, theme::ThemeToken::Border))
-        .into_element()
-}
-
 fn vertical_shell_divider(palette: theme::ThemePalette) -> Element {
     rect()
         .position(Position::new_absolute().right(0.).top(0.).bottom(0.))
@@ -331,7 +323,6 @@ fn top_bar_host(state: State<ShellState>, palette: theme::ThemePalette) -> Eleme
         .height(Size::px(theme::TOPBAR_HEIGHT))
         .child(navigation::top_vault_bar(state, palette))
         .child(TopBarDragRegion.into_element())
-        .child(horizontal_shell_divider(palette))
         .into_element()
 }
 
