@@ -71,15 +71,21 @@ pub(crate) fn error_accessibility_label(error: &str) -> &'static str {
 
 pub(super) fn request_create(mut state: State<ShellState>) {
     eprintln!("[freya][drawing] action:start action=create renderer=native");
-    let root = state
-        .read()
+    let snapshot = state.read().clone();
+    let root = snapshot
         .vault
         .as_ref()
         .map(|vault| vault.root().to_path_buf());
+    let current_directory = snapshot.library.current_path.as_str().to_owned();
+    let create_directory = current_directory.clone();
     let result = root
         .ok_or_else(|| "No vault selected.".to_owned())
         .and_then(|root| {
-            let created = storage::create_scene(&root, "Untitled Drawing")?;
+            let created = storage::create_standalone_scene(
+                &root,
+                &create_directory,
+                "Untitled Drawing",
+            )?;
             let scene = storage::read_scene(&root, &created.relative_path)?;
             let session = session_from_read(scene)?;
             Ok((created.path, session))
@@ -92,7 +98,9 @@ pub(super) fn request_create(mut state: State<ShellState>) {
                 path.display()
             );
             set_active(session);
-            state.write().error = None;
+            let mut shell = state.write();
+            shell.error = None;
+            shell.reload_directory(&current_directory);
         }
         Err(error) => {
             eprintln!("[freya][drawing] action:failure action=create error={error}");
@@ -165,6 +173,21 @@ fn clear_active() {
     }
 }
 
+fn sync_active_canvas(relative_path: &str, canvas: &DrawingCanvasState) {
+    let update = |active: &mut Option<DrawingSession>| {
+        if let Some(session) = active
+            .as_mut()
+            .filter(|session| session.relative_path == relative_path)
+        {
+            session.canvas = canvas.clone();
+        }
+    };
+    match ACTIVE_DRAWING.lock() {
+        Ok(mut active) => update(&mut active),
+        Err(poisoned) => update(&mut poisoned.into_inner()),
+    }
+}
+
 fn active_session() -> Option<DrawingSession> {
     match ACTIVE_DRAWING.lock() {
         Ok(active) => active.clone(),
@@ -218,7 +241,7 @@ fn drawing_shell(
 
     let mut close_state = shell_state;
     let mut key_shell_state = shell_state;
-    let mut save_shell_state = shell_state;
+    let save_shell_state = shell_state;
     let save_canvas_state = canvas_state;
     let save_status = status;
     let save_path = relative_path.clone();
@@ -263,6 +286,10 @@ fn drawing_shell(
                         }
                         "z" => {
                             key_canvas_state.write().undo();
+                            event.stop_propagation();
+                        }
+                        "y" => {
+                            key_canvas_state.write().redo();
                             event.stop_propagation();
                         }
                         _ => {}
@@ -364,17 +391,18 @@ fn save_scene(
         .vault
         .as_ref()
         .map(|vault| vault.root().to_path_buf());
+    let canvas_snapshot = canvas_state.read().clone();
     let result = root
         .ok_or_else(|| "No vault selected.".to_owned())
         .and_then(|root| {
-            canvas_state
-                .read()
+            canvas_snapshot
                 .serialize_json()
                 .and_then(|raw| storage::write_scene(&root, relative_path, &raw))
         });
     match result {
         Ok(()) => {
             eprintln!("[freya][drawing] action:complete action=save path={relative_path}");
+            sync_active_canvas(relative_path, &canvas_snapshot);
             *status.write() = "Saved".to_owned();
             shell_state.write().error = None;
         }
@@ -646,4 +674,47 @@ fn svg_icon(icon: DrawingIcon, color: Color, size: f32) -> Element {
     .stroke(color)
     .stroke_width(2.)
     .into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn canvas_with_elements(count: usize) -> DrawingCanvasState {
+        let elements = (0..count)
+            .map(|index| {
+                format!(
+                    r#"{{"id":"rect-{index}","type":"rectangle","x":0,"y":0,"width":10,"height":10}}"#
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        DrawingCanvasState::from_json(&format!(
+            r#"{{"type":"excalidraw","elements":[{elements}],"appState":{{}},"files":{{}}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn save_snapshot_refreshes_the_active_session_only_for_the_same_path() {
+        clear_active();
+        set_active(DrawingSession {
+            relative_path: "Sketch.excalidraw".to_owned(),
+            title: "Sketch".to_owned(),
+            canvas: canvas_with_elements(0),
+        });
+
+        sync_active_canvas("Other.excalidraw", &canvas_with_elements(2));
+        assert_eq!(
+            active_session().unwrap().canvas.renderable_elements().len(),
+            0
+        );
+
+        sync_active_canvas("Sketch.excalidraw", &canvas_with_elements(2));
+        assert_eq!(
+            active_session().unwrap().canvas.renderable_elements().len(),
+            2
+        );
+        clear_active();
+    }
 }
