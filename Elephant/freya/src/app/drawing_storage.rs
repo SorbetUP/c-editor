@@ -3,7 +3,9 @@
 //! The `.excalidraw` JSON is the canonical editable document. A PNG remains a
 //! compatible optional preview/export sidecar, matching the Vue/Tauri path,
 //! but native editing must not fail merely because that derived preview is
-//! absent or stale.
+//! absent or stale. New library drawings are standalone `.excalidraw` files in
+//! the current visible directory so closing the editor never strands an orphan
+//! inside the hidden `.assets` directory.
 
 use serde_json::{json, Value};
 use std::{
@@ -29,6 +31,9 @@ pub(super) struct CreatedScene {
     pub(super) relative_path: String,
 }
 
+/// Create a hidden sidecar scene for image-backed/Tauri-compatible assets.
+///
+/// Native library creation should use [`create_standalone_scene`] instead.
 pub(super) fn create_scene(root: &Path, title: &str) -> Result<CreatedScene, String> {
     let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let assets = root.join(ASSETS_DIR);
@@ -39,9 +44,47 @@ pub(super) fn create_scene(root: &Path, title: &str) -> Result<CreatedScene, Str
             assets.display()
         )
     })?;
+    create_scene_at(&root, &assets, title)
+}
 
+/// Create a visible, standalone `.excalidraw` document in a library directory.
+pub(super) fn create_standalone_scene(
+    root: &Path,
+    relative_directory: &str,
+    title: &str,
+) -> Result<CreatedScene, String> {
+    let root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let directory = if relative_directory.trim().is_empty() {
+        root.clone()
+    } else {
+        let relative = safe_relative_path(relative_directory)?;
+        let candidate = root.join(relative);
+        reject_symlink(&candidate, "drawing directory")?;
+        let canonical = fs::canonicalize(&candidate).map_err(|error| {
+            format!(
+                "Drawing directory unavailable at {}: {error}",
+                candidate.display()
+            )
+        })?;
+        if !canonical.starts_with(&root) {
+            return Err(format!(
+                "Refusing drawing directory outside vault: {relative_directory}"
+            ));
+        }
+        if !canonical.is_dir() {
+            return Err(format!(
+                "Drawing directory unavailable at {}: expected a directory",
+                canonical.display()
+            ));
+        }
+        canonical
+    };
+    create_scene_at(&root, &directory, title)
+}
+
+fn create_scene_at(root: &Path, directory: &Path, title: &str) -> Result<CreatedScene, String> {
     let safe_title = sanitize_asset_name(title, "Untitled Drawing");
-    let (path, resolved_title) = unique_scene_path(&assets, &safe_title);
+    let (path, resolved_title) = unique_scene_path(directory, &safe_title);
     let scene = json!({
         "kind": "excalidraw",
         "type": "excalidraw",
@@ -64,7 +107,7 @@ pub(super) fn create_scene(root: &Path, title: &str) -> Result<CreatedScene, Str
         )
     })?;
     Ok(CreatedScene {
-        relative_path: relative_from_root(&root, &path)?,
+        relative_path: relative_from_root(root, &path)?,
         path,
     })
 }
@@ -267,14 +310,14 @@ fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
     }
 }
 
-fn unique_scene_path(assets: &Path, base_title: &str) -> (PathBuf, String) {
+fn unique_scene_path(directory: &Path, base_title: &str) -> (PathBuf, String) {
     for suffix in 1usize.. {
         let title = if suffix == 1 {
             base_title.to_owned()
         } else {
             format!("{base_title} {suffix}")
         };
-        let path = assets.join(format!("{title}.excalidraw"));
+        let path = directory.join(format!("{title}.excalidraw"));
         if !path.exists() {
             return (path, title);
         }
@@ -436,6 +479,29 @@ mod tests {
         assert_eq!(reopened_json["elements"][0]["width"], 100.0);
         assert_eq!(reopened_json["elements"][1]["type"], "arrow");
         assert_eq!(reopened_json["elements"][1]["points"][1], json!([40.0, 30.0]));
+    }
+
+    #[test]
+    fn standalone_scene_is_created_in_the_visible_current_directory() {
+        let vault = TestVault::new();
+        fs::create_dir_all(vault.0.join("Projects")).unwrap();
+
+        let created = create_standalone_scene(&vault.0, "Projects", "Sketch").unwrap();
+
+        assert_eq!(created.relative_path, "Projects/Sketch.excalidraw");
+        assert!(vault.0.join(&created.relative_path).is_file());
+        assert!(!created.relative_path.contains("/.assets/"));
+        assert_eq!(
+            read_scene(&vault.0, &created.relative_path).unwrap().title,
+            "Sketch"
+        );
+    }
+
+    #[test]
+    fn standalone_scene_rejects_unsafe_or_missing_directories() {
+        let vault = TestVault::new();
+        assert!(create_standalone_scene(&vault.0, "../outside", "Sketch").is_err());
+        assert!(create_standalone_scene(&vault.0, "missing", "Sketch").is_err());
     }
 
     #[test]
