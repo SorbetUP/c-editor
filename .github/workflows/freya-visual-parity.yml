@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: freya-visual-parity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   TAURI_REFERENCE_SHA: a49531551dcb7a1e9178601edb36f98bbe4b7f28
   FREYA_PARITY_HARD_GATE: "0"
@@ -76,8 +80,6 @@ jobs:
           workspaces: |
             Elephant/freya -> target
             .tauri-reference/Elephant/backend/tauri -> target
-      - name: Install candidate dependencies
-        run: pnpm install --frozen-lockfile
       - name: Install Tauri reference dependencies
         run: pnpm --dir .tauri-reference install --frozen-lockfile
       - name: Validate parity harness
@@ -190,6 +192,7 @@ jobs:
           if-no-files-found: warn
           compression-level: 6
           path: |
+            build/scripts/freya-parity/coverage.json
             test-results/freya-parity/tauri/*/static.png
             test-results/freya-parity/tauri/*/stability.png
             test-results/freya-parity/tauri/metadata.json
