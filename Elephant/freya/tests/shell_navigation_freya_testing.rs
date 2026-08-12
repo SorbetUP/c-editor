@@ -20,6 +20,7 @@ impl FixtureVault {
             .as_nanos();
         let root = std::env::temp_dir().join(format!("elephant-freya-navigation-{stamp}"));
         fs::create_dir_all(root.join("Projects")).expect("create fixture directories");
+        fs::create_dir_all(root.join("Archive")).expect("create archive fixture directory");
         fs::write(root.join("Alpha.md"), "# Alpha\n\nA fixture note\n")
             .expect("write fixture note");
         fs::write(
@@ -72,6 +73,16 @@ fn center(node: &TestingNode) -> (f64, f64) {
 
 fn click_label(runner: &mut TestingRunner, label: &str) {
     runner.click_cursor(center(&require_labeled_node(runner, label)));
+}
+
+fn drag_label_to_label(runner: &mut TestingRunner, source: &str, target: &str) {
+    let source_center = center(&require_labeled_node(runner, source));
+    let target_center = center(&require_labeled_node(runner, target));
+    runner.press_cursor(source_center);
+    runner.move_cursor(target_center);
+    runner.sync_and_update();
+    runner.release_cursor(target_center);
+    runner.sync_and_update();
 }
 
 fn rect_opacity(runner: &TestingRunner, label: &str) -> Option<f32> {
@@ -257,6 +268,35 @@ fn rail_search_dragged_before_sidebar_toggle_persists_and_restores() {
                 .area
                 .min_y()
     );
+}
+
+#[test]
+fn sidebar_drag_moves_note_between_folder_and_root_on_disk() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Projects");
+    runner.sync_and_update();
+    assert!(fixture.path().join("Projects/Plan.md").is_file());
+    assert!(accessible_nodes(&runner, "Plan").len() >= 1);
+
+    drag_label_to_label(&mut runner, "Plan", "Archive");
+    assert!(!fixture.path().join("Projects/Plan.md").exists());
+    assert!(fixture.path().join("Archive/Plan.md").is_file());
+
+    click_label(&mut runner, "Archive");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Plan").len() >= 1);
+
+    drag_label_to_label(&mut runner, "Plan", "All notes");
+    assert!(!fixture.path().join("Archive/Plan.md").exists());
+    assert!(fixture.path().join("Plan.md").is_file());
 }
 
 #[test]
