@@ -1,0 +1,194 @@
+name: Freya visual parity
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - "Elephant/freya/**"
+      - "Elephant/frontend/**"
+      - "Elephant/backend/tauri/**"
+      - "migration/freya/differential-scenarios.json"
+      - "build/scripts/freya-parity/**"
+      - ".github/workflows/freya-visual-parity.yml"
+
+permissions:
+  contents: read
+
+env:
+  TAURI_REFERENCE_SHA: a49531551dcb7a1e9178601edb36f98bbe4b7f28
+  FREYA_PARITY_HARD_GATE: "0"
+  DISPLAY: ":99"
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  visual-parity:
+    name: Tauri reference vs Freya
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - name: Checkout immutable Tauri reference
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAURI_REFERENCE_SHA }}
+          path: .tauri-reference
+          persist-credentials: false
+
+      - name: Verify immutable reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git -C .tauri-reference rev-parse HEAD)"
+          test "$actual" = "$TAURI_REFERENCE_SHA"
+          echo "Tauri reference: $actual"
+
+      - name: Install Linux visual runtime dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file imagemagick libayatana-appindicator3-dev \
+            libgtk-3-dev librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev \
+            openbox patchelf wget x11-utils xdotool xvfb
+          python3 -m pip install --disable-pip-version-check pillow==12.3.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+          run_install: false
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/freya -> target
+            .tauri-reference/Elephant/backend/tauri -> target
+
+      - name: Install candidate dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Tauri reference dependencies
+        run: pnpm --dir .tauri-reference install --frozen-lockfile
+
+      - name: Validate parity harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s build/scripts/freya-parity -p 'test_*.py' -v
+          node --check build/scripts/freya-parity/prepare-fixture.mjs
+          node --check build/scripts/freya-parity/stage-freya-captures.mjs
+          node --check build/scripts/freya-parity/capture-tauri-reference.mjs
+
+      - name: Start deterministic X11 display
+        shell: bash
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1600x1000x24 -nolisten tcp > /tmp/freya-parity-xvfb.log 2>&1 &
+          sleep 1
+          openbox > /tmp/freya-parity-openbox.log 2>&1 &
+          sleep 2
+          xdpyinfo -display :99 >/dev/null
+
+      - name: Capture real Tauri reference checkpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          node build/scripts/freya-parity/capture-tauri-reference.mjs \
+            --repo-root .tauri-reference \
+            --scenario migration/freya/differential-scenarios.json \
+            --config build/scripts/freya-parity/checkpoints.json \
+            --output test-results/freya-parity/tauri \
+            --expected-sha "$TAURI_REFERENCE_SHA"
+
+      - name: Prepare identical Freya fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          node build/scripts/freya-parity/prepare-fixture.mjs \
+            --scenario migration/freya/differential-scenarios.json \
+            --root test-results/freya-parity/freya-fixture \
+            > test-results/freya-parity/freya-fixture.json
+
+      - name: Capture real Freya renderer checkpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/freya-parity/freya-raw
+          scenario="$(realpath migration/freya/differential-scenarios.json)"
+          output="$(realpath test-results/freya-parity/freya-raw)"
+          fixture="$(realpath test-results/freya-parity/freya-fixture)"
+          command_sha="$(printf '%s' 'cargo test differential_freya_capture' | sha256sum | cut -d' ' -f1)"
+          DIFFERENTIAL_SCENARIO_PATH="$scenario" \
+          DIFFERENTIAL_OUTPUT_DIR="$output" \
+          DIFFERENTIAL_FIXTURE_ROOT="$fixture" \
+          DIFFERENTIAL_EXPECTED_VIEWPORT_JSON='{"width":1280,"height":840,"scaleFactor":1,"deviceScaleFactor":1,"fullPage":false,"colorScheme":"light","locale":"en-US"}' \
+          DIFFERENTIAL_RUN_ID="freya-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+          DIFFERENTIAL_COMMAND_SHA256="$command_sha" \
+          DIFFERENTIAL_CAPTURE_NONCE="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}" \
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test differential_freya_capture \
+            capture_shared_fourteen_action_freya_journey \
+            -- --test-threads=1 --nocapture
+          node build/scripts/freya-parity/stage-freya-captures.mjs \
+            --source test-results/freya-parity/freya-raw \
+            --output test-results/freya-parity/freya \
+            --config build/scripts/freya-parity/checkpoints.json
+
+      - name: Compare visual parity
+        id: compare
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate=()
+          if [ "$FREYA_PARITY_HARD_GATE" = "1" ]; then gate=(--hard-gate); fi
+          python3 build/scripts/freya-parity/compare.py \
+            --reference test-results/freya-parity/tauri \
+            --candidate test-results/freya-parity/freya \
+            --config build/scripts/freya-parity/checkpoints.json \
+            --output test-results/freya-parity/comparison \
+            "${gate[@]}"
+
+      - name: Publish parity summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f test-results/freya-parity/comparison/summary.md ]; then
+            cat test-results/freya-parity/comparison/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Freya visual parity" >> "$GITHUB_STEP_SUMMARY"
+            echo "INFRA_ERROR: the capture pipeline did not reach comparison." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Tauri reference SHA: \`$TAURI_REFERENCE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Hard parity gate: \`$FREYA_PARITY_HARD_GATE\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload compact visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freya-visual-parity-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 3
+          if-no-files-found: warn
+          path: |
+            test-results/freya-parity/tauri/*/static.png
+            test-results/freya-parity/tauri/metadata.json
+            test-results/freya-parity/freya/*/static.png
+            test-results/freya-parity/freya/staging.json
+            test-results/freya-parity/comparison/report.json
+            test-results/freya-parity/comparison/summary.md
+            test-results/freya-parity/comparison/diffs/*.png

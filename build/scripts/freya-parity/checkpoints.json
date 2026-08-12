@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "scenario": "migration/freya/differential-scenarios.json",
+  "checkpoints": [
+    { "id": "startup", "afterAction": "launch" },
+    { "id": "search-results", "afterAction": "search-alpha" },
+    { "id": "note-open", "afterAction": "open-alpha-note" },
+    { "id": "note-edited", "afterAction": "edit-alpha-note" },
+    { "id": "create-menu-open", "afterAction": "open-create-menu" }
+  ],
+  "thresholds": {
+    "channelDelta": 12,
+    "maxSignificantPixelRatio": 0.005,
+    "maxNormalizedMeanAbsoluteError": 0.004,
+    "minBlockSsim": 0.985
+  }
+}
