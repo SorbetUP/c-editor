@@ -348,6 +348,7 @@ fn markdown_asset_path(markdown: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::canvas::{DrawingCanvasState, DrawingTool};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestVault(PathBuf);
@@ -403,6 +404,38 @@ mod tests {
         let reopened_json: Value = serde_json::from_str(&reopened.raw).unwrap();
         assert_eq!(reopened_json["elements"][0]["id"], "rect-1");
         assert_eq!(reopened_json["futureTopLevelField"]["preserved"], true);
+    }
+
+    #[test]
+    fn native_engine_draw_save_close_reopen_roundtrip() {
+        let vault = TestVault::new();
+        let created = create_scene(&vault.0, "Native Roundtrip").unwrap();
+        let loaded = read_scene(&vault.0, &created.relative_path).unwrap();
+        let mut canvas = DrawingCanvasState::from_json(&loaded.raw).unwrap();
+
+        canvas.set_tool(DrawingTool::Rectangle);
+        canvas.begin_pointer([-20., 10.]);
+        canvas.move_pointer([80., 70.]);
+        canvas.end_pointer();
+        canvas.set_tool(DrawingTool::Arrow);
+        canvas.begin_pointer([5., 5.]);
+        canvas.move_pointer([45., 35.]);
+        canvas.end_pointer();
+
+        let raw = canvas.serialize_json().unwrap();
+        write_scene(&vault.0, &created.relative_path, &raw).unwrap();
+        drop(canvas);
+
+        let reopened = read_scene(&vault.0, &created.relative_path).unwrap();
+        assert_eq!(reopened.element_count, 2);
+        let reopened_canvas = DrawingCanvasState::from_json(&reopened.raw).unwrap();
+        let reopened_json: Value =
+            serde_json::from_str(&reopened_canvas.serialize_json().unwrap()).unwrap();
+        assert_eq!(reopened_json["elements"][0]["type"], "rectangle");
+        assert_eq!(reopened_json["elements"][0]["x"], -20.0);
+        assert_eq!(reopened_json["elements"][0]["width"], 100.0);
+        assert_eq!(reopened_json["elements"][1]["type"], "arrow");
+        assert_eq!(reopened_json["elements"][1]["points"][1], json!([40.0, 30.0]));
     }
 
     #[test]
