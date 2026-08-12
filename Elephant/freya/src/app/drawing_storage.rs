@@ -108,14 +108,21 @@ pub(super) fn write_scene(root: &Path, relative_path: &str, raw: &str) -> Result
     let scene_path = scene_path(&canonical_root, relative_path)?;
     validate_scene(raw, &scene_path)?;
 
-    let temp_path = scene_path.with_extension(format!("excalidraw.freya-tmp-{}", std::process::id()));
+    let temp_path =
+        scene_path.with_extension(format!("excalidraw.freya-tmp-{}", std::process::id()));
     if temp_path.exists() {
         fs::remove_file(&temp_path).map_err(|error| {
-            format!("Unable to clear stale drawing save {}: {error}", temp_path.display())
+            format!(
+                "Unable to clear stale drawing save {}: {error}",
+                temp_path.display()
+            )
         })?;
     }
     fs::write(&temp_path, raw.as_bytes()).map_err(|error| {
-        format!("Unable to stage drawing save {}: {error}", temp_path.display())
+        format!(
+            "Unable to stage drawing save {}: {error}",
+            temp_path.display()
+        )
     })?;
 
     if let Err(rename_error) = fs::rename(&temp_path, &scene_path) {
@@ -247,12 +254,16 @@ fn scene_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
 
 fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            Err(format!("Refusing symlinked {label}: {}", path.display()))
-        }
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
+            "Refusing symlinked {label}: {}",
+            path.display()
+        )),
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("Unable to inspect {label} {}: {error}", path.display())),
+        Err(error) => Err(format!(
+            "Unable to inspect {label} {}: {error}",
+            path.display()
+        )),
     }
 }
 
@@ -272,11 +283,8 @@ fn unique_scene_path(assets: &Path, base_title: &str) -> (PathBuf, String) {
 }
 
 fn sanitize_asset_name(value: &str, fallback: &str) -> String {
-    let filename = value
-        .replace('\\', "/")
-        .rsplit('/')
-        .next()
-        .unwrap_or(fallback);
+    let normalized = value.replace('\\', "/");
+    let filename = normalized.rsplit('/').next().unwrap_or(fallback);
     let cleaned = filename
         .chars()
         .map(|character| {
@@ -308,7 +316,10 @@ fn safe_relative_path(value: &str) -> Result<PathBuf, String> {
     if path.as_os_str().is_empty()
         || path.is_absolute()
         || path.components().any(|component| {
-            matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_))
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
         })
     {
         return Err(format!("Refusing unsafe drawing path: {value}"));
@@ -400,7 +411,9 @@ mod tests {
         let first = create_scene(&vault.0, "Untitled Drawing").unwrap();
         let second = create_scene(&vault.0, "Untitled Drawing").unwrap();
         assert_ne!(first.path, second.path);
-        assert!(second.relative_path.ends_with("Untitled Drawing 2.excalidraw"));
+        assert!(second
+            .relative_path
+            .ends_with("Untitled Drawing 2.excalidraw"));
     }
 
     #[test]
@@ -409,11 +422,17 @@ mod tests {
         let created = create_scene(&vault.0, "Linked").unwrap();
         let png_relative = created.relative_path.replace(".excalidraw", ".png");
         fs::write(vault.0.join(&png_relative), b"png").unwrap();
-        assert_eq!(read_scene(&vault.0, &png_relative).unwrap().title, "Linked");
+        assert_eq!(
+            read_scene(&vault.0, &png_relative).unwrap().title,
+            "Linked"
+        );
 
         let note = vault.0.join("drawing-note.md");
         fs::write(&note, format!("![Linked]({png_relative})")).unwrap();
-        assert_eq!(read_scene(&vault.0, "drawing-note.md").unwrap().title, "Linked");
+        assert_eq!(
+            read_scene(&vault.0, "drawing-note.md").unwrap().title,
+            "Linked"
+        );
     }
 
     #[test]
@@ -421,8 +440,12 @@ mod tests {
         let vault = TestVault::new();
         assert!(read_scene(&vault.0, "../outside.excalidraw").is_err());
         let created = create_scene(&vault.0, "Invalid").unwrap();
-        let error = write_scene(&vault.0, &created.relative_path, r#"{"type":"other","elements":[]}"#)
-            .unwrap_err();
+        let error = write_scene(
+            &vault.0,
+            &created.relative_path,
+            r#"{"type":"other","elements":[]}"#,
+        )
+        .unwrap_err();
         assert!(error.contains("expected type=excalidraw"));
     }
 }
