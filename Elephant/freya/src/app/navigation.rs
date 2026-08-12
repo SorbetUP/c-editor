@@ -22,6 +22,83 @@ const TREE_DEPTH_INDENT: f32 = 14.;
 const TREE_ROW_HORIZONTAL_PADDING: f32 = 10.;
 const TREE_TOGGLE_SIZE: f32 = 22.;
 const TAGS_HEADER_HEIGHT: f32 = 36.;
+const SIDEBAR_DRAG_THRESHOLD: f64 = 4.;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct SidebarEntryDrag {
+    source: Option<String>,
+    source_is_directory: bool,
+    start_x: f64,
+    start_y: f64,
+    moved: bool,
+    target: Option<String>,
+    target_allowed: bool,
+}
+
+impl SidebarEntryDrag {
+    fn begin(&mut self, source: &str, source_is_directory: bool, x: f64, y: f64) {
+        self.source = Some(normalize_sidebar_path(source));
+        self.source_is_directory = source_is_directory;
+        self.start_x = x;
+        self.start_y = y;
+        self.moved = false;
+        self.target = None;
+        self.target_allowed = false;
+    }
+
+    fn update_pointer(&mut self, x: f64, y: f64) {
+        if self.source.is_none() {
+            return;
+        }
+        if (x - self.start_x).abs() >= SIDEBAR_DRAG_THRESHOLD
+            || (y - self.start_y).abs() >= SIDEBAR_DRAG_THRESHOLD
+        {
+            self.moved = true;
+        }
+    }
+
+    fn enter_target(&mut self, target: &str) {
+        let Some(source) = self.source.as_deref() else {
+            return;
+        };
+        let target = normalize_sidebar_path(target);
+        self.target_allowed = sidebar_can_drop(source, self.source_is_directory, &target);
+        self.target = Some(target);
+    }
+
+    fn leave_target(&mut self, target: &str) {
+        let target = normalize_sidebar_path(target);
+        if self.target.as_deref() == Some(target.as_str()) {
+            self.target = None;
+            self.target_allowed = false;
+        }
+    }
+
+    fn is_source(&self, path: &str) -> bool {
+        self.source.as_deref() == Some(normalize_sidebar_path(path).as_str()) && self.moved
+    }
+
+    fn target_state(&self, path: &str) -> Option<bool> {
+        let path = normalize_sidebar_path(path);
+        (self.source.is_some() && self.target.as_deref() == Some(path.as_str()))
+            .then_some(self.target_allowed)
+    }
+
+    fn finish(&mut self) -> Option<(String, String)> {
+        let result = if self.moved && self.target_allowed {
+            self.source
+                .clone()
+                .zip(self.target.clone())
+                .filter(|(source, target)| {
+                    sidebar_can_drop(source, self.source_is_directory, target)
+                })
+        } else {
+            None
+        };
+        *self = Self::default();
+        result
+    }
+}
 
 pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
     let can_go_back = state.read().can_go_back();
@@ -457,6 +534,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     // while the sidebar is hidden.
     let resizer_a11y_id = use_a11y();
     let expanded_paths = use_state(HashSet::<String>::new);
+    let sidebar_drag = use_state(SidebarEntryDrag::default);
     let snapshot = state.read().clone();
     if !snapshot.sidebar_visible {
         return rect()
@@ -465,15 +543,20 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             .into_element();
     }
 
+    let drag_snapshot = sidebar_drag.read().clone();
     let all_notes_hovered = snapshot.hovered_target.as_deref() == Some("sidebar:all");
     let all_notes_active = snapshot.view == crate::navigation_contract::WorkspaceView::Notes
         && snapshot.library.current_path.as_str().is_empty()
         && snapshot.editor.is_none()
         && !snapshot.search_open
         && !snapshot.settings_open;
+    let all_notes_drop = drag_snapshot.target_state("");
     let sidebar_width = f32::from(snapshot.sidebar_width.get());
+    let mut all_notes_open_state = state;
     let mut all_notes_enter = state;
     let mut all_notes_leave = state;
+    let mut all_notes_drag_enter = sidebar_drag;
+    let mut all_notes_drag_leave = sidebar_drag;
     let all_notes = rect()
         .width(Size::px(sidebar_width - 16.))
         .height(Size::px(theme::SIDEBAR_ALL_NOTES_HEIGHT))
@@ -481,17 +564,28 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .horizontal()
         .cross_align(Alignment::Center)
         .spacing(10.)
-        .background(theme::color(if all_notes_active {
-            theme::mix(palette.primary, palette.soft, 0.20)
-        } else if all_notes_hovered {
-            theme::mix(palette.primary, palette.soft, 0.10)
-        } else {
-            palette.soft
+        .background(theme::color(match all_notes_drop {
+            Some(true) => theme::mix(palette.primary, palette.soft, 0.16),
+            Some(false) => palette.soft,
+            None if all_notes_active => theme::mix(palette.primary, palette.soft, 0.20),
+            None if all_notes_hovered => theme::mix(palette.primary, palette.soft, 0.10),
+            None => palette.soft,
         }))
+        .border(sidebar_drop_border(all_notes_drop, palette))
         .with_corner_radius(8.)
-        .on_mouse_up(move |_| state.write().open_directory("".to_string()))
-        .on_pointer_enter(move |_| all_notes_enter.write().set_hovered_target("sidebar:all"))
-        .on_pointer_leave(move |_| all_notes_leave.write().clear_hovered_target("sidebar:all"))
+        .on_mouse_up(move |_| {
+            if !sidebar_drag.read().moved {
+                all_notes_open_state.write().open_directory("".to_string());
+            }
+        })
+        .on_pointer_enter(move |_| {
+            all_notes_enter.write().set_hovered_target("sidebar:all");
+            all_notes_drag_enter.write().enter_target("");
+        })
+        .on_pointer_leave(move |_| {
+            all_notes_leave.write().clear_hovered_target("sidebar:all");
+            all_notes_drag_leave.write().leave_target("");
+        })
         .a11y_alt("All notes")
         .child(svg_icon(
             Icon::Inbox,
@@ -513,7 +607,16 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     let entries = root_entries
         .iter()
         .filter(|entry| sidebar_entry_visible(entry))
-        .map(|entry| sidebar_entry(entry, 0, state, palette, expanded_paths))
+        .map(|entry| {
+            sidebar_entry(
+                entry,
+                0,
+                state,
+                palette,
+                expanded_paths,
+                sidebar_drag,
+            )
+        })
         .collect::<Vec<_>>();
 
     let mut resize_press_state = state;
@@ -569,7 +672,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                     .update_sidebar_resize(event.global_location().x);
             }
         })
-        .on_global_pointer_press(move |event: Event<PointerEventData>| {
+        .on_global_pointer_up(move |event: Event<PointerEventData>| {
             if event.is_primary() {
                 resize_release_state
                     .write()
@@ -582,12 +685,19 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             _ => {}
         });
 
-    let entries = rect()
+    let entries = ScrollView::new()
         .width(Size::fill())
         .height(Size::fill())
-        .padding(Gaps::new(0., 6., 0., 6.))
-        .spacing(theme::RAIL_GAP)
-        .children(entries);
+        .show_scrollbar(true)
+        .scroll_with_arrows(true)
+        .drag_scrolling(false)
+        .child(
+            rect()
+                .width(Size::fill())
+                .padding(Gaps::new(0., 6., 0., 6.))
+                .spacing(theme::RAIL_GAP)
+                .children(entries),
+        );
     let mut search_state = state;
     let sidebar_scroll = rect()
         .width(Size::fill())
@@ -645,9 +755,37 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                 .height(Size::fill())
                 .background(theme::token_color(palette, theme::ThemeToken::Border)),
         );
+
+    let mut drag_move = sidebar_drag;
+    let mut drag_release = sidebar_drag;
+    let mut drop_state = state;
+    let mut drop_expanded_paths = expanded_paths;
     rect()
         .width(Size::px(sidebar_width))
         .height(Size::fill())
+        .on_global_pointer_move(move |event: Event<PointerEventData>| {
+            if event.is_primary() {
+                drag_move
+                    .write()
+                    .update_pointer(event.global_location().x, event.global_location().y);
+            }
+        })
+        .on_global_pointer_up(move |event: Event<PointerEventData>| {
+            if !event.is_primary() {
+                return;
+            }
+            let drop = drag_release.write().finish();
+            if let Some((source, target)) = drop {
+                if let Some(new_path) = move_sidebar_entry(&mut drop_state.write(), &source, &target)
+                {
+                    rebase_expanded_paths(
+                        &mut drop_expanded_paths.write(),
+                        &source,
+                        &new_path,
+                    );
+                }
+            }
+        })
         .child(sidebar)
         .child(resizer)
         .into_element()
@@ -659,12 +797,14 @@ fn sidebar_entry(
     state: State<ShellState>,
     palette: theme::ThemePalette,
     expanded_paths: State<HashSet<String>>,
+    sidebar_drag: State<SidebarEntryDrag>,
 ) -> Element {
     let entry = entry.clone();
     let path = entry.path.clone();
     let title = entry.title.clone();
     let is_directory = entry.is_directory;
     let snapshot = state.read().clone();
+    let drag_snapshot = sidebar_drag.read().clone();
     let folder_active = is_directory
         && folder_path_is_active(snapshot.library.current_path.as_str(), path.as_str());
     let note_active = !is_directory && note_is_active(&snapshot, &entry);
@@ -675,7 +815,11 @@ fn sidebar_entry(
     let hover_key = format!("sidebar:{path}");
     let hovered = snapshot.hovered_target.as_deref() == Some(hover_key.as_str());
     let active = folder_active || note_active;
-    let row_color = if active || hovered {
+    let dragging = drag_snapshot.is_source(&path);
+    let drop_state = is_directory
+        .then(|| drag_snapshot.target_state(&path))
+        .flatten();
+    let row_color = if active || hovered || drop_state == Some(true) {
         theme::ThemeToken::Text
     } else {
         theme::ThemeToken::Muted
@@ -685,6 +829,8 @@ fn sidebar_entry(
     let leave_key = hover_key.clone();
     let mut enter_state = state;
     let mut leave_state = state;
+    let mut drag_enter = sidebar_drag;
+    let mut drag_leave = sidebar_drag;
 
     let row = if is_directory {
         let toggle_path = path.clone();
@@ -693,7 +839,12 @@ fn sidebar_entry(
         let expand_on_open_path = path.clone();
         let mut open_state = state;
         let mut expand_on_open = expanded_paths;
+        let mut start_drag = sidebar_drag;
+        let click_drag = sidebar_drag;
         let count = entry.note_count;
+        let drag_path = path.clone();
+        let target_path = path.clone();
+        let leave_target_path = path.clone();
         rect()
             .width(Size::fill())
             .height(Size::px(TREE_ROW_HEIGHT))
@@ -701,17 +852,23 @@ fn sidebar_entry(
             .horizontal()
             .cross_align(Alignment::Center)
             .spacing(6.)
-            .background(theme::token_color(
+            .background(sidebar_row_background(
+                active,
+                hovered,
+                drop_state,
                 palette,
-                if active || hovered {
-                    theme::ThemeToken::Soft
-                } else {
-                    theme::ThemeToken::Sidebar
-                },
             ))
+            .border(sidebar_drop_border(drop_state, palette))
             .with_corner_radius(8.)
-            .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
-            .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
+            .opacity(if dragging { 0.45 } else { 1. })
+            .on_pointer_enter(move |_| {
+                enter_state.write().set_hovered_target(enter_key.clone());
+                drag_enter.write().enter_target(&target_path);
+            })
+            .on_pointer_leave(move |_| {
+                leave_state.write().clear_hovered_target(&leave_key);
+                drag_leave.write().leave_target(&leave_target_path);
+            })
             .a11y_alt(title.clone())
             .child(
                 rect()
@@ -744,7 +901,20 @@ fn sidebar_entry(
                     .expanded()
                     .height(Size::fill())
                     .cross_align(Alignment::Center)
+                    .on_pointer_down(move |event: Event<PointerEventData>| {
+                        if event.is_primary() {
+                            start_drag.write().begin(
+                                &drag_path,
+                                true,
+                                event.global_location().x,
+                                event.global_location().y,
+                            );
+                        }
+                    })
                     .on_mouse_up(move |_| {
+                        if click_drag.read().moved {
+                            return;
+                        }
                         expand_on_open.write().insert(expand_on_open_path.clone());
                         open_state.write().open_directory(open_path.clone());
                     })
@@ -765,22 +935,33 @@ fn sidebar_entry(
             .into_element()
     } else {
         let mut open_state = state;
+        let mut start_drag = sidebar_drag;
+        let click_drag = sidebar_drag;
+        let drag_path = path.clone();
         rect()
             .width(Size::fill())
             .height(Size::px(TREE_ROW_HEIGHT))
             .padding(Gaps::new(0., TREE_ROW_HORIZONTAL_PADDING, 0., left_padding))
             .horizontal()
             .cross_align(Alignment::Center)
-            .background(theme::token_color(
-                palette,
-                if active || hovered {
-                    theme::ThemeToken::Soft
-                } else {
-                    theme::ThemeToken::Sidebar
-                },
-            ))
+            .background(sidebar_row_background(active, hovered, None, palette))
             .with_corner_radius(8.)
-            .on_mouse_up(move |_| open_state.write().open_note(&entry))
+            .opacity(if dragging { 0.45 } else { 1. })
+            .on_pointer_down(move |event: Event<PointerEventData>| {
+                if event.is_primary() {
+                    start_drag.write().begin(
+                        &drag_path,
+                        false,
+                        event.global_location().x,
+                        event.global_location().y,
+                    );
+                }
+            })
+            .on_mouse_up(move |_| {
+                if !click_drag.read().moved {
+                    open_state.write().open_note(&entry);
+                }
+            })
             .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
             .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
             .a11y_alt(title.clone())
@@ -802,7 +983,16 @@ fn sidebar_entry(
                 page.entries
                     .iter()
                     .filter(|child| sidebar_entry_visible(child))
-                    .map(|child| sidebar_entry(child, depth + 1, state, palette, expanded_paths))
+                    .map(|child| {
+                        sidebar_entry(
+                            child,
+                            depth + 1,
+                            state,
+                            palette,
+                            expanded_paths,
+                            sidebar_drag,
+                        )
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default()
@@ -815,6 +1005,147 @@ fn sidebar_entry(
         .child(row)
         .children(children)
         .into_element()
+}
+
+fn sidebar_row_background(
+    active: bool,
+    hovered: bool,
+    drop_state: Option<bool>,
+    palette: theme::ThemePalette,
+) -> Color {
+    match drop_state {
+        Some(true) => theme::color(theme::mix(palette.primary, palette.soft, 0.18)),
+        _ if active || hovered => theme::token_color(palette, theme::ThemeToken::Soft),
+        _ => theme::token_color(palette, theme::ThemeToken::Sidebar),
+    }
+}
+
+fn sidebar_drop_border(drop_state: Option<bool>, palette: theme::ThemePalette) -> Border {
+    match drop_state {
+        Some(true) => Border::new()
+            .fill(theme::token_color(palette, theme::ThemeToken::Primary))
+            .width(1.),
+        Some(false) => Border::new()
+            .fill(theme::token_color(palette, theme::ThemeToken::Danger))
+            .width(1.),
+        None => Border::new()
+            .fill(theme::token_color(palette, theme::ThemeToken::Sidebar))
+            .width(0.),
+    }
+}
+
+fn normalize_sidebar_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn sidebar_parent_path(path: &str) -> String {
+    let path = normalize_sidebar_path(path);
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent.to_string())
+        .unwrap_or_default()
+}
+
+fn sidebar_can_drop(source: &str, source_is_directory: bool, target_directory: &str) -> bool {
+    let source = normalize_sidebar_path(source);
+    let target = normalize_sidebar_path(target_directory);
+    if source.is_empty() || sidebar_parent_path(&source) == target {
+        return false;
+    }
+    if source_is_directory
+        && (target == source
+            || target
+                .strip_prefix(source.as_str())
+                .is_some_and(|suffix| suffix.starts_with('/')))
+    {
+        return false;
+    }
+    true
+}
+
+fn rebase_path(path: &str, source: &str, destination: &str) -> String {
+    let path = normalize_sidebar_path(path);
+    let source = normalize_sidebar_path(source);
+    let destination = normalize_sidebar_path(destination);
+    if path == source {
+        return destination;
+    }
+    path.strip_prefix(source.as_str())
+        .filter(|suffix| suffix.starts_with('/'))
+        .map(|suffix| format!("{destination}{suffix}"))
+        .unwrap_or(path)
+}
+
+fn rebase_expanded_paths(paths: &mut HashSet<String>, source: &str, destination: &str) {
+    let rebased = paths
+        .iter()
+        .map(|path| rebase_path(path, source, destination))
+        .collect::<HashSet<_>>();
+    *paths = rebased;
+}
+
+fn move_sidebar_entry(
+    shell: &mut ShellState,
+    source: &str,
+    target_directory: &str,
+) -> Option<String> {
+    let Some(vault) = shell.vault.clone() else {
+        shell.error = Some("No vault selected.".to_string());
+        return None;
+    };
+    let source = normalize_sidebar_path(source);
+    let target_directory = normalize_sidebar_path(target_directory);
+    let opened_relative = shell
+        .editor
+        .as_ref()
+        .and_then(|document| document.path())
+        .and_then(|path| path.strip_prefix(vault.root()).ok())
+        .map(|path| normalize_sidebar_path(path.to_string_lossy().as_ref()));
+
+    eprintln!(
+        "[freya][sidebar] action:move-start source={} target={}",
+        source, target_directory
+    );
+    match vault.move_entry(&source, &target_directory) {
+        Ok(new_path) => {
+            let new_path = normalize_sidebar_path(&new_path);
+            let current = shell.library.current_path.as_str().to_string();
+            let next_current = rebase_path(&current, &source, &new_path);
+            shell.library.current_path =
+                crate::library_contract::RelativePath::from(next_current.as_str());
+            shell.reload_directory(&next_current);
+
+            if let Some(opened_relative) = opened_relative {
+                let next_opened = rebase_path(&opened_relative, &source, &new_path);
+                if next_opened != opened_relative {
+                    match crate::editor::EditorDocument::load(&vault.root().join(&next_opened)) {
+                        Ok(document) => shell.editor = Some(document),
+                        Err(error) => {
+                            shell.editor = None;
+                            shell.error = Some(error.to_string());
+                        }
+                    }
+                }
+            }
+
+            eprintln!(
+                "[freya][sidebar] action:move-complete source={} destination={}",
+                source, new_path
+            );
+            Some(new_path)
+        }
+        Err(error) => {
+            eprintln!(
+                "[freya][sidebar] action:move-failure source={} target={} error={error}",
+                source, target_directory
+            );
+            shell.error = Some(error.to_string());
+            None
+        }
+    }
 }
 
 fn sidebar_entry_visible(entry: &VaultEntry) -> bool {
@@ -898,6 +1229,50 @@ mod tests {
         assert!(folder_path_is_active("Projects/Elephant", "Projects"));
         assert!(!folder_path_is_active("Projector", "Projects"));
         assert!(!folder_path_is_active("", "Projects"));
+    }
+
+    #[test]
+    fn sidebar_drop_matches_tauri_move_guards() {
+        assert!(sidebar_can_drop("Alpha.md", false, "Projects"));
+        assert!(sidebar_can_drop("Projects/Plan.md", false, "Archive"));
+        assert!(!sidebar_can_drop("Projects/Plan.md", false, "Projects"));
+        assert!(!sidebar_can_drop("Projects", true, "Projects"));
+        assert!(!sidebar_can_drop("Projects", true, "Projects/Nested"));
+        assert!(!sidebar_can_drop("Projects", true, ""));
+        assert!(sidebar_can_drop("Projects/Nested", true, ""));
+    }
+
+    #[test]
+    fn moved_paths_rebase_current_and_descendants() {
+        assert_eq!(
+            rebase_path("Projects", "Projects", "Archive/Projects"),
+            "Archive/Projects"
+        );
+        assert_eq!(
+            rebase_path("Projects/Nested", "Projects", "Archive/Projects"),
+            "Archive/Projects/Nested"
+        );
+        assert_eq!(
+            rebase_path("Other", "Projects", "Archive/Projects"),
+            "Other"
+        );
+    }
+
+    #[test]
+    fn sidebar_drag_requires_real_motion_and_valid_target() {
+        let mut drag = SidebarEntryDrag::default();
+        drag.begin("Projects/Plan.md", false, 10., 10.);
+        drag.enter_target("Archive");
+        drag.update_pointer(12., 12.);
+        assert_eq!(drag.finish(), None);
+
+        drag.begin("Projects/Plan.md", false, 10., 10.);
+        drag.enter_target("Archive");
+        drag.update_pointer(16., 10.);
+        assert_eq!(
+            drag.finish(),
+            Some(("Projects/Plan.md".to_string(), "Archive".to_string()))
+        );
     }
 
     #[test]
