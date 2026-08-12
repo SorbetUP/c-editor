@@ -498,7 +498,7 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         tags = library_entry.map(|entry| entry.tags.clone()).unwrap_or_default();
     }
     let date = document_created_at(&markdown)
-        .or_else(|| library_entry.map(|entry| entry.updated_at.clone()))
+        .or_else(|| library_entry.map(|entry| entry.updated_at.as_str().to_string()))
         .map(|value| short_date(&value));
     let pinned = relative_path.as_deref().is_some_and(|path| {
         snapshot
