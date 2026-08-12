@@ -199,3 +199,142 @@ fn map_cluster(cluster: elephantnote_knowledge_core::KnowledgeGraphCluster) -> G
         kind,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::search_graph_contract::GraphEdgeType;
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TempVault {
+        root: PathBuf,
+    }
+
+    impl TempVault {
+        fn new(label: &str) -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "elephant-freya-graph-{label}-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&root).expect("create temp graph vault");
+            Self { root }
+        }
+    }
+
+    impl Drop for TempVault {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn write_note(root: &Path, index: usize, body: &str) {
+        fs::write(
+            root.join(format!("note-{index:03}.md")),
+            format!("# Note {index:03}\n\n{body}\n"),
+        )
+        .expect("write markdown note");
+    }
+
+    #[test]
+    fn production_projection_handles_small_real_markdown_graph() {
+        let vault = TempVault::new("small");
+        write_note(&vault.root, 0, "[[Note 001]] #alpha");
+        write_note(&vault.root, 1, "[[Note 002]] #alpha #shared");
+        write_note(&vault.root, 2, "#isolated");
+
+        let execution = refresh_root(&vault.root, false).expect("project small graph");
+        let snapshot = execution.snapshot;
+
+        assert_eq!(snapshot.stats.total_notes, 3);
+        assert_eq!(
+            snapshot
+                .nodes
+                .iter()
+                .filter(|node| node.kind == GraphNodeKind::Note)
+                .count(),
+            3
+        );
+        assert!(snapshot.edges.iter().any(|edge| {
+            edge.edge_type == GraphEdgeType::ExplicitLink
+                && edge.reason.to_ascii_lowercase().contains("wiki")
+        }));
+        assert!(snapshot
+            .nodes
+            .iter()
+            .any(|node| node.relative_path.ends_with("note-002.md")));
+    }
+
+    #[test]
+    fn production_projection_does_not_truncate_at_two_hundred_notes() {
+        const NOTE_COUNT: usize = 205;
+        let vault = TempVault::new("205");
+
+        for index in 0..NOTE_COUNT {
+            let body = match index {
+                // Multiple outgoing wiki links exercise fan-out and edge mapping.
+                203 => "[[Note 000]] [[Note 050]] [[Note 150]] #fanout".to_string(),
+                // Keep the final note intentionally isolated.
+                204 => "#isolated long-label-regression-fixture".to_string(),
+                // Leave 202 -> 203 connected while 204 remains isolated.
+                _ if index < 203 => format!("[[Note {:03}]] #cluster-{}", index + 1, index % 7),
+                _ => "#tail".to_string(),
+            };
+            write_note(&vault.root, index, &body);
+        }
+
+        let execution = refresh_root(&vault.root, false).expect("project 205-note graph");
+        let snapshot = execution.snapshot;
+
+        assert_eq!(snapshot.stats.total_notes, NOTE_COUNT);
+        assert_eq!(
+            snapshot
+                .nodes
+                .iter()
+                .filter(|node| node.kind == GraphNodeKind::Note)
+                .count(),
+            NOTE_COUNT,
+            "the production projection must never silently stop at 200 notes"
+        );
+        for index in 0..NOTE_COUNT {
+            let suffix = format!("note-{index:03}.md");
+            assert!(
+                snapshot
+                    .nodes
+                    .iter()
+                    .any(|node| node.relative_path.ends_with(&suffix)),
+                "missing projected node {suffix}"
+            );
+        }
+
+        let explicit_links = snapshot
+            .edges
+            .iter()
+            .filter(|edge| edge.edge_type == GraphEdgeType::ExplicitLink)
+            .count();
+        assert!(
+            explicit_links >= 205,
+            "expected the chain plus fan-out wiki links, got {explicit_links} explicit edges"
+        );
+
+        let isolated = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.relative_path.ends_with("note-204.md"))
+            .expect("isolated node is present");
+        assert!(
+            snapshot
+                .edges
+                .iter()
+                .all(|edge| edge.source != isolated.id && edge.target != isolated.id),
+            "the deliberately isolated note must remain an isolated graph node"
+        );
+    }
+}
