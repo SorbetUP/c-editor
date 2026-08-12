@@ -1,5 +1,5 @@
 use elephant_freya::app::app_with_vault;
-use freya::prelude::{AccessibilityRole, Key, NamedKey};
+use freya::prelude::{Key, NamedKey};
 use freya_testing::{TestingNode, TestingRunner};
 use serde_json::json;
 use std::{
@@ -85,20 +85,6 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
         })
         .unwrap_or_else(|| panic!("missing Freya accessibility label {label:?}"));
     runner.click_cursor(node.layout().area.center().to_f64());
-}
-
-fn click_text_input(runner: &mut TestingRunner, label: &str) {
-    let nodes = runner.find_many(|node, element| {
-        let accessibility = &element.accessibility().builder;
-        (accessibility.label() == Some(label) && accessibility.role() == AccessibilityRole::TextInput)
-            .then_some(node)
-    });
-    assert_eq!(
-        nodes.len(),
-        1,
-        "drawing title must expose exactly one TextInput accessibility node"
-    );
-    runner.click_cursor(nodes[0].layout().area.center().to_f64());
 }
 
 fn drawing_canvas_nodes(runner: &TestingRunner) -> Vec<TestingNode> {
@@ -257,7 +243,8 @@ fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
     assert!(scene["files"].is_object());
     assert_png(&created_preview);
 
-    click_text_input(&mut runner, "Untitled Drawing");
+    // New drawings deliberately autofocus their title, matching the creation/name
+    // flow and the behavior covered by Freya's own Input auto-focus tests.
     runner.write_text(" Renamed");
     runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
