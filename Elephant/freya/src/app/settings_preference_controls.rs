@@ -35,10 +35,7 @@ macro_rules! settings_row {
             .width(Size::fill())
             .height(Size::px(68.))
             .padding(Gaps::new(13., 18., 13., 18.))
-            .background(theme::token_color(
-                $palette,
-                theme::ThemeToken::Surface,
-            ))
+            .background(theme::token_color($palette, theme::ThemeToken::Surface))
             .horizontal()
             .main_align(Alignment::SpaceBetween)
             .cross_align(Alignment::Center)
@@ -87,10 +84,7 @@ pub(super) fn preference_switch(
                     rect()
                         .width(Size::px(20.))
                         .height(Size::px(20.))
-                        .background(theme::token_color(
-                            palette,
-                            theme::ThemeToken::Surface,
-                        ))
+                        .background(theme::token_color(palette, theme::ThemeToken::Surface))
                         .with_corner_radius(99.),
                 ),
         )
@@ -425,10 +419,7 @@ pub(super) fn navigation_visibility(
                     rect()
                         .width(Size::px(20.))
                         .height(Size::px(20.))
-                        .background(theme::token_color(
-                            palette,
-                            theme::ThemeToken::Surface,
-                        ))
+                        .background(theme::token_color(palette, theme::ThemeToken::Surface))
                         .with_corner_radius(99.),
                 ),
         )
