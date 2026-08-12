@@ -161,10 +161,26 @@ pub(super) fn write_scene(root: &Path, relative_path: &str, raw: &str) -> Result
     let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let scene_path = scene_path(&canonical_root, relative_path)?;
     validate_scene(raw, &scene_path)?;
+
+    let preview = preview_path(&scene_path);
+    let previous_scene = fs::read(&scene_path).map_err(|error| {
+        format!(
+            "Unable to snapshot canonical drawing {} before save: {error}",
+            scene_path.display()
+        )
+    })?;
+    let previous_preview = match optional_preview_size(&canonical_root, &scene_path)? {
+        Some(_) => Some(fs::read(&preview).map_err(|error| {
+            format!(
+                "Unable to snapshot drawing preview {} before save: {error}",
+                preview.display()
+            )
+        })?),
+        None => None,
+    };
     let png = export::render_png(raw)?;
 
     let temp_scene = temp_path(&scene_path, "scene");
-    let preview = preview_path(&scene_path);
     let temp_preview = temp_path(&preview, "preview");
     clear_stale_temp(&temp_scene)?;
     clear_stale_temp(&temp_preview)?;
@@ -183,20 +199,59 @@ pub(super) fn write_scene(root: &Path, relative_path: &str, raw: &str) -> Result
         ));
     }
 
-    if let Err(error) = replace_file(&temp_scene, &scene_path) {
+    // Commit the derived preview first and the canonical JSON last. If either
+    // replacement fails, restore the previous pair so callers never observe a
+    // new canonical scene with an old PNG (or the inverse) after an error.
+    if let Err(error) = replace_file(&temp_preview, &preview) {
+        let preview_rollback = restore_file(&preview, previous_preview.as_deref());
+        let _ = fs::remove_file(&temp_scene);
         let _ = fs::remove_file(&temp_preview);
-        return Err(error);
+        return Err(format!(
+            "Drawing preview update failed at {}: {error}; preview rollback={}",
+            preview.display(),
+            rollback_status(&preview_rollback)
+        ));
     }
-    // The canonical JSON has already been replaced at this point. Never leave
-    // the old preview silently stale: direct-write fallback is used on
-    // platforms where rename-over-existing is unavailable.
-    replace_file(&temp_preview, &preview).map_err(|error| {
-        format!(
-            "Drawing JSON saved but preview update failed at {}: {error}",
-            preview.display()
-        )
-    })?;
+
+    if let Err(error) = replace_file(&temp_scene, &scene_path) {
+        let scene_rollback = restore_file(&scene_path, Some(&previous_scene));
+        let preview_rollback = restore_file(&preview, previous_preview.as_deref());
+        let _ = fs::remove_file(&temp_scene);
+        return Err(format!(
+            "Drawing JSON update failed at {} after preview commit: {error}; scene rollback={}; preview rollback={}",
+            scene_path.display(),
+            rollback_status(&scene_rollback),
+            rollback_status(&preview_rollback)
+        ));
+    }
     Ok(())
+}
+
+fn restore_file(path: &Path, previous: Option<&[u8]>) -> Result<(), String> {
+    match previous {
+        Some(bytes) => fs::write(path, bytes).map_err(|error| {
+            format!(
+                "Unable to restore drawing file {}: {error}",
+                path.display()
+            )
+        }),
+        None => match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!(
+                "Unable to remove newly committed drawing file {} during rollback: {error}",
+                path.display()
+            )),
+        },
+    }
+}
+
+fn rollback_status(result: &Result<(), String>) -> &'static str {
+    if result.is_ok() {
+        "ok"
+    } else {
+        "failed"
+    }
 }
 
 fn write_preview(root: &Path, scene_path: &Path, raw: &str) -> Result<(), String> {
@@ -621,6 +676,49 @@ mod tests {
         let reopened_json: Value = serde_json::from_str(&reopened.raw).unwrap();
         assert_eq!(reopened_json["elements"][0]["id"], "rect-1");
         assert_eq!(reopened_json["futureTopLevelField"]["preserved"], true);
+    }
+
+    #[test]
+    fn failed_preview_preflight_never_changes_the_canonical_json() {
+        let vault = TestVault::new();
+        let created = create_standalone_scene(&vault.0, "", "Atomic").unwrap();
+        let original = fs::read(&created.path).unwrap();
+        let preview = preview_path(&created.path);
+        fs::remove_file(&preview).unwrap();
+        fs::create_dir(&preview).unwrap();
+
+        let mut next: Value = serde_json::from_slice(&original).unwrap();
+        next["title"] = Value::String("Should Not Commit".to_owned());
+        let raw = serde_json::to_string_pretty(&next).unwrap();
+        let error = write_scene(&vault.0, &created.relative_path, &raw).unwrap_err();
+
+        assert!(error.contains("expected a file"));
+        assert_eq!(fs::read(&created.path).unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_preview_is_rejected_before_canonical_json_changes() {
+        use std::os::unix::fs::symlink;
+
+        let vault = TestVault::new();
+        let outside = TestVault::new();
+        let created = create_standalone_scene(&vault.0, "", "Safe Save").unwrap();
+        let original = fs::read(&created.path).unwrap();
+        let preview = preview_path(&created.path);
+        fs::remove_file(&preview).unwrap();
+        let outside_preview = outside.0.join("outside.png");
+        fs::write(&outside_preview, b"outside-preview").unwrap();
+        symlink(&outside_preview, &preview).unwrap();
+
+        let mut next: Value = serde_json::from_slice(&original).unwrap();
+        next["title"] = Value::String("Must Not Escape".to_owned());
+        let raw = serde_json::to_string_pretty(&next).unwrap();
+        let error = write_scene(&vault.0, &created.relative_path, &raw).unwrap_err();
+
+        assert!(error.contains("symlinked drawing preview"));
+        assert_eq!(fs::read(&created.path).unwrap(), original);
+        assert_eq!(fs::read(outside_preview).unwrap(), b"outside-preview");
     }
 
     #[test]
