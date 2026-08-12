@@ -59,6 +59,17 @@ impl FixtureVault {
         Self { root }
     }
 
+    fn add_bulk_notes(&self, count: usize) {
+        for index in 0..count {
+            let title = format!("Bulk {index:03}");
+            fs::write(
+                self.root.join(format!("{title}.md")),
+                format!("# {title}\n\nPagination fixture note {index}.\n"),
+            )
+            .unwrap_or_else(|error| panic!("write bulk fixture note {index}: {error}"));
+        }
+    }
+
     fn path(&self) -> &PathBuf {
         &self.root
     }
@@ -408,6 +419,41 @@ fn grid_list_nested_folder_back_and_empty_states_use_real_fixture_content() {
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
     assert!(!accessible_nodes(&runner, LONG_NOTE_TITLE).is_empty());
+}
+
+#[test]
+fn scrolling_reveals_buffered_entries_and_fetches_beyond_first_real_page() {
+    let fixture = FixtureVault::new();
+    fixture.add_bulk_notes(250);
+    let root = fixture.path().clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    let initial_note_actions = accessible_nodes(&runner, "Note actions").len();
+    assert!(
+        initial_note_actions <= 72,
+        "the initial Freya render window must stay bounded like Tauri; got {initial_note_actions} note cards"
+    );
+    assert!(initial_note_actions > 0);
+
+    for _ in 0..8 {
+        runner.scroll((640., 420.), (0., -900.));
+        runner.sync_and_update();
+    }
+
+    let paged_note_actions = accessible_nodes(&runner, "Note actions").len();
+    assert!(
+        paged_note_actions > 120,
+        "scrolling must fetch beyond the first 120-entry backend page; got {paged_note_actions} note cards"
+    );
+    assert!(
+        accessible_nodes(&runner, "Bulk 249").len() >= 1,
+        "a note from the 250-note fixture must become reachable after real page continuation"
+    );
 }
 
 #[test]
