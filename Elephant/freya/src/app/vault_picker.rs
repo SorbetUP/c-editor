@@ -183,12 +183,25 @@ mod tests {
     fn startup_state_round_trips_paths_with_spaces() {
         let state = StartupState {
             version: 1,
-            last_vault: PathBuf::from("/tmp/Elephant Vault/Test"),
+            last_vault: PathBuf::from("Elephant Vault").join("Test"),
         };
         let encoded = serde_json::to_string(&state).expect("serialize startup state");
         let decoded: StartupState =
             serde_json::from_str(&encoded).expect("deserialize startup state");
         assert_eq!(decoded.version, 1);
+        assert_eq!(decoded.last_vault, state.last_vault);
+    }
+
+    #[test]
+    fn startup_state_round_trips_unicode_paths_semantically() {
+        let state = StartupState {
+            version: 1,
+            last_vault: PathBuf::from("Café Notes").join("Überblick").join("東京"),
+        };
+        let encoded = serde_json::to_vec(&state).expect("serialize unicode startup state");
+        let decoded: StartupState =
+            serde_json::from_slice(&encoded).expect("deserialize unicode startup state");
+        assert_eq!(decoded.version, state.version);
         assert_eq!(decoded.last_vault, state.last_vault);
     }
 
