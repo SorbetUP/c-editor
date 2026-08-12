@@ -4,7 +4,6 @@
 use freya::prelude::*;
 
 use crate::{
-    editor::EditorDocument,
     library_contract::{
         EntryKind as ContractKind, EntryTitle, EntryType, LibraryEntry, RelativePath, SortMode,
         ViewMode,
@@ -574,25 +573,29 @@ fn render_library_card(
             } else if is_folder {
                 state_for_open.write().open_directory(path_for_open.clone());
             } else {
-                let root = {
+                let vault_entry = {
                     let snapshot = state_for_open.read();
                     snapshot
-                        .vault
+                        .page
                         .as_ref()
-                        .map(|vault| vault.root().to_path_buf())
+                        .and_then(|page| {
+                            page.entries
+                                .iter()
+                                .find(|entry| entry.path == path_for_open)
+                        })
+                        .cloned()
                 };
-                if let Some(root) = root {
-                    let full = root.join(&path_for_open);
-                    match EditorDocument::load(full) {
-                        Ok(document) => state_for_open.write().editor = Some(document),
-                        Err(error) => {
-                            eprintln!(
-                                "[freya][library] action:failure action=open path={} error={error}",
-                                path_for_open
-                            );
-                            state_for_open.write().error = Some(error.to_string());
-                        }
-                    }
+                if let Some(vault_entry) = vault_entry {
+                    state_for_open.write().open_note(&vault_entry);
+                } else {
+                    eprintln!(
+                        "[freya][library] action:failure action=open path={} reason=missing_page_entry",
+                        path_for_open
+                    );
+                    state_for_open.write().error = Some(format!(
+                        "Library entry is no longer present in the current directory: {}",
+                        path_for_open
+                    ));
                 }
             }
         })
