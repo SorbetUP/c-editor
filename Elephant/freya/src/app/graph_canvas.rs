@@ -593,7 +593,7 @@ pub fn render(
             }
             event.stop_propagation();
         })
-        .on_global_pointer_up(move |event: Event<PointerEventData>| {
+        .on_global_pointer_press(move |event: Event<PointerEventData>| {
             if !event.is_primary() {
                 return;
             }
