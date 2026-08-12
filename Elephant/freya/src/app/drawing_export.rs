@@ -1,14 +1,11 @@
 //! Native PNG export for Elephant's Excalidraw-compatible Freya renderer.
 //!
-//! The PNG is intentionally a derived artifact. The `.excalidraw` JSON stays
-//! canonical, while this module produces the preview consumed by existing
-//! Tauri notes and embeds the full scene in an Excalidraw-compatible PNG tEXt
-//! chunk so the exported image remains recoverable/editable.
+//! `.excalidraw` JSON stays canonical. PNG is a derived native-Skia preview
+//! and carries an Excalidraw-readable tEXt payload so the exported image keeps
+//! the full scene rather than becoming a lossy screenshot.
 
-use freya_skia_safe::{
-    surfaces, Color, EncodedImageFormat, Font, Paint, PaintStyle, Point, Rect,
-};
 use serde_json::Value;
+use skia_safe::{surfaces, Canvas, Color, EncodedImageFormat, Font, Paint, PaintStyle, Point, Rect};
 
 const EXPORT_PADDING: f32 = 10.;
 const DEFAULT_WIDTH: i32 = 512;
@@ -70,8 +67,6 @@ impl ExportTransform {
     }
 }
 
-/// Render the canonical Excalidraw JSON to a native Skia PNG and embed the
-/// scene as Excalidraw-readable metadata.
 pub(super) fn render_png(raw: &str) -> Result<Vec<u8>, String> {
     let scene: Value = serde_json::from_str(raw)
         .map_err(|error| format!("Unable to export drawing preview: invalid scene JSON: {error}"))?;
@@ -82,17 +77,14 @@ pub(super) fn render_png(raw: &str) -> Result<Vec<u8>, String> {
         .get("elements")
         .and_then(Value::as_array)
         .ok_or_else(|| "Unable to export drawing preview: elements must be an array".to_owned())?;
-
     let visible = elements
         .iter()
         .filter(|element| !bool_value(element, "isDeleted", false))
         .collect::<Vec<_>>();
-    let export_bounds = scene_bounds(&visible);
-    let (width, height, transform) = export_geometry(export_bounds);
+    let (width, height, transform) = export_geometry(scene_bounds(&visible));
     let mut surface = surfaces::raster_n32_premul((width, height))
         .ok_or_else(|| format!("Unable to allocate drawing preview surface {width}x{height}"))?;
     let canvas = surface.canvas();
-
     let export_background = scene
         .get("appState")
         .and_then(|app| app.get("exportBackground"))
@@ -109,11 +101,9 @@ pub(super) fn render_png(raw: &str) -> Result<Vec<u8>, String> {
         Color::TRANSPARENT
     };
     canvas.clear(background);
-
     for element in visible {
         draw_element(canvas, element, transform);
     }
-
     let image = surface.image_snapshot();
     #[allow(deprecated)]
     let encoded = image
@@ -124,41 +114,33 @@ pub(super) fn render_png(raw: &str) -> Result<Vec<u8>, String> {
 
 fn export_geometry(bounds: Option<Bounds>) -> (i32, i32, ExportTransform) {
     let Some(bounds) = bounds else {
-        let default = Bounds {
+        let bounds = Bounds {
             min_x: 0.,
             min_y: 0.,
-            max_x: (DEFAULT_WIDTH as f32 - EXPORT_PADDING * 2.).max(1.),
-            max_y: (DEFAULT_HEIGHT as f32 - EXPORT_PADDING * 2.).max(1.),
+            max_x: DEFAULT_WIDTH as f32 - EXPORT_PADDING * 2.,
+            max_y: DEFAULT_HEIGHT as f32 - EXPORT_PADDING * 2.,
         };
         return (
             DEFAULT_WIDTH,
             DEFAULT_HEIGHT,
-            ExportTransform {
-                bounds: default,
-                scale: 1.,
-            },
+            ExportTransform { bounds, scale: 1. },
         );
     };
-
     let max_world = bounds.width().max(bounds.height());
     let scale = if max_world + EXPORT_PADDING * 2. > MAX_EXPORT_DIMENSION {
         ((MAX_EXPORT_DIMENSION - EXPORT_PADDING * 2.) / max_world).max(0.01)
     } else {
         1.
     };
-    let width = (bounds.width() * scale + EXPORT_PADDING * 2.)
-        .ceil()
-        .max(1.) as i32;
-    let height = (bounds.height() * scale + EXPORT_PADDING * 2.)
-        .ceil()
-        .max(1.) as i32;
+    let width = (bounds.width() * scale + EXPORT_PADDING * 2.).ceil().max(1.) as i32;
+    let height = (bounds.height() * scale + EXPORT_PADDING * 2.).ceil().max(1.) as i32;
     (width, height, ExportTransform { bounds, scale })
 }
 
 fn scene_bounds(elements: &[&Value]) -> Option<Bounds> {
-    let mut bounds = None;
+    let mut bounds: Option<Bounds> = None;
     for element in elements {
-        for point in element_outline_points(element) {
+        for point in outline_points(element) {
             match bounds.as_mut() {
                 Some(bounds) => bounds.include(point),
                 None => bounds = Some(Bounds::from_point(point)),
@@ -168,14 +150,13 @@ fn scene_bounds(elements: &[&Value]) -> Option<Bounds> {
     bounds
 }
 
-fn element_outline_points(element: &Value) -> Vec<[f32; 2]> {
+fn outline_points(element: &Value) -> Vec<[f32; 2]> {
     let x = number(element, "x", 0.);
     let y = number(element, "y", 0.);
     let width = number(element, "width", 0.);
     let height = number(element, "height", 0.);
     let angle = number(element, "angle", 0.);
     let kind = string_value(element, "type", "");
-
     if matches!(kind, "line" | "arrow" | "freedraw") {
         let mut points = absolute_points(element);
         if points.is_empty() {
@@ -183,8 +164,6 @@ fn element_outline_points(element: &Value) -> Vec<[f32; 2]> {
         }
         return rotate_points(points, [x + width / 2., y + height / 2.], angle);
     }
-
-    let center = [x + width / 2., y + height / 2.];
     rotate_points(
         vec![
             [x, y],
@@ -192,21 +171,17 @@ fn element_outline_points(element: &Value) -> Vec<[f32; 2]> {
             [x + width, y + height],
             [x, y + height],
         ],
-        center,
+        [x + width / 2., y + height / 2.],
         angle,
     )
 }
 
-fn draw_element(canvas: &freya_skia_safe::Canvas, element: &Value, transform: ExportTransform) {
+fn draw_element(canvas: &Canvas, element: &Value, transform: ExportTransform) {
     let kind = string_value(element, "type", "");
     let opacity = number(element, "opacity", 100.).clamp(0., 100.);
     let stroke = parse_color(string_value(element, "strokeColor", "#1b1b1f"), opacity);
-    let fill = parse_color(
-        string_value(element, "backgroundColor", "transparent"),
-        opacity,
-    );
+    let fill = parse_color(string_value(element, "backgroundColor", "transparent"), opacity);
     let stroke_width = number(element, "strokeWidth", 2.).max(0.5);
-
     match kind {
         "rectangle" => draw_box(canvas, element, transform, stroke, fill, stroke_width, false),
         "ellipse" => draw_box(canvas, element, transform, stroke, fill, stroke_width, true),
@@ -219,7 +194,7 @@ fn draw_element(canvas: &freya_skia_safe::Canvas, element: &Value, transform: Ex
 
 #[allow(clippy::too_many_arguments)]
 fn draw_box(
-    canvas: &freya_skia_safe::Canvas,
+    canvas: &Canvas,
     element: &Value,
     transform: ExportTransform,
     stroke: Color,
@@ -229,8 +204,8 @@ fn draw_box(
 ) {
     let x = number(element, "x", 0.);
     let y = number(element, "y", 0.);
-    let width = number(element, "width", 0.).max(1.);
-    let height = number(element, "height", 0.).max(1.);
+    let width = number(element, "width", 0.).abs().max(1.);
+    let height = number(element, "height", 0.).abs().max(1.);
     let angle = number(element, "angle", 0.);
     let top_left = transform.point([x, y]);
     let rect = Rect::from_xywh(
@@ -240,7 +215,6 @@ fn draw_box(
         transform.scalar(height),
     );
     let center = transform.point([x + width / 2., y + height / 2.]);
-
     canvas.save();
     if angle.abs() > f32::EPSILON {
         canvas.rotate(angle.to_degrees(), Some(center));
@@ -269,7 +243,7 @@ fn draw_box(
 }
 
 fn draw_polyline(
-    canvas: &freya_skia_safe::Canvas,
+    canvas: &Canvas,
     element: &Value,
     transform: ExportTransform,
     stroke: Color,
@@ -298,7 +272,6 @@ fn draw_polyline(
             style,
         );
     }
-
     if !arrow || points.len() < 2 {
         return;
     }
@@ -329,7 +302,7 @@ fn draw_polyline(
 
 #[allow(clippy::too_many_arguments)]
 fn draw_styled_segment(
-    canvas: &freya_skia_safe::Canvas,
+    canvas: &Canvas,
     start: [f32; 2],
     end: [f32; 2],
     transform: ExportTransform,
@@ -349,12 +322,10 @@ fn draw_styled_segment(
         .set_style(PaintStyle::Stroke)
         .set_stroke_width(transform.scalar(stroke_width).max(0.5))
         .set_color(stroke);
-
     if style != "dashed" && style != "dotted" {
         canvas.draw_line(transform.point(start), transform.point(end), &paint);
         return;
     }
-
     let (dash, gap) = if style == "dashed" {
         (stroke_width * 4.5, stroke_width * 3.)
     } else {
@@ -365,17 +336,14 @@ fn draw_styled_segment(
     while offset < length {
         let piece_end = (offset + dash).min(length);
         let from = [start[0] + unit[0] * offset, start[1] + unit[1] * offset];
-        let to = [
-            start[0] + unit[0] * piece_end,
-            start[1] + unit[1] * piece_end,
-        ];
+        let to = [start[0] + unit[0] * piece_end, start[1] + unit[1] * piece_end];
         canvas.draw_line(transform.point(from), transform.point(to), &paint);
         offset += dash + gap;
     }
 }
 
 fn draw_arrowhead(
-    canvas: &freya_skia_safe::Canvas,
+    canvas: &Canvas,
     tip: [f32; 2],
     neighbor: [f32; 2],
     transform: ExportTransform,
@@ -383,31 +351,19 @@ fn draw_arrowhead(
     stroke_width: f32,
 ) {
     let base_angle = (tip[1] - neighbor[1]).atan2(tip[0] - neighbor[0]);
-    let length = 12.;
     let mut paint = Paint::default();
     paint
         .set_anti_alias(true)
         .set_style(PaintStyle::Stroke)
         .set_stroke_width(transform.scalar(stroke_width).max(0.5))
         .set_color(stroke);
-    for branch_angle in [
-        base_angle + 150_f32.to_radians(),
-        base_angle - 150_f32.to_radians(),
-    ] {
-        let end = [
-            tip[0] + length * branch_angle.cos(),
-            tip[1] + length * branch_angle.sin(),
-        ];
+    for branch in [base_angle + 150_f32.to_radians(), base_angle - 150_f32.to_radians()] {
+        let end = [tip[0] + 12. * branch.cos(), tip[1] + 12. * branch.sin()];
         canvas.draw_line(transform.point(tip), transform.point(end), &paint);
     }
 }
 
-fn draw_text(
-    canvas: &freya_skia_safe::Canvas,
-    element: &Value,
-    transform: ExportTransform,
-    color: Color,
-) {
+fn draw_text(canvas: &Canvas, element: &Value, transform: ExportTransform, color: Color) {
     let text = string_value(element, "text", "");
     if text.is_empty() {
         return;
@@ -424,7 +380,6 @@ fn draw_text(
     font.set_size(transform.scalar(font_size).max(1.));
     let mut paint = Paint::default();
     paint.set_anti_alias(true).set_style(PaintStyle::Fill).set_color(color);
-
     canvas.save();
     if angle.abs() > f32::EPSILON {
         canvas.rotate(angle.to_degrees(), Some(center));
@@ -473,28 +428,27 @@ fn parse_color(value: &str, opacity: f32) -> Color {
         return Color::TRANSPARENT;
     }
     let hex = value.trim().trim_start_matches('#');
-    let parsed = match hex.len() {
-        3 => {
-            let r = u8::from_str_radix(&hex[0..1], 16).unwrap_or(0) * 17;
-            let g = u8::from_str_radix(&hex[1..2], 16).unwrap_or(0) * 17;
-            let b = u8::from_str_radix(&hex[2..3], 16).unwrap_or(0) * 17;
-            (r, g, b, 255)
-        }
-        6 | 8 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-            let a = if hex.len() == 8 {
+    let (r, g, b, source_alpha) = match hex.len() {
+        3 => (
+            u8::from_str_radix(&hex[0..1], 16).unwrap_or(0) * 17,
+            u8::from_str_radix(&hex[1..2], 16).unwrap_or(0) * 17,
+            u8::from_str_radix(&hex[2..3], 16).unwrap_or(0) * 17,
+            255,
+        ),
+        6 | 8 => (
+            u8::from_str_radix(&hex[0..2], 16).unwrap_or(0),
+            u8::from_str_radix(&hex[2..4], 16).unwrap_or(0),
+            u8::from_str_radix(&hex[4..6], 16).unwrap_or(0),
+            if hex.len() == 8 {
                 u8::from_str_radix(&hex[6..8], 16).unwrap_or(255)
             } else {
                 255
-            };
-            (r, g, b, a)
-        }
+            },
+        ),
         _ => (27, 27, 31, 255),
     };
-    let alpha = ((parsed.3 as f32) * opacity.clamp(0., 100.) / 100.).round() as u8;
-    Color::from_argb(alpha, parsed.0, parsed.1, parsed.2)
+    let alpha = ((source_alpha as f32) * opacity.clamp(0., 100.) / 100.).round() as u8;
+    Color::from_argb(alpha, r, g, b)
 }
 
 fn number(value: &Value, key: &str, fallback: f32) -> f32 {
@@ -525,7 +479,6 @@ fn embed_scene_metadata(png: &[u8], scene: &Value) -> Result<Vec<u8>, String> {
     text.push(0);
     text.extend_from_slice(ascii_metadata.as_bytes());
     let chunk = png_chunk(*b"tEXt", &text)?;
-
     let mut cursor = PNG_SIGNATURE.len();
     while cursor + 12 <= png.len() {
         let length = u32::from_be_bytes(
@@ -558,7 +511,8 @@ fn ascii_json(value: &str) -> String {
         if character.is_ascii() {
             output.push(character);
         } else {
-            for unit in character.encode_utf16(&mut [0; 2]).iter() {
+            let mut units = [0u16; 2];
+            for unit in character.encode_utf16(&mut units).iter() {
                 output.push_str(&format!("\\u{unit:04x}"));
             }
         }
@@ -645,7 +599,7 @@ mod tests {
 
     #[test]
     fn empty_scene_still_exports_a_valid_preview() {
-        let png = render_png(r#"{"type":"excalidraw","elements":[],"appState":{"viewBackgroundColor":"#ffffff"},"files":{}}"#).unwrap();
+        let png = render_png(r##"{"type":"excalidraw","elements":[],"appState":{"viewBackgroundColor":"#ffffff"},"files":{}}"##).unwrap();
         assert_eq!(&png[..PNG_SIGNATURE.len()], PNG_SIGNATURE);
         assert!(png.windows(4).any(|chunk| chunk == b"IEND"));
     }
