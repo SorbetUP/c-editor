@@ -13,6 +13,14 @@ use freya::prelude::*;
 
 pub use drawing_scene::{DrawingCanvasState, DrawingTool};
 
+/// Test-only context entrypoint used by the existing `freya-testing` suite.
+/// Production always passes an explicit state to `drawing_canvas_with_state`.
+#[cfg(test)]
+pub fn drawing_canvas() -> Element {
+    let state = use_consume::<State<DrawingCanvasState>>();
+    drawing_canvas_with_state(state)
+}
+
 pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
     let snapshot = state.read().clone();
     let mut pointer_state = state;
