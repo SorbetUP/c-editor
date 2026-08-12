@@ -95,19 +95,21 @@ pub(super) fn card_action_menu(
         .into_element()
 }
 
-/// Advance the exact Tauri library window. A single prefetch request first
-/// reveals any already-buffered 72-item render chunk and then immediately
-/// continues into the next real backend page when that reveal exhausts the
-/// current 120-item page. This is important with Freya's native ScrollView:
-/// the wheel event that reaches the library sentinel can be consumed by the
-/// newly-scrollable child after the first render, so requiring a second wheel
-/// event to start backend I/O could strand the library at the first page.
+/// Advance the exact Tauri library window. A single prefetch first reveals any
+/// already-buffered render chunk, then may cross one additional backend page
+/// boundary. Limiting one wheel dispatch to two backend reads keeps very large
+/// vaults incremental while avoiding a Freya ScrollView propagation edge case
+/// where the first fetch makes the child scrollable and subsequent wheel events
+/// no longer reach the outer pagination sentinel.
 ///
+/// There is deliberately no entry-count cap: later wheel dispatches continue
+/// from the accumulated offset until the real backend reports exhaustion.
 /// The shell's raw `VaultPage` is extended alongside the typed library state
 /// so newly paged notes still open through `ShellState::open_note` rather than
 /// a parallel filesystem path.
 pub(super) fn load_more_library_entries(mut state: State<ShellState>) -> bool {
     let mut changed = false;
+    let mut backend_fetches = 0usize;
     loop {
         let action = state.write().library.load_more();
         match action {
@@ -184,6 +186,14 @@ pub(super) fn load_more_library_entries(mut state: State<ShellState>) -> bool {
                             raw_count.min(page_size),
                             next.library.entries.len()
                         );
+                        drop(next);
+
+                        changed = true;
+                        backend_fetches += 1;
+                        let may_have_more = raw_count > page_size || backend_has_more;
+                        if backend_fetches < 2 && may_have_more {
+                            continue;
+                        }
                         return true;
                     }
                     Err(error) => {
