@@ -7,7 +7,10 @@
 use super::ShellState;
 use freya::{components::SvgViewer, prelude::*};
 use serde_json::Value;
-use std::sync::Mutex;
+use std::{
+    path::{Path, PathBuf},
+    sync::{Mutex, MutexGuard},
+};
 
 #[path = "drawing_storage.rs"]
 mod storage;
@@ -45,7 +48,12 @@ fn dark_text() -> Color {
     Color::from_rgb(238, 242, 255)
 }
 
-static ACTIVE_DRAWING: Mutex<Option<DrawingSession>> = Mutex::new(None);
+/// Drawing sessions are scoped to a vault instead of being a process-wide singleton.
+///
+/// Freya tests intentionally create several app instances in parallel, and desktop
+/// users may also have multiple vault-backed windows during a process lifetime. A
+/// single global `Option<DrawingSession>` lets one window steal another one's editor.
+static ACTIVE_DRAWINGS: Mutex<Vec<(PathBuf, DrawingSession)>> = Mutex::new(Vec::new());
 
 #[derive(Clone, Debug, PartialEq)]
 struct DrawingSession {
@@ -90,16 +98,16 @@ pub(super) fn request_create(mut state: State<ShellState>) {
             )?;
             let scene = storage::read_scene(&root, &created.relative_path)?;
             let session = session_from_read(scene)?;
-            Ok((created.path, session))
+            Ok((root, created.path, session))
         });
 
     match result {
-        Ok((path, session)) => {
+        Ok((root, path, session)) => {
             eprintln!(
                 "[freya][drawing] action:complete action=create path={} elements=0",
                 path.display()
             );
-            set_active(session);
+            set_active(root, session);
             let mut shell = state.write();
             shell.error = None;
             shell.reload_directory(&current_directory);
@@ -121,17 +129,20 @@ pub(super) fn open_existing(mut state: State<ShellState>, relative_path: &str) {
         .map(|vault| vault.root().to_path_buf());
     let result = root
         .ok_or_else(|| "No vault selected.".to_owned())
-        .and_then(|root| storage::read_scene(&root, &path))
-        .and_then(session_from_read);
+        .and_then(|root| {
+            let scene = storage::read_scene(&root, &path)?;
+            let session = session_from_read(scene)?;
+            Ok((root, session))
+        });
 
     match result {
-        Ok(session) => {
+        Ok((root, session)) => {
             eprintln!(
                 "[freya][drawing] action:complete action=open path={} elements={}",
                 session.relative_path,
                 session.canvas.renderable_elements().len()
             );
-            set_active(session);
+            set_active(root, session);
             state.write().error = None;
         }
         Err(error) => {
@@ -166,68 +177,69 @@ fn session_from_read(scene: storage::SceneRead) -> Result<DrawingSession, String
     })
 }
 
-fn set_active(session: DrawingSession) {
-    match ACTIVE_DRAWING.lock() {
-        Ok(mut active) => *active = Some(session),
-        Err(poisoned) => *poisoned.into_inner() = Some(session),
+fn active_drawings() -> MutexGuard<'static, Vec<(PathBuf, DrawingSession)>> {
+    ACTIVE_DRAWINGS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn set_active(root: PathBuf, session: DrawingSession) {
+    let mut active = active_drawings();
+    if let Some((_, current)) = active.iter_mut().find(|(key, _)| key == &root) {
+        *current = session;
+    } else {
+        active.push((root, session));
     }
 }
 
-fn clear_active() {
-    match ACTIVE_DRAWING.lock() {
-        Ok(mut active) => *active = None,
-        Err(poisoned) => *poisoned.into_inner() = None,
+fn clear_active(root: &Path) {
+    active_drawings().retain(|(key, _)| key != root);
+}
+
+fn sync_active_identity(root: &Path, old_path: &str, new_path: &str, title: &str) {
+    if let Some((_, session)) = active_drawings()
+        .iter_mut()
+        .find(|(key, session)| key == root && session.relative_path == old_path)
+    {
+        session.relative_path = new_path.to_owned();
+        session.title = title.to_owned();
     }
 }
 
-fn sync_active_identity(old_path: &str, new_path: &str, title: &str) {
-    let update = |active: &mut Option<DrawingSession>| {
-        if let Some(session) = active
-            .as_mut()
-            .filter(|session| session.relative_path == old_path)
-        {
-            session.relative_path = new_path.to_owned();
-            session.title = title.to_owned();
-        }
-    };
-    match ACTIVE_DRAWING.lock() {
-        Ok(mut active) => update(&mut active),
-        Err(poisoned) => {
-            let mut active = poisoned.into_inner();
-            update(&mut active);
-        }
+fn sync_active_canvas(
+    root: &Path,
+    relative_path: &str,
+    title: &str,
+    canvas: &DrawingCanvasState,
+) {
+    if let Some((_, session)) = active_drawings()
+        .iter_mut()
+        .find(|(key, session)| key == root && session.relative_path == relative_path)
+    {
+        session.title = title.to_owned();
+        session.canvas = canvas.clone();
     }
 }
 
-fn sync_active_canvas(relative_path: &str, title: &str, canvas: &DrawingCanvasState) {
-    let update = |active: &mut Option<DrawingSession>| {
-        if let Some(session) = active
-            .as_mut()
-            .filter(|session| session.relative_path == relative_path)
-        {
-            session.title = title.to_owned();
-            session.canvas = canvas.clone();
-        }
-    };
-    match ACTIVE_DRAWING.lock() {
-        Ok(mut active) => update(&mut active),
-        Err(poisoned) => {
-            let mut active = poisoned.into_inner();
-            update(&mut active);
-        }
-    }
+fn active_session(root: &Path) -> Option<DrawingSession> {
+    active_drawings()
+        .iter()
+        .find(|(key, _)| key == root)
+        .map(|(_, session)| session.clone())
 }
 
-fn active_session() -> Option<DrawingSession> {
-    match ACTIVE_DRAWING.lock() {
-        Ok(active) => active.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    }
+fn vault_root(state: State<ShellState>) -> Option<PathBuf> {
+    state
+        .read()
+        .vault
+        .as_ref()
+        .map(|vault| vault.root().to_path_buf())
 }
 
 /// Minimal integration seam used by `library::main_content`.
 pub(super) fn active_panel(state: State<ShellState>) -> Option<Element> {
-    active_session().map(|session| DrawingPanel { state, session }.into_element())
+    let root = vault_root(state)?;
+    active_session(&root).map(|session| DrawingPanel { state, session }.into_element())
 }
 
 #[derive(PartialEq)]
@@ -276,6 +288,7 @@ fn drawing_shell(
     } else {
         Color::from_rgb(96, 96, 108)
     };
+    let active_root = vault_root(shell_state);
 
     let mut close_state = shell_state;
     let mut key_shell_state = shell_state;
@@ -293,6 +306,8 @@ fn drawing_shell(
     let save_title = title;
     let submit_path = relative_path;
     let submit_title = title;
+    let key_root = active_root.clone();
+    let close_root = active_root;
 
     let name_control = if rename_allowed {
         Some(
@@ -362,7 +377,9 @@ fn drawing_shell(
         .a11y_alt(format!("Drawing editor {title_snapshot}"))
         .on_global_key_down(move |event: Event<KeyboardEventData>| {
             if event.key == Key::Named(NamedKey::Escape) {
-                clear_active();
+                if let Some(root) = key_root.as_deref() {
+                    clear_active(root);
+                }
                 key_shell_state.write().error = None;
                 event.stop_propagation();
                 return;
@@ -437,7 +454,9 @@ fn drawing_shell(
                             surface,
                             "Close drawing · Esc",
                             move |event| {
-                                clear_active();
+                                if let Some(root) = close_root.as_deref() {
+                                    clear_active(root);
+                                }
                                 close_state.write().error = None;
                                 event.stop_propagation();
                             },
@@ -513,7 +532,7 @@ fn save_scene(
         match storage::rename_standalone_scene(&root, &old_path, &requested_title) {
             Ok(renamed) => {
                 if renamed.relative_path != old_path || renamed.title != current_title {
-                    sync_active_identity(&old_path, &renamed.relative_path, &renamed.title);
+                    sync_active_identity(&root, &old_path, &renamed.relative_path, &renamed.title);
                     *relative_path.write() = renamed.relative_path.clone();
                     *title.write() = renamed.title.clone();
                     shell_state.write().reload_directory(&library_path);
@@ -547,7 +566,7 @@ fn save_scene(
     match result {
         Ok(()) => {
             eprintln!("[freya][drawing] action:complete action=save path={target_path}");
-            sync_active_canvas(&target_path, &target_title, &canvas_snapshot);
+            sync_active_canvas(&root, &target_path, &target_title, &canvas_snapshot);
             *status.write() = "Saved".to_owned();
             shell_state.write().error = None;
         }
@@ -840,43 +859,91 @@ mod tests {
         .unwrap()
     }
 
+    fn session(path: &str, title: &str, elements: usize) -> DrawingSession {
+        DrawingSession {
+            relative_path: path.to_owned(),
+            title: title.to_owned(),
+            canvas: canvas_with_elements(elements),
+            rename_allowed: true,
+        }
+    }
+
     #[test]
     fn save_snapshot_refreshes_the_active_session_only_for_the_same_path() {
-        clear_active();
-        set_active(DrawingSession {
-            relative_path: "Sketch.excalidraw".to_owned(),
-            title: "Sketch".to_owned(),
-            canvas: canvas_with_elements(0),
-            rename_allowed: true,
-        });
+        let root = PathBuf::from("/tmp/elephant-drawing-test-save");
+        clear_active(&root);
+        set_active(root.clone(), session("Sketch.excalidraw", "Sketch", 0));
 
-        sync_active_canvas("Other.excalidraw", "Other", &canvas_with_elements(2));
+        sync_active_canvas(
+            &root,
+            "Other.excalidraw",
+            "Other",
+            &canvas_with_elements(2),
+        );
         assert_eq!(
-            active_session().unwrap().canvas.renderable_elements().len(),
+            active_session(&root)
+                .unwrap()
+                .canvas
+                .renderable_elements()
+                .len(),
             0
         );
 
-        sync_active_canvas("Sketch.excalidraw", "Sketch", &canvas_with_elements(2));
-        let active = active_session().unwrap();
+        sync_active_canvas(
+            &root,
+            "Sketch.excalidraw",
+            "Sketch",
+            &canvas_with_elements(2),
+        );
+        let active = active_session(&root).unwrap();
         assert_eq!(active.canvas.renderable_elements().len(), 2);
         assert_eq!(active.title, "Sketch");
-        clear_active();
+        clear_active(&root);
     }
 
     #[test]
     fn identity_sync_moves_the_live_session_to_the_real_renamed_path() {
-        clear_active();
-        set_active(DrawingSession {
-            relative_path: "Old.excalidraw".to_owned(),
-            title: "Old".to_owned(),
-            canvas: canvas_with_elements(1),
-            rename_allowed: true,
-        });
-        sync_active_identity("Old.excalidraw", "New.excalidraw", "New");
-        let active = active_session().unwrap();
+        let root = PathBuf::from("/tmp/elephant-drawing-test-rename");
+        clear_active(&root);
+        set_active(root.clone(), session("Old.excalidraw", "Old", 1));
+        sync_active_identity(&root, "Old.excalidraw", "New.excalidraw", "New");
+        let active = active_session(&root).unwrap();
         assert_eq!(active.relative_path, "New.excalidraw");
         assert_eq!(active.title, "New");
         assert_eq!(active.canvas.renderable_elements().len(), 1);
-        clear_active();
+        clear_active(&root);
+    }
+
+    #[test]
+    fn active_sessions_are_isolated_by_vault_root() {
+        let root_a = PathBuf::from("/tmp/elephant-drawing-vault-a");
+        let root_b = PathBuf::from("/tmp/elephant-drawing-vault-b");
+        clear_active(&root_a);
+        clear_active(&root_b);
+        set_active(root_a.clone(), session("A.excalidraw", "A", 1));
+        set_active(root_b.clone(), session("B.excalidraw", "B", 2));
+
+        sync_active_canvas(&root_a, "A.excalidraw", "A", &canvas_with_elements(3));
+        assert_eq!(
+            active_session(&root_a)
+                .unwrap()
+                .canvas
+                .renderable_elements()
+                .len(),
+            3
+        );
+        assert_eq!(
+            active_session(&root_b)
+                .unwrap()
+                .canvas
+                .renderable_elements()
+                .len(),
+            2
+        );
+
+        clear_active(&root_a);
+        assert!(active_session(&root_a).is_none());
+        assert_eq!(active_session(&root_b).unwrap().title, "B");
+        clear_active(&root_b);
     }
 }
