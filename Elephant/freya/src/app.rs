@@ -296,45 +296,86 @@ fn vertical_shell_divider(palette: theme::ThemePalette) -> Element {
         .into_element()
 }
 
-fn top_bar_drag_region(left: f32) -> Element {
-    rect()
-        .position(Position::new_absolute().left(left).right(0.).top(0.))
-        .height(Size::px(theme::TOPBAR_HEIGHT))
-        .window_drag()
-        .into_element()
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TopBarDragLayout {
+    leading_width: f32,
+    trailing_left: f32,
 }
 
-fn top_bar_drag_leading_region(width: f32) -> Element {
-    rect()
-        .position(Position::new_absolute().left(0.).top(0.))
-        .width(Size::px(width))
-        .height(Size::px(theme::TOPBAR_HEIGHT))
-        .window_drag()
-        .into_element()
-}
-
-fn top_bar_host(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
-    let sidebar_visible = state.read().sidebar_visible;
-    let topbar = rect()
-        .width(Size::fill())
-        .height(Size::px(theme::TOPBAR_HEIGHT))
-        .child(navigation::top_vault_bar(state, palette));
-
+fn top_bar_drag_layout(sidebar_visible: bool, is_macos: bool) -> TopBarDragLayout {
     if sidebar_visible {
-        let nav_left = if cfg!(target_os = "macos") {
+        let nav_left = if is_macos {
             TOPBAR_NAV_LEFT_MACOS
         } else {
             TOPBAR_NAV_LEFT_DESKTOP
         };
-        topbar
-            .child(top_bar_drag_leading_region(nav_left))
-            .child(top_bar_drag_region(nav_left + TOPBAR_NAV_WIDTH))
-            .into_element()
+        TopBarDragLayout {
+            leading_width: nav_left,
+            trailing_left: nav_left + TOPBAR_NAV_WIDTH,
+        }
     } else {
-        topbar
-            .child(top_bar_drag_region(TOPBAR_DRAG_HIDDEN_LEFT))
-            .into_element()
+        TopBarDragLayout {
+            leading_width: 0.,
+            trailing_left: TOPBAR_DRAG_HIDDEN_LEFT,
+        }
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TopBarDragGeometry {
+    Leading { width: f32 },
+    Trailing { left: f32 },
+}
+
+/// Owns Freya's `window_drag()` hooks in a stable child lifecycle.
+///
+/// `window_drag()` in Freya 0.4.1 uses hooks internally. Each mounted region
+/// therefore owns exactly one unconditional call in this child component,
+/// while the parent always mounts the same two region components. Toggling the
+/// sidebar changes only their geometry, never the shell's hook order.
+#[derive(PartialEq)]
+struct TopBarDragRegion {
+    geometry: TopBarDragGeometry,
+}
+
+impl Component for TopBarDragRegion {
+    fn render(&self) -> impl IntoElement {
+        let region = match self.geometry {
+            TopBarDragGeometry::Leading { width } => rect()
+                .position(Position::new_absolute().left(0.).top(0.))
+                .width(Size::px(width)),
+            TopBarDragGeometry::Trailing { left } => rect()
+                .position(Position::new_absolute().left(left).right(0.).top(0.)),
+        };
+        region
+            .height(Size::px(theme::TOPBAR_HEIGHT))
+            .window_drag()
+    }
+}
+
+fn top_bar_host(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    let layout = top_bar_drag_layout(state.read().sidebar_visible, cfg!(target_os = "macos"));
+    rect()
+        .width(Size::fill())
+        .height(Size::px(theme::TOPBAR_HEIGHT))
+        .child(navigation::top_vault_bar(state, palette))
+        .child(
+            TopBarDragRegion {
+                geometry: TopBarDragGeometry::Leading {
+                    width: layout.leading_width,
+                },
+            }
+            .into_element(),
+        )
+        .child(
+            TopBarDragRegion {
+                geometry: TopBarDragGeometry::Trailing {
+                    left: layout.trailing_left,
+                },
+            }
+            .into_element(),
+        )
+        .into_element()
 }
 
 fn icon_rail_host(
@@ -474,5 +515,30 @@ mod tests {
         assert_eq!(TOPBAR_NAV_LEFT_DESKTOP, 56.);
         assert_eq!(TOPBAR_NAV_LEFT_MACOS, 84.);
         assert_eq!(TOPBAR_NAV_WIDTH, 76.);
+    }
+
+    #[test]
+    fn topbar_drag_layout_tracks_sidebar_and_platform_geometry() {
+        assert_eq!(
+            top_bar_drag_layout(true, false),
+            TopBarDragLayout {
+                leading_width: 56.,
+                trailing_left: 132.,
+            }
+        );
+        assert_eq!(
+            top_bar_drag_layout(true, true),
+            TopBarDragLayout {
+                leading_width: 84.,
+                trailing_left: 160.,
+            }
+        );
+        assert_eq!(
+            top_bar_drag_layout(false, false),
+            TopBarDragLayout {
+                leading_width: 0.,
+                trailing_left: 180.,
+            }
+        );
     }
 }
