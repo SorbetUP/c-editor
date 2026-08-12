@@ -1,17 +1,37 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "scenario": "migration/freya/differential-scenarios.json",
   "checkpoints": [
-    { "id": "startup", "afterAction": "launch" },
-    { "id": "search-results", "afterAction": "search-alpha" },
-    { "id": "note-open", "afterAction": "open-alpha-note" },
-    { "id": "note-edited", "afterAction": "edit-alpha-note" },
-    { "id": "create-menu-open", "afterAction": "open-create-menu" }
+    { "id": "startup", "afterAction": "launch", "requireStability": true },
+    { "id": "search-open", "afterAction": "open-search", "requireStability": true },
+    { "id": "search-results", "afterAction": "search-alpha", "requireStability": true },
+    { "id": "library-after-search", "afterAction": "close-search", "requireStability": true },
+    { "id": "root-library", "afterAction": "navigate-all-notes", "requireStability": true },
+    { "id": "note-open", "afterAction": "open-alpha-note", "requireStability": true },
+    { "id": "note-edited", "afterAction": "edit-alpha-note", "requireStability": false },
+    { "id": "library-after-note", "afterAction": "close-alpha-note", "requireStability": true },
+    { "id": "create-menu-open", "afterAction": "open-create-menu", "requireStability": true },
+    { "id": "library-after-menu", "afterAction": "close-create-menu", "requireStability": true },
+    { "id": "settings-general", "source": "surface", "requireStability": true },
+    { "id": "settings-editor", "source": "surface", "requireStability": true },
+    { "id": "graph-default", "source": "surface", "requireStability": true }
   ],
   "thresholds": {
     "channelDelta": 12,
     "maxSignificantPixelRatio": 0.005,
     "maxNormalizedMeanAbsoluteError": 0.004,
-    "minBlockSsim": 0.985
+    "minBlockSsim": 0.985,
+    "maxTileSignificantPixelRatio": 0.18,
+    "maxCoarseNmae": 0.012,
+    "tileSize": 48,
+    "ssimBlockSize": 16,
+    "edgeThreshold": 20,
+    "coarseScale": 4,
+    "translationRadius": 4,
+    "maxStabilitySignificantPixelRatio": 0.005,
+    "maxStabilityNmae": 0.002,
+    "minUniqueColors": 8,
+    "minLuminanceStdDev": 1.0,
+    "minLuminanceEntropy": 0.5
   }
 }
