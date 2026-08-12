@@ -672,7 +672,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                     .update_sidebar_resize(event.global_location().x);
             }
         })
-        .on_global_pointer_up(move |event: Event<PointerEventData>| {
+        .on_global_pointer_press(move |event: Event<PointerEventData>| {
             if event.is_primary() {
                 resize_release_state
                     .write()
@@ -770,7 +770,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                     .update_pointer(event.global_location().x, event.global_location().y);
             }
         })
-        .on_global_pointer_up(move |event: Event<PointerEventData>| {
+        .on_global_pointer_press(move |event: Event<PointerEventData>| {
             if !event.is_primary() {
                 return;
             }
