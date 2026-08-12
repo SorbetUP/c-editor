@@ -1,12 +1,13 @@
-//! Overlay card actions for the native library surface.
+//! Native library actions backed by the production vault adapter.
 //!
-//! Card composition stays in `library.rs`; this module owns the source
-//! NoteCard/FolderCard menu and its real vault mutations.
+//! Card composition and inline rename rendering stay in `library.rs`; this
+//! module owns the compact NoteCard action popover and filesystem mutations.
 
 use freya::prelude::*;
 
-use crate::theme;
+use crate::{editor::EditorDocument, theme};
 
+use super::library_icons::{svg_icon, Icon as LibraryIcon};
 use super::super::ShellState;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -22,110 +23,126 @@ pub(super) fn card_action_menu(
     state: State<ShellState>,
     card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
-    renaming: bool,
 ) -> Element {
-    if renaming {
-        let mut rename_state = state;
-        let mut rename_menu_state = card_menu_state;
-        let rename_input = rename_value;
-        let path_for_rename = path.clone();
-        let mut cancel_menu_state = card_menu_state;
-        return rect()
-            .position(Position::new_absolute().top(42.).right(8.))
-            .width(Size::px(220.))
-            .padding(Gaps::new_all(8.))
-            .background(theme::color(theme::SURFACE))
-            .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
-            .with_corner_radius(7.)
-            .a11y_alt("Rename menu")
-            .child(
-                rect()
-                    .width(Size::fill())
-                    .on_mouse_up(|event: Event<MouseEventData>| event.stop_propagation())
-                    .child(
-                        Input::new(rename_input)
-                            .width(Size::fill())
-                            .placeholder(format!("Rename {title}"))
-                            .on_submit(move |next_title: String| {
-                                if rename_library_entry(
-                                    &mut rename_state,
-                                    &path_for_rename,
-                                    &next_title,
-                                ) {
-                                    let mut menu = rename_menu_state.write();
-                                    menu.open = false;
-                                    menu.renaming = false;
-                                }
-                            }),
-                    ),
-            )
-            .child(
-                rect()
-                    .height(Size::px(28.))
-                    .padding(Gaps::new(0., 8., 0., 8.))
-                    .center()
-                    .a11y_alt("Cancel rename")
-                    .on_mouse_up(move |event: Event<MouseEventData>| {
-                        event.stop_propagation();
-                        let mut menu = cancel_menu_state.write();
-                        menu.open = false;
-                        menu.renaming = false;
-                    })
-                    .child(label().text("Cancel")),
-            )
-            .into_element();
-    }
-
     let mut rename_menu_state = card_menu_state;
     let mut rename_value_state = rename_value;
     let mut delete_menu_state = card_menu_state;
     let mut delete_state = state;
-    let path_for_delete = path.clone();
-    let action_label = if is_folder {
-        "Close folder actions"
-    } else {
-        "Note actions"
-    };
+    let path_for_delete = path;
+    let rename_title = title;
+
     rect()
         .position(Position::new_absolute().top(42.).right(8.))
-        .width(Size::px(if is_folder { 118. } else { 82. }))
+        .width(Size::px(78.))
+        .height(Size::px(42.))
         .horizontal()
-        .spacing(6.)
-        .padding(Gaps::new_all(6.))
+        .spacing(4.)
+        .padding(Gaps::new_all(5.))
         .background(theme::color(theme::SURFACE))
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
-        .with_corner_radius(7.)
-        .a11y_alt(action_label)
+        .with_corner_radius(10.)
+        .a11y_alt(if is_folder {
+            "Folder actions"
+        } else {
+            "Note actions"
+        })
+        .on_mouse_up(|event: Event<MouseEventData>| event.stop_propagation())
         .child(
             rect()
-                .height(Size::px(28.))
-                .padding(Gaps::new(0., 8., 0., 8.))
+                .width(Size::px(32.))
+                .height(Size::px(32.))
                 .center()
+                .with_corner_radius(8.)
                 .a11y_alt(if is_folder { "Rename folder" } else { "Rename" })
                 .on_mouse_up(move |event: Event<MouseEventData>| {
                     event.stop_propagation();
+                    rename_value_state.set(rename_title.clone());
                     let mut menu = rename_menu_state.write();
-                    menu.open = true;
+                    menu.open = false;
                     menu.renaming = true;
-                    rename_value_state.set(String::new());
                 })
-                .child(label().text("Rename")),
+                .child(svg_icon(
+                    LibraryIcon::Pencil,
+                    theme::color(theme::TEXT),
+                    20.,
+                )),
         )
         .child(
             rect()
-                .height(Size::px(28.))
-                .padding(Gaps::new(0., 8., 0., 8.))
+                .width(Size::px(32.))
+                .height(Size::px(32.))
                 .center()
+                .with_corner_radius(8.)
                 .a11y_alt(if is_folder { "Delete folder" } else { "Delete" })
                 .on_mouse_up(move |event: Event<MouseEventData>| {
                     event.stop_propagation();
                     if delete_library_entry(&mut delete_state, &path_for_delete) {
-                        delete_menu_state.write().open = false;
+                        let mut menu = delete_menu_state.write();
+                        menu.open = false;
+                        menu.renaming = false;
                     }
                 })
-                .child(label().text("Delete")),
+                .child(svg_icon(
+                    LibraryIcon::Trash2,
+                    theme::color(theme::DANGER),
+                    20.,
+                )),
         )
         .into_element()
+}
+
+/// Match the Vue `vaultStore.createNote()` orchestration: create through the
+/// production backend, refresh the current directory, then open the exact note
+/// returned by the backend. No optimistic card is inserted before filesystem
+/// success.
+pub(super) fn create_note_and_open(mut state: State<ShellState>) -> bool {
+    let (vault, directory) = {
+        let snapshot = state.read();
+        (
+            snapshot.vault.clone(),
+            snapshot.library.current_path.as_str().to_string(),
+        )
+    };
+    let Some(vault) = vault else {
+        state.write().error = Some("No vault selected.".to_string());
+        eprintln!("[freya][library] action:failure action=Note reason=no_vault");
+        return false;
+    };
+
+    eprintln!(
+        "[freya][library] action:start action=Note directory={directory}"
+    );
+    match vault.create_note(Some(directory.clone()), None, None) {
+        Ok(entry) => {
+            let full_path = vault.root().join(&entry.path);
+            state.write().reload_directory(&directory);
+            match EditorDocument::load(full_path) {
+                Ok(document) => {
+                    let mut next = state.write();
+                    next.editor = Some(document);
+                    next.error = None;
+                    eprintln!(
+                        "[freya][library] action:complete action=Note path={}",
+                        entry.path
+                    );
+                    true
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[freya][library] action:failure action=open-created-note path={} error={error}",
+                        entry.path
+                    );
+                    state.write().error = Some(error.to_string());
+                    false
+                }
+            }
+        }
+        Err(error) => {
+            eprintln!("[freya][library] action:failure action=Note error={error}");
+            state.write().error = Some(error.to_string());
+            false
+        }
+    }
 }
 
 pub(super) fn rename_library_entry(state: &mut State<ShellState>, path: &str, title: &str) -> bool {
