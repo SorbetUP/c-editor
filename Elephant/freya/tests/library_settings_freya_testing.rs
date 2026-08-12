@@ -130,6 +130,39 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
     ));
 }
 
+fn click_action_for_card(runner: &mut TestingRunner, card_label: &str, action_label: &str) {
+    let card_area = library_card_node(runner, card_label).layout().area;
+    let node = accessible_nodes(runner, action_label)
+        .into_iter()
+        .filter(|node| {
+            let area = node.layout().area;
+            let center_x = (area.min_x() + area.max_x()) / 2.;
+            let center_y = (area.min_y() + area.max_y()) / 2.;
+            center_x >= card_area.min_x()
+                && center_x <= card_area.max_x()
+                && center_y >= card_area.min_y()
+                && center_y <= card_area.max_y()
+        })
+        .min_by(|left, right| {
+            left.layout()
+                .area
+                .size
+                .area()
+                .partial_cmp(&right.layout().area.size.area())
+                .expect("card action areas must be ordered")
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no Freya action {action_label:?} is contained by library card {card_label:?}"
+            )
+        });
+    let area = node.layout().area;
+    runner.click_cursor((
+        ((area.min_x() + area.max_x()) / 2.) as f64,
+        ((area.min_y() + area.max_y()) / 2.) as f64,
+    ));
+}
+
 fn click_smallest_label(runner: &mut TestingRunner, label: &str) {
     let nodes = accessible_nodes(runner, label);
     let node = nodes
@@ -231,6 +264,34 @@ fn clicking_a_note_that_disappears_surfaces_the_real_open_error() {
 }
 
 #[test]
+fn opening_existing_note_records_shell_history_and_back_restores_library() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    assert!(!accessible_nodes(&runner, "Show notes as list").is_empty());
+    click_library_card(&mut runner, "A");
+    runner.sync_and_update();
+    assert!(
+        accessible_nodes(&runner, "Show notes as list").is_empty(),
+        "opening an existing note must replace the library surface with the editor"
+    );
+
+    click_label(&mut runner, "Retour");
+    runner.sync_and_update();
+    assert!(!accessible_nodes(&runner, "A").is_empty());
+    assert!(
+        !accessible_nodes(&runner, "Show notes as list").is_empty(),
+        "Back must return from an existing note to the recorded library directory"
+    );
+}
+
+#[test]
 fn card_actions_are_overlayed_and_rename_and_delete_use_the_real_vault() {
     let fixture = FixtureVault::new();
     let root = fixture.path().clone();
@@ -243,8 +304,11 @@ fn card_actions_are_overlayed_and_rename_and_delete_use_the_real_vault() {
 
     let before = library_card_node(&runner, "Rename").layout().area;
     hover_library_card(&mut runner, "Rename");
-    assert_eq!(accessible_nodes(&runner, "Note actions").len(), 1);
-    click_label(&mut runner, "Note actions");
+    assert!(
+        accessible_nodes(&runner, "Note actions").len() > 1,
+        "each visible note card keeps its own Tauri-parity actions trigger"
+    );
+    click_action_for_card(&mut runner, "Rename", "Note actions");
     runner.sync_and_update();
     assert!(accessible_nodes(&runner, "Note actions").len() >= 1);
     assert_eq!(library_card_node(&runner, "Rename").layout().area, before);
@@ -262,7 +326,7 @@ fn card_actions_are_overlayed_and_rename_and_delete_use_the_real_vault() {
     assert_eq!(library_card_node(&runner, "Rename").layout().area, before);
 
     hover_library_card(&mut runner, "Rename");
-    click_label(&mut runner, "Note actions");
+    click_action_for_card(&mut runner, "Rename", "Note actions");
     runner.sync_and_update();
     click_smallest_label(&mut runner, "Rename");
     runner.sync_and_update();
@@ -277,7 +341,7 @@ fn card_actions_are_overlayed_and_rename_and_delete_use_the_real_vault() {
     assert!(!fixture.path().join("Rename.md").exists());
 
     hover_library_card(&mut runner, "Delete");
-    click_label(&mut runner, "Note actions");
+    click_action_for_card(&mut runner, "Delete", "Note actions");
     runner.sync_and_update();
     click_smallest_label(&mut runner, "Delete");
     runner.sync_and_update();
@@ -286,7 +350,7 @@ fn card_actions_are_overlayed_and_rename_and_delete_use_the_real_vault() {
 
     fs::remove_file(fixture.path().join("MissingAction.md")).expect("remove action target");
     hover_library_card(&mut runner, "MissingAction");
-    click_label(&mut runner, "Note actions");
+    click_action_for_card(&mut runner, "MissingAction", "Note actions");
     runner.sync_and_update();
     click_smallest_label(&mut runner, "Delete");
     runner.sync_and_update();
