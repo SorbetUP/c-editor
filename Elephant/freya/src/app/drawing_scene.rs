@@ -633,6 +633,8 @@ impl DrawingElement {
 
     fn hit_test(&self, point: [f32; 2]) -> bool {
         let (x, y, width, height) = self.bounds();
+        let center = [x + width / 2., y + height / 2.];
+        let point = rotate_point_around(point, center, -self.angle);
         let padding = self.stroke_width.max(6.);
         if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw")
             && self.points.len() >= 2
@@ -645,11 +647,32 @@ impl DrawingElement {
                 ) <= padding
             });
         }
+        if self.kind == "ellipse" && width > f32::EPSILON && height > f32::EPSILON {
+            let radius_x = width / 2.;
+            let radius_y = height / 2.;
+            let dx = (point[0] - center[0]) / (radius_x + padding);
+            let dy = (point[1] - center[1]) / (radius_y + padding);
+            return dx * dx + dy * dy <= 1.;
+        }
         point[0] >= x - padding
             && point[0] <= x + width + padding
             && point[1] >= y - padding
             && point[1] <= y + height + padding
     }
+}
+
+fn rotate_point_around(point: [f32; 2], center: [f32; 2], angle: f32) -> [f32; 2] {
+    if angle.abs() <= f32::EPSILON {
+        return point;
+    }
+    let sin = angle.sin();
+    let cos = angle.cos();
+    let x = point[0] - center[0];
+    let y = point[1] - center[1];
+    [
+        center[0] + x * cos - y * sin,
+        center[1] + x * sin + y * cos,
+    ]
 }
 
 fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -819,5 +842,53 @@ mod tests {
         state.escape();
         assert!(state.document.elements.is_empty());
         assert_eq!(state.active_tool(), DrawingTool::Selection);
+    }
+
+    #[test]
+    fn hit_test_follows_rotated_rectangle_instead_of_stale_axis_bounds() {
+        let mut state = empty_state();
+        state.document.elements.push(serde_json::from_value(json!({
+            "id":"rotated-rect",
+            "type":"rectangle",
+            "x":0,
+            "y":0,
+            "width":100,
+            "height":20,
+            "angle":std::f32::consts::FRAC_PI_2,
+            "strokeColor":"#000000",
+            "backgroundColor":"transparent",
+            "strokeWidth":2,
+            "opacity":100
+        })).unwrap());
+        state.set_tool(DrawingTool::Selection);
+        state.begin_pointer([50., 50.]);
+        assert_eq!(state.selected_element_id(), Some("rotated-rect"));
+        state.escape();
+        state.begin_pointer([90., 10.]);
+        assert_eq!(state.selected_element_id(), None);
+    }
+
+    #[test]
+    fn hit_test_follows_rotated_line_segments() {
+        let mut state = empty_state();
+        state.document.elements.push(serde_json::from_value(json!({
+            "id":"rotated-line",
+            "type":"line",
+            "x":0,
+            "y":0,
+            "width":100,
+            "height":0,
+            "points":[[0,0],[100,0]],
+            "angle":std::f32::consts::FRAC_PI_2,
+            "strokeColor":"#000000",
+            "strokeWidth":2,
+            "opacity":100
+        })).unwrap());
+        state.set_tool(DrawingTool::Selection);
+        state.begin_pointer([50., 40.]);
+        assert_eq!(state.selected_element_id(), Some("rotated-line"));
+        state.escape();
+        state.begin_pointer([90., 0.]);
+        assert_eq!(state.selected_element_id(), None);
     }
 }
