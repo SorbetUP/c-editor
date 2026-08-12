@@ -243,8 +243,9 @@ fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
     assert!(scene["files"].is_object());
     assert_png(&created_preview);
 
-    // New drawings deliberately autofocus their title, matching the creation/name
-    // flow and the behavior covered by Freya's own Input auto-focus tests.
+    // Freya's auto-focused Input starts at index 0. Exercise an explicit user
+    // edit of the prefilled title, then verify that Enter commits both sidecars.
+    runner.press_key(Key::Named(NamedKey::End));
     runner.write_text(" Renamed");
     runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
