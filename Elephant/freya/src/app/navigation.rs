@@ -1,5 +1,7 @@
 //! Freya conversion of AppShell's TopVaultBar, IconRail and SidebarNav.
 
+use std::collections::HashSet;
+
 use freya::prelude::*;
 
 use crate::{theme, vault_adapter::VaultEntry};
@@ -9,6 +11,14 @@ use super::{
     settings_effects::SettingsEffects,
     ShellState,
 };
+
+const TAURI_TOPBAR_HEIGHT: f32 = 32.;
+const TAURI_TOPBAR_NAV_WIDTH: f32 = 92.;
+const TREE_ROW_HEIGHT: f32 = 36.;
+const TREE_DEPTH_INDENT: f32 = 14.;
+const TREE_ROW_HORIZONTAL_PADDING: f32 = 10.;
+const TREE_TOGGLE_SIZE: f32 = 22.;
+const TAGS_HEADER_HEIGHT: f32 = 36.;
 
 pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
     let can_go_back = state.read().can_go_back();
@@ -21,8 +31,9 @@ pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalet
     let mut back_leave_state = state;
     let mut forward_enter_state = state;
     let mut forward_leave_state = state;
+
     rect()
-        .height(Size::px(theme::TOPBAR_HEIGHT))
+        .height(Size::px(TAURI_TOPBAR_HEIGHT))
         .width(Size::fill())
         .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .child(
@@ -32,7 +43,7 @@ pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalet
                         .left(if cfg!(target_os = "macos") { 84. } else { 56. })
                         .top(theme::TOPBAR_NAV_TOP),
                 )
-                .width(Size::px(76.))
+                .width(Size::px(TAURI_TOPBAR_NAV_WIDTH))
                 .height(Size::px(theme::TOPBAR_NAV_BUTTON_SIZE))
                 .horizontal()
                 .spacing(theme::RAIL_GAP)
@@ -51,7 +62,11 @@ pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalet
                         ))
                         .with_corner_radius(5.)
                         .opacity(if can_go_back { 1. } else { 0.3 })
-                        .on_mouse_up(move |_| back_state.write().navigate_back())
+                        .on_mouse_up(move |_| {
+                            if can_go_back {
+                                back_state.write().navigate_back();
+                            }
+                        })
                         .on_pointer_enter(move |_| {
                             back_enter_state.write().set_hovered_target("topnav:Retour")
                         })
@@ -89,7 +104,11 @@ pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalet
                         ))
                         .with_corner_radius(5.)
                         .opacity(if can_go_forward { 1. } else { 0.3 })
-                        .on_mouse_up(move |_| forward_state.write().navigate_forward())
+                        .on_mouse_up(move |_| {
+                            if can_go_forward {
+                                forward_state.write().navigate_forward();
+                            }
+                        })
                         .on_pointer_enter(move |_| {
                             forward_enter_state
                                 .write()
@@ -119,7 +138,7 @@ pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalet
             rect()
                 .position(Position::new_absolute().left(180.).top(0.))
                 .width(Size::fill())
-                .height(Size::px(theme::TOPBAR_HEIGHT)),
+                .height(Size::px(TAURI_TOPBAR_HEIGHT)),
         )
         .a11y_alt("TopVaultBar")
         .into_element()
@@ -187,6 +206,7 @@ pub(super) fn icon_rail(
             state,
             palette,
         ));
+
     rect()
         .width(Size::px(theme::RAIL_WIDTH))
         .height(Size::fill())
@@ -195,6 +215,13 @@ pub(super) fn icon_rail(
         .a11y_alt("Workspace navigation")
         .child(nav)
         .child(bottom)
+        .child(
+            rect()
+                .position(Position::new_absolute().right(0.).top(0.))
+                .width(Size::px(1.))
+                .height(Size::fill())
+                .background(theme::token_color(palette, theme::ThemeToken::Border)),
+        )
         .maybe_child(
             state
                 .read()
@@ -220,7 +247,7 @@ fn vault_action(mut state: State<ShellState>, palette: theme::ThemePalette) -> E
         .center()
         .background(theme::token_color(palette, theme::ThemeToken::Soft))
         .opacity(if hovered { 0.85 } else { 1. })
-        .with_corner_radius(7.)
+        .with_corner_radius(10.)
         .on_mouse_up(move |_| state.write().vault_menu_open = true)
         .on_pointer_enter(move |_| enter_state.write().set_hovered_target("rail:vault"))
         .on_pointer_leave(move |_| leave_state.write().clear_hovered_target("rail:vault"))
@@ -248,6 +275,11 @@ fn rail_action(
         .rail_drag
         .as_ref()
         .is_some_and(|drag| drag.source == item_id && drag.moved);
+    let shown_icon = if item_id == "sidebar-toggle" && !hovered {
+        Icon::PanelLeft
+    } else {
+        icon
+    };
     let enter_key = hover_key.clone();
     let leave_key = hover_key.clone();
     let mut enter_state = state;
@@ -270,7 +302,7 @@ fn rail_action(
                 theme::ThemeToken::Sidebar
             },
         ))
-        .with_corner_radius(7.)
+        .with_corner_radius(8.)
         .opacity(if dragging { 0.55 } else { 1. })
         .on_pointer_down(move |event: Event<PointerEventData>| {
             if event.is_primary() {
@@ -295,18 +327,19 @@ fn rail_action(
             if was_drag {
                 return;
             }
-            match label_text {
-                "Search" => {
+            match item_id {
+                "search" => {
                     let mut shell = release_state.write();
                     shell.search_open = !shell.search_open;
                     shell.settings_open = false;
                 }
-                "Settings" => {
+                "settings" => {
                     let mut shell = release_state.write();
                     shell.settings_open = !shell.settings_open;
                     shell.search_open = false;
                 }
-                _ => release_state.write().toggle_sidebar(),
+                "sidebar-toggle" => release_state.write().toggle_sidebar(),
+                _ => {}
             }
             let _ = event;
         })
@@ -325,8 +358,15 @@ fn rail_action(
         })
         .a11y_alt(label_text)
         .child(svg_icon(
-            icon,
-            theme::token_color(palette, theme::ThemeToken::Muted),
+            shown_icon,
+            theme::token_color(
+                palette,
+                if hovered {
+                    theme::ThemeToken::Text
+                } else {
+                    theme::ThemeToken::Muted
+                },
+            ),
             18.,
         ))
         .into_element()
@@ -342,7 +382,7 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
     rect()
         .position(Position::new_absolute().left(52.).bottom(42.))
         .width(Size::px(250.))
-        .padding(Gaps::new_all(8.))
+        .padding(Gaps::new_all(6.))
         .background(theme::token_color(palette, theme::ThemeToken::Surface))
         .border(
             Border::new()
@@ -366,9 +406,19 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
                 .horizontal()
                 .cross_align(Alignment::Center)
                 .background(theme::token_color(palette, theme::ThemeToken::Soft))
-                .with_corner_radius(7.)
+                .with_corner_radius(6.)
                 .a11y_alt(vault_name.clone())
-                .child(label().text(vault_name)),
+                .child(svg_icon(
+                    Icon::Vault,
+                    theme::token_color(palette, theme::ThemeToken::Text),
+                    15.,
+                ))
+                .child(
+                    label()
+                        .padding(Gaps::new(0., 0., 0., 10.))
+                        .font_size(13.)
+                        .text(vault_name),
+                ),
         )
         .child(
             rect()
@@ -376,7 +426,12 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
                 .padding(Gaps::new(0., 10., 0., 10.))
                 .horizontal()
                 .cross_align(Alignment::Center)
-                .on_mouse_up(move |_| state.write().settings_open = true)
+                .on_mouse_up(move |_| {
+                    let mut shell = state.write();
+                    shell.settings_open = true;
+                    shell.search_open = false;
+                    shell.vault_menu_open = false;
+                })
                 .a11y_alt("Manage vaults")
                 .child(svg_icon(
                     Icon::Settings,
@@ -385,6 +440,8 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
                 ))
                 .child(
                     label()
+                        .padding(Gaps::new(0., 0., 0., 10.))
+                        .font_size(13.)
                         .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .text("Manage vaults"),
                 ),
@@ -393,7 +450,10 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
 }
 
 pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    // Hooks stay unconditional: the host component owns this lifecycle even
+    // while the sidebar is hidden.
     let resizer_a11y_id = use_a11y();
+    let expanded_paths = use_state(HashSet::<String>::new);
     let snapshot = state.read().clone();
     if !snapshot.sidebar_visible {
         return rect()
@@ -401,6 +461,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             .height(Size::fill())
             .into_element();
     }
+
     let all_notes_hovered = snapshot.hovered_target.as_deref() == Some("sidebar:all");
     let all_notes_active = snapshot.view == crate::navigation_contract::WorkspaceView::Notes
         && snapshot.library.current_path.as_str().is_empty()
@@ -416,10 +477,11 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .padding(Gaps::new(0., 12., 0., 12.))
         .horizontal()
         .cross_align(Alignment::Center)
-        .background(theme::color(if all_notes_hovered {
-            theme::mix(palette.primary, palette.soft, 0.24)
-        } else if all_notes_active {
+        .spacing(10.)
+        .background(theme::color(if all_notes_active {
             theme::mix(palette.primary, palette.soft, 0.20)
+        } else if all_notes_hovered {
+            theme::mix(palette.primary, palette.soft, 0.10)
         } else {
             palette.soft
         }))
@@ -433,23 +495,24 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             theme::token_color(palette, theme::ThemeToken::Text),
             18.,
         ))
-        .child(
-            label()
-                .padding(Gaps::new(0., 0., 0., 10.))
-                .font_size(14.)
-                .text("All notes"),
-        );
+        .child(label().font_size(14.).text("All notes"));
 
-    let entries = snapshot
-        .page
+    // SidebarNav.vue keeps rootSidebarEntries stable while directory contents
+    // are loaded lazily by each expanded tree node. Do the same here instead
+    // of reusing `page.entries`, which represents the current library page.
+    let root_entries = snapshot
+        .vault
         .as_ref()
-        .map(|page| {
-            page.entries
-                .iter()
-                .map(|entry| sidebar_entry(entry, state, palette))
-                .collect::<Vec<_>>()
-        })
+        .and_then(|vault| vault.list_directory("").ok())
+        .map(|page| page.entries)
+        .or_else(|| snapshot.page.as_ref().map(|page| page.entries.clone()))
         .unwrap_or_default();
+    let entries = root_entries
+        .iter()
+        .filter(|entry| sidebar_entry_visible(entry))
+        .map(|entry| sidebar_entry(entry, 0, state, palette, expanded_paths))
+        .collect::<Vec<_>>();
+
     let mut resize_press_state = state;
     let mut resize_move_state = state;
     let mut resize_release_state = state;
@@ -515,12 +578,14 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             Key::Named(NamedKey::ArrowRight) => resize_key_state.write().resize_sidebar_by(16.),
             _ => {}
         });
+
     let entries = rect()
         .width(Size::fill())
         .height(Size::fill())
         .padding(Gaps::new(0., 6., 0., 6.))
         .spacing(theme::RAIL_GAP)
         .children(entries);
+    let mut search_state = state;
     let sidebar_scroll = rect()
         .width(Size::fill())
         .height(Size::fill())
@@ -531,9 +596,10 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .child(
             rect()
                 .width(Size::fill())
-                .height(Size::px(28.))
+                .height(Size::px(TAGS_HEADER_HEIGHT))
                 .padding(Gaps::new(4., 14., 8., 14.))
                 .horizontal()
+                .cross_align(Alignment::Center)
                 .main_align(Alignment::SpaceBetween)
                 .child(
                     label()
@@ -541,13 +607,26 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                         .font_weight(FontWeight::BOLD)
                         .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .a11y_alt("Notes")
-                        .text("Notes"),
+                        .text("NOTES"),
                 )
-                .child(rect().a11y_alt("Search notes").child(svg_icon(
-                    Icon::Search,
-                    theme::token_color(palette, theme::ThemeToken::Muted),
-                    14.,
-                ))),
+                .child(
+                    rect()
+                        .width(Size::px(24.))
+                        .height(Size::px(24.))
+                        .center()
+                        .with_corner_radius(6.)
+                        .on_mouse_up(move |_| {
+                            let mut shell = search_state.write();
+                            shell.search_open = true;
+                            shell.settings_open = false;
+                        })
+                        .a11y_alt("Search notes")
+                        .child(svg_icon(
+                            Icon::Search,
+                            theme::token_color(palette, theme::ThemeToken::Muted),
+                            14.,
+                        )),
+                ),
         )
         .child(entries);
     let sidebar = rect()
@@ -555,9 +634,16 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .height(Size::fill())
         .background(theme::token_color(palette, theme::ThemeToken::Sidebar))
         .a11y_alt("Sidebar")
-        .child(sidebar_scroll);
+        .child(sidebar_scroll)
+        .child(
+            rect()
+                .position(Position::new_absolute().right(0.).top(0.))
+                .width(Size::px(1.))
+                .height(Size::fill())
+                .background(theme::token_color(palette, theme::ThemeToken::Border)),
+        );
     rect()
-        .width(Size::px(f32::from(snapshot.sidebar_width.get())))
+        .width(Size::px(sidebar_width))
         .height(Size::fill())
         .child(sidebar)
         .child(resizer)
@@ -566,66 +652,258 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
 
 fn sidebar_entry(
     entry: &VaultEntry,
-    mut state: State<ShellState>,
+    depth: usize,
+    state: State<ShellState>,
     palette: theme::ThemePalette,
+    expanded_paths: State<HashSet<String>>,
 ) -> Element {
     let entry = entry.clone();
     let path = entry.path.clone();
     let title = entry.title.clone();
     let is_directory = entry.is_directory;
+    let snapshot = state.read().clone();
+    let folder_active = is_directory
+        && folder_path_is_active(snapshot.library.current_path.as_str(), path.as_str());
+    let note_active = !is_directory && note_is_active(&snapshot, &entry);
+    let explicitly_expanded = expanded_paths.read().contains(path.as_str());
+    // Active paths are expanded just like SidebarTreeEntry's immediate watcher,
+    // so a restored/reloaded navigation state reconstructs the visible branch.
+    let expanded = is_directory && (explicitly_expanded || folder_active);
     let hover_key = format!("sidebar:{path}");
-    let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let hovered = snapshot.hovered_target.as_deref() == Some(hover_key.as_str());
+    let active = folder_active || note_active;
+    let row_color = if active || hovered {
+        theme::ThemeToken::Text
+    } else {
+        theme::ThemeToken::Muted
+    };
+    let left_padding = TREE_ROW_HORIZONTAL_PADDING + depth as f32 * TREE_DEPTH_INDENT;
     let enter_key = hover_key.clone();
     let leave_key = hover_key.clone();
     let mut enter_state = state;
     let mut leave_state = state;
+
+    let row = if is_directory {
+        let toggle_path = path.clone();
+        let mut toggle_expanded = expanded_paths;
+        let open_path = path.clone();
+        let expand_on_open_path = path.clone();
+        let mut open_state = state;
+        let mut expand_on_open = expanded_paths;
+        let count = entry.note_count;
+        rect()
+            .width(Size::fill())
+            .height(Size::px(TREE_ROW_HEIGHT))
+            .padding(Gaps::new(0., TREE_ROW_HORIZONTAL_PADDING, 0., left_padding))
+            .horizontal()
+            .cross_align(Alignment::Center)
+            .spacing(6.)
+            .background(theme::token_color(
+                palette,
+                if active || hovered {
+                    theme::ThemeToken::Soft
+                } else {
+                    theme::ThemeToken::Sidebar
+                },
+            ))
+            .with_corner_radius(8.)
+            .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
+            .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
+            .a11y_alt(title.clone())
+            .child(
+                rect()
+                    .width(Size::px(TREE_TOGGLE_SIZE))
+                    .height(Size::px(TREE_TOGGLE_SIZE))
+                    .center()
+                    .a11y_alt(if expanded {
+                        format!("Collapse {title}")
+                    } else {
+                        format!("Expand {title}")
+                    })
+                    .on_mouse_up(move |_| {
+                        let mut paths = toggle_expanded.write();
+                        if !paths.remove(toggle_path.as_str()) {
+                            paths.insert(toggle_path.clone());
+                        }
+                    })
+                    .child(svg_icon(
+                        if expanded {
+                            Icon::ChevronDown
+                        } else {
+                            Icon::ChevronRight
+                        },
+                        theme::token_color(palette, row_color),
+                        15.,
+                    )),
+            )
+            .child(
+                rect()
+                    .expanded()
+                    .height(Size::fill())
+                    .cross_align(Alignment::Center)
+                    .on_mouse_up(move |_| {
+                        expand_on_open.write().insert(expand_on_open_path.clone());
+                        open_state.write().open_directory(open_path.clone());
+                    })
+                    .a11y_alt(title.clone())
+                    .child(
+                        label()
+                            .font_size(14.)
+                            .color(theme::token_color(palette, row_color))
+                            .text(title),
+                    ),
+            )
+            .maybe_child((count > 0).then(|| {
+                label()
+                    .font_size(12.)
+                    .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                    .text(count.to_string())
+            }))
+            .into_element()
+    } else {
+        let mut open_state = state;
+        rect()
+            .width(Size::fill())
+            .height(Size::px(TREE_ROW_HEIGHT))
+            .padding(Gaps::new(0., TREE_ROW_HORIZONTAL_PADDING, 0., left_padding))
+            .horizontal()
+            .cross_align(Alignment::Center)
+            .background(theme::token_color(
+                palette,
+                if active || hovered {
+                    theme::ThemeToken::Soft
+                } else {
+                    theme::ThemeToken::Sidebar
+                },
+            ))
+            .with_corner_radius(8.)
+            .on_mouse_up(move |_| open_state.write().open_note(&entry))
+            .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
+            .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
+            .a11y_alt(title.clone())
+            .child(
+                label()
+                    .font_size(14.)
+                    .color(theme::token_color(palette, row_color))
+                    .text(title),
+            )
+            .into_element()
+    };
+
+    let children = if expanded {
+        snapshot
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.list_directory(path.clone()).ok())
+            .map(|page| {
+                page.entries
+                    .iter()
+                    .filter(|child| sidebar_entry_visible(child))
+                    .map(|child| sidebar_entry(child, depth + 1, state, palette, expanded_paths))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
     rect()
         .width(Size::fill())
-        .height(Size::px(36.))
-        .padding(Gaps::new(0., 10., 0., 10.))
-        .horizontal()
-        .cross_align(Alignment::Center)
-        .background(theme::token_color(
-            palette,
-            if hovered {
-                theme::ThemeToken::Soft
-            } else {
-                theme::ThemeToken::Sidebar
-            },
-        ))
-        .on_mouse_up(move |_| {
-            if is_directory {
-                state.write().open_directory(path.clone());
-            } else {
-                state.write().open_note(&entry);
-            }
-        })
-        .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
-        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
-        .a11y_alt(title.clone())
-        .child(if is_directory {
-            rect()
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(4.)
-                .child(svg_icon(
-                    Icon::ChevronRight,
-                    theme::token_color(palette, theme::ThemeToken::Muted),
-                    15.,
-                ))
-                .child(
-                    label()
-                        .font_size(14.)
-                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
-                        .text(title),
-                )
-                .into_element()
-        } else {
-            label()
-                .font_size(14.)
-                .color(theme::token_color(palette, theme::ThemeToken::Muted))
-                .text(title)
-                .into_element()
-        })
+        .child(row)
+        .children(children)
         .into_element()
+}
+
+fn sidebar_entry_visible(entry: &VaultEntry) -> bool {
+    if entry
+        .path
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .any(|part| part.starts_with('.'))
+    {
+        return false;
+    }
+    entry.is_directory || entry.path.to_ascii_lowercase().ends_with(".md")
+}
+
+fn folder_path_is_active(current_path: &str, folder_path: &str) -> bool {
+    if folder_path.is_empty() {
+        return false;
+    }
+    current_path == folder_path
+        || current_path
+            .strip_prefix(folder_path)
+            .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+fn note_is_active(snapshot: &ShellState, entry: &VaultEntry) -> bool {
+    let Some(document_path) = snapshot.editor.as_ref().and_then(|document| document.path()) else {
+        return false;
+    };
+    let Some(vault) = snapshot.vault.as_ref() else {
+        return false;
+    };
+    let expected = vault.root().join(&entry.path);
+    document_path == expected.as_path()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault_adapter::EntryKind;
+
+    fn entry(path: &str, is_directory: bool) -> VaultEntry {
+        VaultEntry {
+            path: path.to_string(),
+            filename: path.rsplit('/').next().unwrap_or(path).to_string(),
+            name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            title: path.rsplit('/').next().unwrap_or(path).to_string(),
+            entry_type: if is_directory {
+                EntryKind::Folder
+            } else {
+                EntryKind::Note
+            },
+            kind: if is_directory {
+                EntryKind::Folder
+            } else {
+                EntryKind::Note
+            },
+            is_directory,
+            note_count: 0,
+            excerpt: String::new(),
+            preview: String::new(),
+            tags: Vec::new(),
+            updated_at: String::new(),
+            children_preview: Vec::new(),
+            drawing_preview: None,
+            full_path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn sidebar_only_keeps_folders_and_markdown_notes() {
+        assert!(sidebar_entry_visible(&entry("Projects", true)));
+        assert!(sidebar_entry_visible(&entry("Projects/Plan.MD", false)));
+        assert!(!sidebar_entry_visible(&entry("Projects/image.png", false)));
+        assert!(!sidebar_entry_visible(&entry(".assets/private.md", false)));
+    }
+
+    #[test]
+    fn active_folder_matches_tauri_descendant_rule() {
+        assert!(folder_path_is_active("Projects", "Projects"));
+        assert!(folder_path_is_active("Projects/Elephant", "Projects"));
+        assert!(!folder_path_is_active("Projector", "Projects"));
+        assert!(!folder_path_is_active("", "Projects"));
+    }
+
+    #[test]
+    fn tauri_navigation_metrics_are_kept_explicit() {
+        assert_eq!(TAURI_TOPBAR_HEIGHT, 32.);
+        assert_eq!(TAURI_TOPBAR_NAV_WIDTH, 92.);
+        assert_eq!(TREE_ROW_HEIGHT, 36.);
+        assert_eq!(TREE_DEPTH_INDENT, 14.);
+        assert_eq!(TREE_TOGGLE_SIZE, 22.);
+        assert_eq!(TAGS_HEADER_HEIGHT, 36.);
+    }
 }
