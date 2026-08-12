@@ -29,24 +29,32 @@ runs:
           pnpm install --no-frozen-lockfile --ignore-scripts
         }
 
-        # Dependencies intentionally live in Elephant/node_modules for the renderer,
-        # while repository-level Node scripts use the standard root resolution path.
-        # Keep both views pointed at the exact same pnpm installation instead of
-        # performing a second install or relying on NODE_PATH (which ESM ignores).
+        # pnpm is intentionally configured with modules-dir=Elephant/node_modules.
+        # Repository-level CommonJS and ESM scripts still resolve packages through
+        # <repo>/node_modules, so expose the exact same installation there.  The
+        # bridge is recreated on every clean CI setup to avoid broken/stale links.
         node <<'NODE'
         const fs = require('node:fs')
         const path = require('node:path')
         const target = path.resolve('Elephant/node_modules')
         const link = path.resolve('node_modules')
         if (!fs.existsSync(target)) throw new Error(`pnpm modules directory is missing: ${target}`)
-        if (!fs.existsSync(link)) {
-          fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+        try {
+          fs.lstatSync(link)
+          fs.rmSync(link, { recursive: true, force: true })
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error
         }
-        const resolved = fs.realpathSync(link)
-        if (resolved !== fs.realpathSync(target)) {
-          throw new Error(`root node_modules does not resolve to Elephant/node_modules: ${resolved}`)
+        fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+        const targetReal = fs.realpathSync(target)
+        const linkReal = fs.realpathSync(link)
+        if (linkReal !== targetReal) {
+          throw new Error(`root node_modules does not resolve to Elephant/node_modules: ${linkReal} != ${targetReal}`)
         }
-        console.log(`[setup] root Node module resolution -> ${resolved}`)
+        for (const packageName of ['fs-extra', 'jsdom']) {
+          const manifest = require.resolve(`${packageName}/package.json`, { paths: [process.cwd()] })
+          console.log(`[setup] root package resolution ${packageName} -> ${manifest}`)
+        }
         NODE
       env:
         GITHUB_TOKEN: ${{ github.token }}
