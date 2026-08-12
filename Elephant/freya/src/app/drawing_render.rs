@@ -125,7 +125,11 @@ fn render_polyline(
     if element.kind != "arrow" || points.len() < 2 {
         return;
     }
-    if element.start_arrowhead.as_deref().is_some_and(|value| value != "none") {
+    if element
+        .start_arrowhead
+        .as_deref()
+        .is_some_and(|value| value != "none")
+    {
         render_arrowhead(
             output,
             index,
@@ -288,22 +292,28 @@ fn text_element(
     stroke: Color,
     alt: &str,
 ) -> Element {
-    label()
-        .key(("drawing-text", index))
+    let width = element.width.max(1.) * viewport.zoom;
+    let height = element.height.max(element.font_size).max(1.) * viewport.zoom;
+    let font_size = if element.font_size > 0. {
+        element.font_size * viewport.zoom
+    } else {
+        20. * viewport.zoom
+    };
+    rect()
+        .key(("drawing-text-container", index))
         .position(absolute(viewport, element.x, element.y))
-        .width(Size::px(element.width.max(1.) * viewport.zoom))
-        .height(Size::px(
-            element.height.max(element.font_size).max(1.) * viewport.zoom,
-        ))
-        .font_size(if element.font_size > 0. {
-            element.font_size * viewport.zoom
-        } else {
-            20. * viewport.zoom
-        })
-        .color(stroke)
+        .width(Size::px(width))
+        .height(Size::px(height))
         .rotation(element.angle.to_degrees())
-        .a11y_alt(alt)
-        .text(element.text.clone())
+        .child(
+            label()
+                .width(Size::fill())
+                .height(Size::fill())
+                .font_size(font_size)
+                .color(stroke)
+                .a11y_alt(alt)
+                .text(element.text.clone()),
+        )
         .into_element()
 }
 
@@ -452,8 +462,8 @@ mod tests {
 
     #[test]
     fn midpoint_geometry_keeps_segment_center_on_the_requested_line() {
-        let start = [10., 20.];
-        let end = [50., 60.];
+        let start: [f32; 2] = [10., 20.];
+        let end: [f32; 2] = [50., 60.];
         let midpoint = [(start[0] + end[0]) / 2., (start[1] + end[1]) / 2.];
         assert_eq!(midpoint, [30., 40.]);
         let length = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
