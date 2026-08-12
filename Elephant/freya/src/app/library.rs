@@ -23,6 +23,9 @@ use library_actions::{card_action_menu, CardMenuState};
 
 pub(super) fn main_content(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
+    if let Some(panel) = drawing::active_panel(state) {
+        return panel;
+    }
     let body = if snapshot.editor.is_some() {
         editor_view::note_editor_host(state)
     } else if snapshot.view == WorkspaceView::Notes {

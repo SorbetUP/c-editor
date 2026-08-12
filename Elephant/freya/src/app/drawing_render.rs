@@ -1,6 +1,10 @@
 use super::drawing_scene::{rgba, DrawingCanvasState, DrawingElement, Viewport};
 use freya::prelude::*;
 
+fn excalidraw_purple() -> Color {
+    Color::from_rgb(105, 101, 219)
+}
+
 pub fn render(state: &DrawingCanvasState) -> Vec<Element> {
     let mut elements = Vec::new();
     for (index, element) in state.document.elements.iter().enumerate() {
@@ -31,13 +35,15 @@ fn render_element(
         "ellipse" => output.push(shape_rect(
             element, index, label, x, y, width, height, viewport, stroke, fill, true,
         )),
-        "line" | "arrow" => render_polyline(output, element, index, viewport, stroke, &label),
-        "freedraw" => render_polyline(output, element, index, viewport, stroke, &label),
+        "line" | "arrow" | "freedraw" => {
+            render_polyline(output, element, index, viewport, stroke, &label)
+        }
         "text" => output.push(text_element(element, index, viewport, stroke, &label)),
         _ => {}
     }
     if selected {
         output.push(selection_rect(index, x, y, width, height, viewport));
+        render_selection_handles(output, index, x, y, width, height, viewport);
     }
 }
 
@@ -87,16 +93,18 @@ fn render_polyline(
         let dy = end[1] - start[1];
         let length = (dx * dx + dy * dy).sqrt().max(1.);
         let angle = dy.atan2(dx).to_degrees();
-        let line = rect()
-            .key(("drawing-segment", index, segment_index))
-            .position(absolute(viewport, start[0], start[1]))
-            .width(Size::px(length * viewport.zoom))
-            .height(Size::px(element.stroke_width.max(1.) * viewport.zoom))
-            .background(stroke)
-            .with_corner_radius(element.stroke_width.max(1.) * viewport.zoom / 2.)
-            .rotation(angle)
-            .a11y_alt(format!("{label} segment {segment_index}"));
-        output.push(line.into_element());
+        output.push(
+            rect()
+                .key(("drawing-segment", index, segment_index))
+                .position(absolute(viewport, start[0], start[1]))
+                .width(Size::px(length * viewport.zoom))
+                .height(Size::px(element.stroke_width.max(1.) * viewport.zoom))
+                .background(stroke)
+                .with_corner_radius(element.stroke_width.max(1.) * viewport.zoom / 2.)
+                .rotation(angle)
+                .a11y_alt(format!("{label} segment {segment_index}"))
+                .into_element(),
+        );
     }
     if element.kind == "arrow" && element.end_arrowhead.as_deref() != Some("none") {
         if let Some([previous, end]) = points
@@ -107,7 +115,7 @@ fn render_polyline(
             let dx = end[0] - previous[0];
             let dy = end[1] - previous[1];
             let angle = dy.atan2(dx).to_degrees();
-            for (branch, rotation) in [-150., 150.].into_iter().enumerate() {
+            for (branch, rotation) in [150., -150.].into_iter().enumerate() {
                 output.push(
                     rect()
                         .key(("drawing-arrowhead", index, branch))
@@ -162,9 +170,43 @@ fn selection_rect(
         .position(absolute(viewport, x - 4., y - 4.))
         .width(Size::px((width + 8.).max(8.) * viewport.zoom))
         .height(Size::px((height + 8.).max(8.) * viewport.zoom))
-        .border(Border::new().fill(Color::from_rgb(105, 101, 219)).width(1.))
+        .border(Border::new().fill(excalidraw_purple()).width(1.))
         .a11y_alt(format!("Drawing selection {index}"))
         .into_element()
+}
+
+fn render_selection_handles(
+    output: &mut Vec<Element>,
+    index: usize,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    viewport: Viewport,
+) {
+    let size = (8. / viewport.zoom).clamp(3., 12.);
+    for (handle, [hx, hy]) in [
+        [x, y],
+        [x + width, y],
+        [x, y + height],
+        [x + width, y + height],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        output.push(
+            rect()
+                .key(("drawing-selection-handle", index, handle))
+                .position(absolute(viewport, hx - size / 2., hy - size / 2.))
+                .width(Size::px(size * viewport.zoom))
+                .height(Size::px(size * viewport.zoom))
+                .background(Color::WHITE)
+                .border(Border::new().fill(excalidraw_purple()).width(1.))
+                .with_corner_radius(2.)
+                .a11y_alt(format!("Drawing selection handle {handle}"))
+                .into_element(),
+        );
+    }
 }
 
 fn points(element: &DrawingElement) -> Vec<[f32; 2]> {

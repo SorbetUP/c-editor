@@ -4,13 +4,15 @@
 //! primitives and pointer state; no WebView, React renderer, or fake success
 //! state is involved.
 
+#[path = "drawing_render.rs"]
 mod drawing_render;
+#[path = "drawing_scene.rs"]
 mod drawing_scene;
 
 use freya::prelude::*;
 
 pub use drawing_scene::{
-    DrawingCanvasState, DrawingElement, DrawingScene, RenderableElement, Viewport,
+    DrawingCanvasState, DrawingElement, DrawingScene, DrawingTool, RenderableElement, Viewport,
 };
 
 pub fn drawing_canvas() -> Element {
@@ -25,13 +27,14 @@ pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
     let mut end_state = state;
     let mut wheel_state = state;
     let primitives = drawing_render::render(&snapshot);
+    let background = color(snapshot.canvas_background());
 
     rect()
         .key(("native-excalidraw-canvas", snapshot.revision))
         .expanded()
-        .background(Color::WHITE)
+        .background(background)
         .overflow(Overflow::Clip)
-        .a11y_alt("DrawingCanvas")
+        .a11y_alt(format!("Drawing canvas · {}", snapshot.active_tool().label()))
         .on_mouse_down(move |event: Event<MouseEventData>| {
             if event.button == Some(MouseButton::Left) {
                 pointer_state
@@ -66,4 +69,16 @@ pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
 fn point(value: CursorPoint) -> [f32; 2] {
     let (x, y) = value.to_tuple();
     [x as f32, y as f32]
+}
+
+fn color(value: &str) -> Color {
+    let value = value.trim().trim_start_matches('#');
+    if value.len() == 6 {
+        let r = u8::from_str_radix(&value[0..2], 16).unwrap_or(255);
+        let g = u8::from_str_radix(&value[2..4], 16).unwrap_or(255);
+        let b = u8::from_str_radix(&value[4..6], 16).unwrap_or(255);
+        Color::from_rgb(r, g, b)
+    } else {
+        Color::WHITE
+    }
 }
