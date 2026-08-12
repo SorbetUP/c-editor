@@ -12,19 +12,22 @@ on:
       - ".github/workflows/freya-native.yml"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: freya-native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  navigation-check-and-test:
-    name: Freya navigation exact-branch validation
-    if: github.event_name == 'pull_request' && github.head_ref == 'parallel/freya-navigation-parity'
+  check-and-test:
+    name: Freya check and tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout navigation branch
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
         with:
-          ref: parallel/freya-navigation-parity
+          fetch-depth: 0
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
@@ -37,45 +40,141 @@ jobs:
           workspaces: |
             Elephant/freya -> target
 
-      - name: Format workspace but stage navigation-owned files only
+      - name: Diagnose full Freya formatting baseline
+        continue-on-error: true
+        run: cargo fmt --manifest-path Elephant/freya/Cargo.toml -- --check
+
+      - name: Check changed Rust formatting
         shell: bash
         run: |
-          set -euxo pipefail
-          cargo fmt --manifest-path Elephant/freya/Cargo.toml
-          git add \
-            Elephant/freya/src/app/navigation.rs \
-            Elephant/freya/src/app/navigation_icons.rs \
-            Elephant/freya/tests/navigation_visual_freya_testing.rs \
-            Elephant/freya/tests/shell_navigation_freya_testing.rs
-          git diff --cached --check
-
-      - name: Check Freya shell
-        run: cargo check --manifest-path Elephant/freya/Cargo.toml
-
-      - name: Test navigation unit contract
-        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib app::navigation::tests -- --test-threads=1
-
-      - name: Test Freya navigation integration
-        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test shell_navigation_freya_testing -- --test-threads=1
-
-      - name: Test Freya navigation visual contract
-        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test navigation_visual_freya_testing -- --test-threads=1
-
-      - name: Commit tested navigation formatting
-        shell: bash
-        run: |
-          set -euxo pipefail
-          if git diff --cached --quiet; then
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            base="HEAD^"
+          fi
+          mapfile -t files < <(
+            git diff --diff-filter=ACMR --name-only "$base" HEAD -- \
+              ':(glob)Elephant/freya/**/*.rs' \
+              ':(glob)Elephant/crates/muya-core/**/*.rs' \
+              ':(glob)Elephant/backend/knowledge-core/**/*.rs'
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No changed Rust files in the Freya validation scope."
             exit 0
           fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'style(freya): format navigation parity changes'
-          git push origin HEAD:parallel/freya-navigation-parity
+          printf 'rustfmt --check %s\n' "${files[@]}"
+          rustfmt --edition 2021 --check "${files[@]}"
 
-      - name: Diagnose inherited Freya library suite
+      - name: Check Freya shell
+        id: freya-check
+        run: cargo check --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Test Freya library
+        id: freya-library
         continue-on-error: true
-        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 2>&1 | tee /tmp/freya-lib.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            if [ "$status" -eq 124 ]; then
+              detail="library tests timed out after 180 seconds"
+            else
+              detail="library tests exited with status $status"
+            fi
+            python3 - "$detail" /tmp/freya-lib.log <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          detail, filename = sys.argv[1:]
+          raw = Path(filename).read_text(errors='replace')
+          ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+          lines = [ansi.sub('', line) for line in raw.splitlines()]
+          markers = (
+              ' FAILED', 'panicked at', 'failures:', 'test result: FAILED',
+              'NotFound', 'assertion ', 'Error:', 'error[E', 'error:'
+          )
+          interesting = []
+          for index, line in enumerate(lines):
+              if any(marker in line for marker in markers):
+                  interesting.extend(lines[max(0, index - 2):min(len(lines), index + 5)])
+          if not interesting:
+              interesting = lines[-40:]
+          compact = []
+          seen = set()
+          for line in interesting:
+              if line not in seen:
+                  compact.append(line)
+                  seen.add(line)
+          message = detail + '\n' + '\n'.join(compact[-80:])
+          escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=Freya library tests::{escaped}')
+          PY
+          fi
+          exit "$status"
+
+      - name: Test Freya integration suites independently
+        if: ${{ !cancelled() && steps.freya-check.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          failures=0
+          for file in Elephant/freya/tests/*.rs; do
+            suite="$(basename "$file" .rs)"
+            echo "::group::Freya suite: $suite"
+            set +e
+            timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test "$suite" -- --test-threads=1 2>&1 | tee "/tmp/freya-${suite}.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then
+              failures=$((failures + 1))
+              if [ "$status" -eq 124 ]; then
+                detail="suite timed out after 180 seconds"
+              else
+                detail="suite exited with status $status"
+              fi
+              python3 - "$suite" "$detail" "/tmp/freya-${suite}.log" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          suite, detail, filename = sys.argv[1:]
+          raw = Path(filename).read_text(errors='replace')
+          ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+          lines = [ansi.sub('', line) for line in raw.splitlines()]
+          markers = (
+              ' FAILED', 'panicked at', 'failures:', 'test result: FAILED',
+              'NotFound', 'assertion ', 'Error:', 'error[E', 'error:'
+          )
+          interesting = []
+          for index, line in enumerate(lines):
+              if any(marker in line for marker in markers):
+                  interesting.extend(lines[max(0, index - 2):min(len(lines), index + 5)])
+          if not interesting:
+              interesting = lines[-30:]
+          compact = []
+          seen = set()
+          for line in interesting:
+              if line not in seen:
+                  compact.append(line)
+                  seen.add(line)
+          message = detail + '\n' + '\n'.join(compact[-60:])
+          escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=Freya suite {suite}::{escaped}')
+          PY
+            fi
+          done
+          if [ "$failures" -ne 0 ]; then
+            echo "Freya integration failures: $failures"
+            exit 1
+          fi
+
+      - name: Fail when Freya library tests failed
+        if: ${{ always() && steps.freya-library.outcome == 'failure' }}
+        run: exit 1
 
   macos-check:
     name: Freya macOS compile
@@ -83,7 +182,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
