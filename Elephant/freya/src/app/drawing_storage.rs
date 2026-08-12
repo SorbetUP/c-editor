@@ -31,6 +31,12 @@ pub(super) struct CreatedScene {
     pub(super) relative_path: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RenamedScene {
+    pub(super) relative_path: String,
+    pub(super) title: String,
+}
+
 /// Create a hidden sidecar scene for image-backed/Tauri-compatible assets.
 ///
 /// Native library creation should use [`create_standalone_scene`] instead.
@@ -83,7 +89,7 @@ pub(super) fn create_standalone_scene(
 }
 
 fn create_scene_at(root: &Path, directory: &Path, title: &str) -> Result<CreatedScene, String> {
-    let safe_title = sanitize_asset_name(title, "Untitled Drawing");
+    let safe_title = sanitize_scene_title(title, "Untitled Drawing");
     let (path, resolved_title) = unique_scene_path(directory, &safe_title);
     let scene = json!({
         "kind": "excalidraw",
@@ -182,6 +188,60 @@ pub(super) fn write_scene(root: &Path, relative_path: &str, raw: &str) -> Result
         let _ = fs::remove_file(&temp_path);
     }
     Ok(())
+}
+
+pub(super) fn can_rename_standalone_scene(relative_path: &str, has_preview: bool) -> bool {
+    if has_preview {
+        return false;
+    }
+    let normalized = relative_path.replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    lower.ends_with(".excalidraw")
+        && lower != ASSETS_DIR
+        && !lower.starts_with(&format!("{ASSETS_DIR}/"))
+        && !lower.contains(&format!("/{ASSETS_DIR}/"))
+}
+
+pub(super) fn rename_standalone_scene(
+    root: &Path,
+    relative_path: &str,
+    title: &str,
+) -> Result<RenamedScene, String> {
+    let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let current_path = scene_path(&canonical_root, relative_path)?;
+    if !can_rename_standalone_scene(relative_path, preview_path(&current_path).exists()) {
+        return Err(format!(
+            "Refusing to rename image-backed or hidden drawing: {relative_path}"
+        ));
+    }
+    let directory = current_path
+        .parent()
+        .ok_or_else(|| format!("Drawing has no parent directory: {relative_path}"))?;
+    let safe_title = sanitize_scene_title(title, "Untitled Drawing");
+    let current_title = current_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if current_title == safe_title {
+        return Ok(RenamedScene {
+            relative_path: relative_from_root(&canonical_root, &current_path)?,
+            title: safe_title,
+        });
+    }
+
+    let (target, resolved_title) = unique_scene_path(directory, &safe_title);
+    reject_symlink(&target, "drawing rename target")?;
+    fs::rename(&current_path, &target).map_err(|error| {
+        format!(
+            "Unable to rename drawing {} to {}: {error}",
+            current_path.display(),
+            target.display()
+        )
+    })?;
+    Ok(RenamedScene {
+        relative_path: relative_from_root(&canonical_root, &target)?,
+        title: resolved_title,
+    })
 }
 
 fn validate_scene(raw: &str, scene_path: &Path) -> Result<Value, String> {
@@ -323,6 +383,21 @@ fn unique_scene_path(directory: &Path, base_title: &str) -> (PathBuf, String) {
         }
     }
     unreachable!("unbounded suffix iterator always returns a candidate")
+}
+
+fn sanitize_scene_title(value: &str, fallback: &str) -> String {
+    let cleaned = sanitize_asset_name(value, fallback);
+    let lower = cleaned.to_ascii_lowercase();
+    let stripped = [".excalidraw.png", ".excalidraw", ".png"]
+        .into_iter()
+        .find(|suffix| lower.ends_with(suffix))
+        .map(|suffix| cleaned[..cleaned.len() - suffix.len()].trim())
+        .unwrap_or(cleaned.as_str());
+    if stripped.is_empty() {
+        fallback.to_owned()
+    } else {
+        stripped.to_owned()
+    }
 }
 
 fn sanitize_asset_name(value: &str, fallback: &str) -> String {
@@ -502,6 +577,31 @@ mod tests {
         let vault = TestVault::new();
         assert!(create_standalone_scene(&vault.0, "../outside", "Sketch").is_err());
         assert!(create_standalone_scene(&vault.0, "missing", "Sketch").is_err());
+    }
+
+    #[test]
+    fn standalone_rename_normalizes_extensions_and_avoids_collisions() {
+        let vault = TestVault::new();
+        let first = create_standalone_scene(&vault.0, "", "Sketch").unwrap();
+        let second = create_standalone_scene(&vault.0, "", "Other").unwrap();
+
+        let renamed =
+            rename_standalone_scene(&vault.0, &second.relative_path, "Sketch.excalidraw.png")
+                .unwrap();
+
+        assert_eq!(renamed.title, "Sketch 2");
+        assert_eq!(renamed.relative_path, "Sketch 2.excalidraw");
+        assert!(vault.0.join(&first.relative_path).is_file());
+        assert!(vault.0.join(&renamed.relative_path).is_file());
+        assert!(!vault.0.join(&second.relative_path).exists());
+    }
+
+    #[test]
+    fn image_backed_sidecar_is_not_renamed_without_rewriting_its_owner() {
+        let vault = TestVault::new();
+        let created = create_scene(&vault.0, "Linked").unwrap();
+        assert!(!can_rename_standalone_scene(&created.relative_path, false));
+        assert!(rename_standalone_scene(&vault.0, &created.relative_path, "Other").is_err());
     }
 
     #[test]
