@@ -1087,6 +1087,17 @@ fn rebase_expanded_paths(paths: &mut HashSet<String>, source: &str, destination:
     *paths = rebased;
 }
 
+fn moved_relative_path(source: &str, target_directory: &str) -> Option<String> {
+    let source = normalize_sidebar_path(source);
+    let target_directory = normalize_sidebar_path(target_directory);
+    let filename = source.rsplit('/').next().filter(|filename| !filename.is_empty())?;
+    Some(if target_directory.is_empty() {
+        filename.to_string()
+    } else {
+        format!("{target_directory}/{filename}")
+    })
+}
+
 fn move_sidebar_entry(
     shell: &mut ShellState,
     source: &str,
@@ -1098,6 +1109,9 @@ fn move_sidebar_entry(
     };
     let source = normalize_sidebar_path(source);
     let target_directory = normalize_sidebar_path(target_directory);
+    let Some(new_path) = moved_relative_path(&source, &target_directory) else {
+        return None;
+    };
     let opened_relative = shell
         .editor
         .as_ref()
@@ -1109,9 +1123,8 @@ fn move_sidebar_entry(
         "[freya][sidebar] action:move-start source={} target={}",
         source, target_directory
     );
-    match vault.move_entry(&source, &target_directory) {
-        Ok(new_path) => {
-            let new_path = normalize_sidebar_path(&new_path);
+    match vault.move_entry(&source, Some(target_directory.clone())) {
+        Ok(true) => {
             let current = shell.library.current_path.as_str().to_string();
             let next_current = rebase_path(&current, &source, &new_path);
             shell.library.current_path =
@@ -1136,6 +1149,13 @@ fn move_sidebar_entry(
                 source, new_path
             );
             Some(new_path)
+        }
+        Ok(false) => {
+            eprintln!(
+                "[freya][sidebar] action:move-noop source={} target={}",
+                source, target_directory
+            );
+            None
         }
         Err(error) => {
             eprintln!(
@@ -1255,6 +1275,14 @@ mod tests {
         assert_eq!(
             rebase_path("Other", "Projects", "Archive/Projects"),
             "Other"
+        );
+        assert_eq!(
+            moved_relative_path("Projects/Plan.md", "Archive"),
+            Some("Archive/Plan.md".to_string())
+        );
+        assert_eq!(
+            moved_relative_path("Projects/Plan.md", ""),
+            Some("Plan.md".to_string())
         );
     }
 
