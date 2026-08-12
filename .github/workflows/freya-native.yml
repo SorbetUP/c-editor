@@ -32,6 +32,17 @@ jobs:
           workspaces: |
             Elephant/freya -> target
 
+      - name: Install Freya Linux test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1-mesa-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgl1-mesa-dev \
+            libgles2-mesa-dev \
+            libwayland-dev
+
       - name: Check Freya shell
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
