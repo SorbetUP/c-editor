@@ -3,13 +3,12 @@
 //! Tauri's `AtomicGraphView.vue` remains the visual/interaction reference:
 //! the graph uses the real knowledge-core projection, connectivity-scaled
 //! nodes, cluster colors, weighted links, label thresholds, a focus camera,
-//! pan/zoom, hover and a note preview card.  No renderer-side sample graph or
+//! pan/zoom, hover and a note preview card. No renderer-side sample graph or
 //! arbitrary node-count limit is introduced here.
 
 use super::explorer::ExplorerState;
-use crate::{
-    search_graph_contract::{GraphCluster, GraphEdge, GraphEdgeType, GraphNode, GraphNodeKind},
-    theme,
+use crate::search_graph_contract::{
+    GraphCluster, GraphEdge, GraphEdgeType, GraphNode, GraphNodeKind,
 };
 use freya::prelude::*;
 use std::{
@@ -20,17 +19,23 @@ use std::{
 const BASE_WORLD_WIDTH: f32 = 1_800.;
 const BASE_WORLD_HEIGHT: f32 = 1_200.;
 const STAGE_PADDING: f32 = 40.;
-const LABEL_THRESHOLD: f32 = 7.;
-const MIN_ZOOM: f32 = 0.125;
-const MAX_ZOOM: f32 = 20.;
+const MIN_ZOOM: f32 = 0.1;
+const MAX_ZOOM: f32 = 4.;
 const FOCUS_ZOOM_MULTIPLIER: f32 = 2.5;
+const DEFAULT_LABEL_THRESHOLD: f32 = 7.;
+const DEFAULT_NODE_SIZE_SCALE: f32 = 1.;
+const DEFAULT_LINK_THICKNESS: f32 = 1.;
+const CLICK_SLOP: f32 = 4.;
 
 // `graphThemes.js` -> Midnight/dark, the Tauri graph store's default theme.
 const GRAPH_BG: (u8, u8, u8) = (18, 20, 28);
 const GRAPH_LABEL: (u8, u8, u8) = (112, 136, 176);
-const GRAPH_LABEL_ACTIVE: (u8, u8, u8) = (220, 228, 246);
+const GRAPH_LABEL_ACTIVE: (u8, u8, u8) = (240, 237, 255);
 const GRAPH_CARD_BG: (u8, u8, u8) = (16, 18, 26);
 const GRAPH_CARD_BORDER: (u8, u8, u8) = (70, 90, 150);
+const GRAPH_CONTROL_BG: (u8, u8, u8) = (24, 27, 38);
+const GRAPH_CONTROL_SOFT: (u8, u8, u8) = (34, 39, 54);
+const GRAPH_PRIMARY: (u8, u8, u8) = (124, 92, 237);
 const MIDNIGHT_NODE_PALETTE: [(u8, u8, u8); 8] = [
     (90, 130, 240),
     (60, 180, 190),
@@ -66,6 +71,13 @@ pub struct GraphCanvasState {
     hovered: Option<String>,
     overrides: BTreeMap<String, [f32; 2]>,
     fitted: bool,
+    options_open: bool,
+    show_labels: bool,
+    show_stats: bool,
+    label_threshold: f32,
+    node_size_scale: f32,
+    link_thickness: f32,
+    card_collapsed: bool,
 }
 
 impl Default for GraphCanvasState {
@@ -80,6 +92,14 @@ impl Default for GraphCanvasState {
             hovered: None,
             overrides: BTreeMap::new(),
             fitted: false,
+            // AtomicGraphView opens the options panel by default.
+            options_open: true,
+            show_labels: true,
+            show_stats: true,
+            label_threshold: DEFAULT_LABEL_THRESHOLD,
+            node_size_scale: DEFAULT_NODE_SIZE_SCALE,
+            link_thickness: DEFAULT_LINK_THICKNESS,
+            card_collapsed: false,
         }
     }
 }
@@ -129,7 +149,7 @@ impl GraphCanvasState {
         let fit_zoom = (available_width / self.content_size[0].max(1.))
             .min(available_height / self.content_size[1].max(1.));
         // Tauri focuses a selected node with Sigma camera ratio 0.4, i.e.
-        // 2.5x the reset scale.
+        // approximately 2.5x the reset scale.
         self.zoom = (fit_zoom * FOCUS_ZOOM_MULTIPLIER).clamp(MIN_ZOOM, MAX_ZOOM);
         self.center_on(position);
     }
@@ -138,6 +158,19 @@ impl GraphCanvasState {
         self.pan = [
             self.size[0] / 2. - position[0] * self.zoom,
             self.size[1] / 2. - position[1] * self.zoom,
+        ];
+    }
+
+    fn set_zoom_centered(&mut self, zoom: f32) {
+        let center = [self.size[0] / 2., self.size[1] / 2.];
+        let world = [
+            (center[0] - self.pan[0]) / self.zoom,
+            (center[1] - self.pan[1]) / self.zoom,
+        ];
+        self.zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        self.pan = [
+            center[0] - world[0] * self.zoom,
+            center[1] - world[1] * self.zoom,
         ];
     }
 
@@ -202,8 +235,16 @@ impl GraphCanvasState {
         }
     }
 
-    fn end_pointer(&mut self) {
+    /// Ends a pointer gesture and returns true only for a stage click, not a pan
+    /// or a node drag. AtomicGraphView uses such a click to clear selection.
+    fn end_pointer_at(&mut self, pointer: [f32; 2]) -> bool {
+        let stage_click = matches!(
+            self.dragging.as_ref(),
+            Some(DragState::Pan { pointer: start, .. })
+                if squared_distance(*start, pointer) <= CLICK_SLOP * CLICK_SLOP
+        );
         self.dragging = None;
+        stage_click
     }
 
     fn set_hovered(&mut self, id: Option<String>) {
@@ -226,13 +267,20 @@ impl GraphCanvasState {
             local[1] - before[1] * self.zoom,
         ];
     }
+
+    fn reset_display_options(&mut self) {
+        self.show_labels = true;
+        self.show_stats = true;
+        self.label_threshold = DEFAULT_LABEL_THRESHOLD;
+        self.node_size_scale = DEFAULT_NODE_SIZE_SCALE;
+        self.link_thickness = DEFAULT_LINK_THICKNESS;
+    }
 }
 
 #[derive(Clone, Debug)]
 struct CanvasNode {
     id: String,
     title: String,
-    kind: GraphNodeKind,
     position: [f32; 2],
     radius: f32,
     connectivity: f32,
@@ -297,14 +345,20 @@ pub fn render(
         let Some(target) = nodes.iter().find(|node| node.id == edge.target) else {
             continue;
         };
-        let emphasized = active_id.is_some_and(|active| edge.source == active || edge.target == active);
+        let touches_selected = selected_id
+            .as_deref()
+            .is_some_and(|active| edge.source == active || edge.target == active);
+        let touches_hovered = hovered_id
+            .as_deref()
+            .is_some_and(|active| edge.source == active || edge.target == active);
         edge_elements.push(render_edge(
             edge,
             source.position,
             target.position,
             &viewport,
             normalize_edge_weight(edge.weight, min_weight, max_weight),
-            emphasized,
+            touches_selected,
+            touches_hovered,
             active_id.is_some(),
         ));
     }
@@ -321,13 +375,22 @@ pub fn render(
                 .get(active)
                 .is_some_and(|set| set.contains(node.id.as_str()))
         });
-        let display_radius = display_radius(node.radius, selected, hovered, neighboring, active_id.is_some());
+        let display_radius = display_radius(
+            node.radius * viewport.node_size_scale,
+            selected,
+            hovered,
+            neighboring,
+            active_id.is_some(),
+        );
         let center = viewport.screen_position(node.position);
         let id = node.id.clone();
         let position = node.position;
         let mut node_canvas = canvas.clone();
         let mut node_explorer = explorer.clone();
-        let label_visible = selected || hovered || display_radius >= LABEL_THRESHOLD;
+        let effective_threshold =
+            viewport.label_threshold * (1. / viewport.zoom.max(MIN_ZOOM)).max(0.5);
+        let label_visible =
+            selected || hovered || (viewport.show_labels && display_radius >= effective_threshold);
 
         node_elements.push(
             rect()
@@ -340,6 +403,23 @@ pub fn render(
                 .width(Size::px(display_radius * 2.))
                 .height(Size::px(display_radius * 2.))
                 .background(node_color(node.cluster_index, node.connectivity))
+                .border(
+                    Border::new()
+                        .fill(if selected {
+                            Color::from_rgb(168, 150, 255)
+                        } else if hovered {
+                            Color::from_rgb(240, 237, 255)
+                        } else {
+                            node_color(node.cluster_index, node.connectivity)
+                        })
+                        .width(if selected {
+                            2.
+                        } else if hovered {
+                            1.5
+                        } else {
+                            0.
+                        }),
+                )
                 .with_corner_radius(display_radius)
                 .on_mouse_down(move |event: Event<MouseEventData>| {
                     if event.button == Some(MouseButton::Left) {
@@ -348,6 +428,7 @@ pub fn render(
                             .write()
                             .begin_node_drag(id.clone(), pointer, position);
                         node_canvas.write().focus_on(position);
+                        node_canvas.write().card_collapsed = false;
                         node_explorer.write().select_graph_node(id.clone());
                         event.stop_propagation();
                     }
@@ -357,31 +438,63 @@ pub fn render(
         );
 
         if label_visible {
-            let font_size = if selected { 14. } else if hovered { 13. } else { 12. };
+            let font_size = if selected {
+                14.
+            } else if hovered {
+                13.
+            } else {
+                12.
+            };
+            let max_chars = label_max_chars(selected, hovered);
+            let label_text = trunc_label(&node.title, max_chars);
+            let pill_width = ((label_text.chars().count() as f32 * font_size * 0.58)
+                + if selected || hovered { 20. } else { 16. })
+                .clamp(42., 300.);
+            let pill_height = font_size + if selected || hovered { 10. } else { 8. };
+            let label_top = center[1] + display_radius + 4.;
+
             node_elements.push(
-                label()
-                    .key(("graph-node-title", node.id.clone()))
+                rect()
+                    .key(("graph-node-title-pill", node.id.clone()))
                     .position(
                         Position::new_absolute()
-                            .left(center[0] + display_radius + 7.)
-                            .top(center[1] - font_size / 2.),
+                            .left(center[0] - pill_width / 2.)
+                            .top(label_top),
                     )
-                    .width(Size::px(190.))
-                    .height(Size::px(22.))
-                    .font_size(font_size)
-                    .font_weight(if selected {
-                        FontWeight::BOLD
-                    } else if hovered {
-                        FontWeight::SEMI_BOLD
-                    } else {
-                        FontWeight::MEDIUM
-                    })
-                    .color(rgb(if selected || hovered {
-                        GRAPH_LABEL_ACTIVE
-                    } else {
-                        GRAPH_LABEL
-                    }))
-                    .text(trunc_label(&node.title, 28))
+                    .width(Size::px(pill_width))
+                    .height(Size::px(pill_height))
+                    .center()
+                    .background(Color::from_rgb(18, 22, 30))
+                    .border(
+                        Border::new()
+                            .fill(if selected {
+                                Color::from_rgb(168, 150, 255)
+                            } else if hovered {
+                                Color::from_rgb(170, 160, 255)
+                            } else {
+                                rgb(GRAPH_CARD_BORDER)
+                            })
+                            .width(if selected { 1.5 } else if hovered { 1.2 } else { 1. }),
+                    )
+                    .with_corner_radius(pill_height / 2.)
+                    .a11y_alt(node.title.clone())
+                    .child(
+                        label()
+                            .font_size(font_size)
+                            .font_weight(if selected {
+                                FontWeight::BOLD
+                            } else if hovered {
+                                FontWeight::SEMI_BOLD
+                            } else {
+                                FontWeight::MEDIUM
+                            })
+                            .color(rgb(if selected || hovered {
+                                GRAPH_LABEL_ACTIVE
+                            } else {
+                                GRAPH_LABEL
+                            }))
+                            .text(label_text),
+                    )
                     .into_element(),
             );
         }
@@ -389,18 +502,22 @@ pub fn render(
 
     let stats_text = format!("{} nœuds · {} liens", visible_ids.len(), edge_elements.len());
     let viewport_label = viewport.viewport_label();
-    let selected_card = selected_card(&mut explorer, snapshot, &nodes, &viewport);
+    let selected_card = selected_card(&mut explorer, snapshot, &nodes, &viewport, canvas.clone());
+    let options_panel = options_panel(canvas.clone(), &viewport);
     let mut size_canvas = canvas.clone();
     let mut stage_canvas = canvas.clone();
     let mut stage_explorer = explorer.clone();
     let mut move_canvas = canvas.clone();
     let mut end_canvas = canvas.clone();
+    let mut end_explorer = explorer.clone();
     let mut wheel_canvas = canvas.clone();
     let mut reset_canvas = canvas.clone();
+    let mut zoom_canvas = canvas.clone();
+    let mut options_canvas = canvas.clone();
     let hit_nodes = nodes.clone();
     let click_hit_nodes = nodes.clone();
-    let stats_top = (viewport.size[1] - 34.).max(8.);
-    let reset_top = (viewport.size[1] - 72.).max(8.);
+    let stats_top = (viewport.size[1] - 72.).max(8.);
+    let controls_top = (viewport.size[1] - 38.).max(8.);
     let zoom_percent = (viewport.zoom * 100.).round();
 
     rect()
@@ -419,6 +536,7 @@ pub fn render(
                         .write()
                         .begin_node_drag(node.id.clone(), pointer, node.position);
                     stage_canvas.write().focus_on(node.position);
+                    stage_canvas.write().card_collapsed = false;
                     stage_explorer.write().select_graph_node(node.id.clone());
                 } else {
                     stage_canvas.write().begin_pan(pointer);
@@ -440,9 +558,16 @@ pub fn render(
             }
             event.stop_propagation();
         })
-        .on_global_pointer_press(move |event: Event<PointerEventData>| {
-            if event.is_primary() {
-                end_canvas.write().end_pointer();
+        .on_global_pointer_up(move |event: Event<PointerEventData>| {
+            if !event.is_primary() {
+                return;
+            }
+            let stage_click = end_canvas
+                .write()
+                .end_pointer_at(point(event.global_location()));
+            if stage_click {
+                end_explorer.write().graph.selected_node_id = None;
+                end_canvas.write().card_collapsed = false;
             }
         })
         .on_wheel(move |event: Event<WheelEventData>| {
@@ -467,53 +592,100 @@ pub fn render(
                 .a11y_alt("Graph nodes")
                 .children(node_elements),
         )
-        .child(
+        .maybe_child(viewport.show_stats.then(|| {
             rect()
-                .position(Position::new_absolute().left(12.).top(stats_top))
+                .position(Position::new_absolute().left(22.).top(stats_top))
                 .height(Size::px(26.))
                 .padding(Gaps::new(0., 12., 0., 12.))
                 .center()
-                .background(rgb(GRAPH_CARD_BG))
+                .background(rgb(GRAPH_CONTROL_BG))
                 .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
                 .with_corner_radius(13.)
                 .a11y_alt(stats_text.clone())
                 .child(
                     label()
                         .font_size(12.)
+                        .font_weight(FontWeight::SEMI_BOLD)
                         .color(rgb(GRAPH_LABEL))
-                        .text(stats_text),
+                        .text(stats_text.clone()),
+                )
+        }))
+        .child(
+            rect()
+                .position(Position::new_absolute().left(22.).top(controls_top))
+                .height(Size::px(32.))
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .spacing(10.)
+                .a11y_alt("Graph zoom controls")
+                .child(
+                    rect()
+                        .width(Size::px(30.))
+                        .height(Size::px(30.))
+                        .center()
+                        .background(rgb(GRAPH_PRIMARY))
+                        .with_corner_radius(15.)
+                        .on_mouse_up(move |_| reset_canvas.write().fit_to_content())
+                        .a11y_alt("Recenter graph")
+                        .child(
+                            label()
+                                .font_size(14.)
+                                .font_weight(FontWeight::BOLD)
+                                .color(Color::WHITE)
+                                .text("⌖"),
+                        ),
+                )
+                .child(
+                    Slider::new(move |value| {
+                        zoom_canvas
+                            .write()
+                            .set_zoom_centered(slider_to_zoom(value));
+                    })
+                    .value(zoom_to_slider(viewport.zoom))
+                    .size(Size::px(100.)),
+                )
+                .child(
+                    label()
+                        .width(Size::px(42.))
+                        .font_size(12.)
+                        .color(rgb(GRAPH_LABEL))
+                        .text(format!("{zoom_percent:.0}%")),
                 ),
         )
         .child(
             rect()
-                .position(Position::new_absolute().left(12.).top(reset_top))
-                .height(Size::px(30.))
-                .padding(Gaps::new(0., 10., 0., 10.))
+                .position(Position::new_absolute().right(22.).top(14.))
+                .width(Size::px(38.))
+                .height(Size::px(38.))
                 .center()
-                .background(rgb(GRAPH_CARD_BG))
+                .background(rgb(if viewport.options_open {
+                    GRAPH_CONTROL_SOFT
+                } else {
+                    GRAPH_CONTROL_BG
+                }))
                 .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
-                .with_corner_radius(9.)
-                .on_mouse_up(move |_| reset_canvas.write().fit_to_content())
-                .a11y_alt("Recenter graph")
+                .with_corner_radius(10.)
+                .on_mouse_up(move |_| {
+                    let open = options_canvas.read().options_open;
+                    options_canvas.write().options_open = !open;
+                })
+                .a11y_alt("Graph options")
                 .child(
                     label()
-                        .font_size(12.)
+                        .font_size(17.)
                         .color(rgb(GRAPH_LABEL_ACTIVE))
-                        .text(format!("Recentrer · {zoom_percent:.0}%")),
+                        .text("⚙"),
                 ),
         )
+        .maybe_child(options_panel)
         .maybe_child(selected_card)
         .into_element()
 }
 
 fn world_size_for_count(node_count: usize) -> [f32; 2] {
-    // Exact scaling rule used by AtomicGraphView before building its semantic
-    // view model.  This is the important >200 density behavior: the world
-    // grows with sqrt(N) instead of silently truncating nodes.
-    let scale = (node_count as f32).sqrt().div_euclid(12.).max(1.);
-    // `div_euclid` on floats is not the Tauri expression. Correct the quotient
-    // to ordinary division while keeping this helper explicit and testable.
-    let scale = ((node_count as f32).sqrt() / 12.).max(scale).max(1.);
+    // Exact scaling rule used by AtomicGraphView:
+    // Math.max(1, Math.sqrt(nodeCount) / 12).
+    let scale = ((node_count as f32).sqrt() / 12.).max(1.);
     [BASE_WORLD_WIDTH * scale, BASE_WORLD_HEIGHT * scale]
 }
 
@@ -614,9 +786,9 @@ fn layout_graph_nodes(
             .unwrap_or(group_index);
 
         for (index, node) in group.iter().enumerate() {
-            // Deterministic phyllotaxis avoids the severe overlap produced by
-            // a single orbit for large folders while remaining cheap enough to
-            // recompute during native interaction. Source/saved positions win.
+            // Deterministic phyllotaxis avoids severe overlap in large folders
+            // while remaining cheap enough for native interaction. Source/saved
+            // positions still win over generated positions.
             let radius = 36. * (index as f32).sqrt();
             let angle = -PI / 2. + index as f32 * golden_angle;
             let generated = [
@@ -657,7 +829,6 @@ fn layout_graph_nodes(
                     CanvasNode {
                         id: node.id.clone(),
                         title: node.title.clone(),
-                        kind: node.kind,
                         position,
                         radius,
                         connectivity,
@@ -668,7 +839,9 @@ fn layout_graph_nodes(
         .collect()
 }
 
-fn build_neighbors<'a>(edges: impl Iterator<Item = &'a GraphEdge>) -> BTreeMap<String, BTreeSet<String>> {
+fn build_neighbors<'a>(
+    edges: impl Iterator<Item = &'a GraphEdge>,
+) -> BTreeMap<String, BTreeSet<String>> {
     let mut neighbors = BTreeMap::<String, BTreeSet<String>>::new();
     for edge in edges {
         neighbors
@@ -711,7 +884,7 @@ fn hit_test_node<'a>(
     let local = viewport.local_pointer(pointer);
     nodes.iter().find(|node| {
         let center = viewport.screen_position(node.position);
-        let hit_radius = node.radius.max(6.) + 7.;
+        let hit_radius = (node.radius * viewport.node_size_scale).max(6.) + 7.;
         let dx = local[0] - center[0];
         let dy = local[1] - center[1];
         dx * dx + dy * dy <= hit_radius * hit_radius
@@ -733,7 +906,8 @@ fn render_edge(
     target: [f32; 2],
     viewport: &GraphCanvasState,
     normalized_weight: f32,
-    emphasized: bool,
+    touches_selected: bool,
+    touches_hovered: bool,
     focus_active: bool,
 ) -> Element {
     let source = viewport.screen_position(source);
@@ -742,14 +916,21 @@ fn render_edge(
     let dy = target[1] - source[1];
     let length = (dx * dx + dy * dy).sqrt().max(1.);
     let angle = dy.atan2(dx).to_degrees();
-    let mut thickness = 0.25 + normalized_weight * 0.7;
-    if emphasized {
-        thickness += 0.6;
+    let base = (0.25 + normalized_weight * 0.7) * viewport.link_thickness;
+    let thickness = if touches_selected {
+        base + 0.6
+    } else if touches_hovered {
+        base + 0.5
     } else if focus_active {
-        thickness *= 0.3;
+        base * 0.3
+    } else {
+        base
     }
-    thickness = thickness.max(0.35);
-    let midpoint = [(source[0] + target[0]) / 2., (source[1] + target[1]) / 2.];
+    .max(0.12);
+    let midpoint = [
+        (source[0] + target[0]) / 2.,
+        (source[1] + target[1]) / 2.,
+    ];
 
     rect()
         .key(("graph-edge", edge.id.clone()))
@@ -773,6 +954,7 @@ fn selected_card(
     snapshot: &ExplorerState,
     nodes: &[CanvasNode],
     viewport: &GraphCanvasState,
+    canvas: State<GraphCanvasState>,
 ) -> Option<Element> {
     let selected_id = snapshot.graph.selected_node_id.as_deref()?;
     let selected_canvas = nodes.iter().find(|node| node.id == selected_id)?;
@@ -784,8 +966,8 @@ fn selected_card(
         .iter()
         .find(|node| node.id == selected_id)?;
     let center = viewport.screen_position(selected_canvas.position);
-    let left = (center[0] + 22.).clamp(12., (viewport.size[0] - 322.).max(12.));
-    let top = (center[1] + 22.).clamp(12., (viewport.size[1] - 250.).max(12.));
+    let left = (center[0] + 40.).clamp(16., (viewport.size[0] - 396.).max(16.));
+    let top = (center[1] - 60.).clamp(16., (viewport.size[1] - 92.).max(16.));
     let title = selected.title.clone();
     let summary = if selected.summary.trim().is_empty() {
         "Aucun résumé pour cette note.".to_string()
@@ -809,57 +991,359 @@ fn selected_card(
         selected.source_count,
         selected.chunk_count
     );
-    let mut state = state.clone();
+    let collapsed = viewport.card_collapsed;
+    let mut open_state = state.clone();
+    let mut close_state = state.clone();
+    let mut close_canvas = canvas.clone();
+    let mut collapse_canvas = canvas;
 
     Some(
         rect()
             .position(Position::new_absolute().left(left).top(top))
-            .width(Size::px(310.))
+            .width(Size::px(380.))
             .padding(Gaps::new_all(12.))
             .spacing(8.)
             .background(rgb(GRAPH_CARD_BG))
             .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
-            .with_corner_radius(12.)
+            .with_corner_radius(14.)
             .a11y_alt(format!("Graph node selected {title}"))
             .child(
-                label()
-                    .font_size(15.)
-                    .font_weight(FontWeight::BOLD)
-                    .color(rgb(GRAPH_LABEL_ACTIVE))
-                    .text(title),
-            )
-            .child(label().font_size(11.).color(rgb(GRAPH_LABEL)).text(meta))
-            .child(
-                label()
-                    .font_size(12.)
-                    .color(rgb(GRAPH_LABEL_ACTIVE))
-                    .text(trunc_label(&summary, 180)),
-            )
-            .maybe_child((!tags.is_empty()).then(|| {
-                label()
-                    .font_size(11.)
-                    .color(Color::from_rgb(155, 108, 255))
-                    .text(tags)
-            }))
-            .child(
                 rect()
-                    .height(Size::px(32.))
-                    .padding(Gaps::new(0., 12., 0., 12.))
-                    .center()
-                    .background(Color::from_rgb(59, 91, 190))
-                    .with_corner_radius(8.)
-                    .on_mouse_up(move |_| state.write().open_selected_graph_node())
-                    .a11y_alt("Open selected note")
+                    .width(Size::fill())
+                    .height(Size::px(30.))
+                    .horizontal()
+                    .main_align(Alignment::SpaceBetween)
+                    .cross_align(Alignment::Center)
+                    .child(
+                        label()
+                            .font_size(15.)
+                            .font_weight(FontWeight::BOLD)
+                            .color(rgb(GRAPH_LABEL_ACTIVE))
+                            .text(trunc_label(&title, 48)),
+                    )
+                    .child(
+                        rect()
+                            .horizontal()
+                            .spacing(4.)
+                            .child(
+                                rect()
+                                    .width(Size::px(28.))
+                                    .height(Size::px(28.))
+                                    .center()
+                                    .with_corner_radius(7.)
+                                    .background(rgb(GRAPH_CONTROL_BG))
+                                    .on_mouse_up(move |_| {
+                                        let current = collapse_canvas.read().card_collapsed;
+                                        collapse_canvas.write().card_collapsed = !current;
+                                    })
+                                    .a11y_alt(if collapsed {
+                                        "Expand graph note card"
+                                    } else {
+                                        "Collapse graph note card"
+                                    })
+                                    .child(
+                                        label()
+                                            .font_size(14.)
+                                            .color(rgb(GRAPH_LABEL))
+                                            .text(if collapsed { "⌃" } else { "⌄" }),
+                                    ),
+                            )
+                            .child(
+                                rect()
+                                    .width(Size::px(28.))
+                                    .height(Size::px(28.))
+                                    .center()
+                                    .with_corner_radius(7.)
+                                    .background(rgb(GRAPH_CONTROL_BG))
+                                    .on_mouse_up(move |_| {
+                                        close_state.write().graph.selected_node_id = None;
+                                        close_canvas.write().card_collapsed = false;
+                                    })
+                                    .a11y_alt("Close graph note card")
+                                    .child(
+                                        label()
+                                            .font_size(14.)
+                                            .color(rgb(GRAPH_LABEL))
+                                            .text("×"),
+                                    ),
+                            ),
+                    ),
+            )
+            .maybe_child((!collapsed).then(|| {
+                rect()
+                    .spacing(8.)
+                    .child(label().font_size(11.).color(rgb(GRAPH_LABEL)).text(meta))
                     .child(
                         label()
                             .font_size(12.)
-                            .font_weight(FontWeight::SEMI_BOLD)
-                            .color(Color::from_rgb(245, 247, 255))
-                            .text("Ouvrir la note"),
+                            .color(rgb(GRAPH_LABEL_ACTIVE))
+                            .text(trunc_label(&summary, 180)),
+                    )
+                    .maybe_child((!tags.is_empty()).then(|| {
+                        label()
+                            .font_size(11.)
+                            .color(Color::from_rgb(155, 108, 255))
+                            .text(tags)
+                    }))
+                    .child(
+                        rect()
+                            .height(Size::px(34.))
+                            .padding(Gaps::new(0., 12., 0., 12.))
+                            .center()
+                            .background(Color::from_rgb(59, 91, 190))
+                            .with_corner_radius(8.)
+                            .on_mouse_up(move |_| open_state.write().open_selected_graph_node())
+                            .a11y_alt("Open selected note")
+                            .child(
+                                label()
+                                    .font_size(12.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(Color::from_rgb(245, 247, 255))
+                                    .text("Ouvrir la note  →"),
+                            ),
+                    )
+            }))
+            .into_element(),
+    )
+}
+
+fn options_panel(
+    canvas: State<GraphCanvasState>,
+    viewport: &GraphCanvasState,
+) -> Option<Element> {
+    if !viewport.options_open {
+        return None;
+    }
+
+    let mut close_canvas = canvas.clone();
+    let mut reset_canvas = canvas.clone();
+    let mut labels_canvas = canvas.clone();
+    let mut stats_canvas = canvas.clone();
+    let mut threshold_canvas = canvas.clone();
+    let mut nodes_canvas = canvas.clone();
+    let mut links_canvas = canvas;
+    let labels_enabled = viewport.show_labels;
+    let stats_enabled = viewport.show_stats;
+
+    Some(
+        rect()
+            .position(Position::new_absolute().right(70.).top(62.))
+            .width(Size::px(340.))
+            .padding(Gaps::new_all(0.))
+            .background(rgb(GRAPH_CARD_BG))
+            .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
+            .with_corner_radius(16.)
+            .overflow(Overflow::Clip)
+            .a11y_alt("Graph display options")
+            .child(
+                rect()
+                    .height(Size::px(48.))
+                    .padding(Gaps::new(0., 18., 0., 18.))
+                    .horizontal()
+                    .main_align(Alignment::SpaceBetween)
+                    .cross_align(Alignment::Center)
+                    .child(
+                        label()
+                            .font_size(15.)
+                            .font_weight(FontWeight::BOLD)
+                            .color(rgb(GRAPH_LABEL_ACTIVE))
+                            .text("Options"),
+                    )
+                    .child(
+                        rect()
+                            .horizontal()
+                            .spacing(4.)
+                            .child(
+                                rect()
+                                    .width(Size::px(28.))
+                                    .height(Size::px(28.))
+                                    .center()
+                                    .with_corner_radius(7.)
+                                    .background(rgb(GRAPH_CONTROL_BG))
+                                    .on_mouse_up(move |_| {
+                                        reset_canvas.write().reset_display_options();
+                                    })
+                                    .a11y_alt("Reset graph display options")
+                                    .child(
+                                        label()
+                                            .font_size(14.)
+                                            .color(rgb(GRAPH_LABEL))
+                                            .text("↺"),
+                                    ),
+                            )
+                            .child(
+                                rect()
+                                    .width(Size::px(28.))
+                                    .height(Size::px(28.))
+                                    .center()
+                                    .with_corner_radius(7.)
+                                    .background(rgb(GRAPH_CONTROL_BG))
+                                    .on_mouse_up(move |_| {
+                                        close_canvas.write().options_open = false;
+                                    })
+                                    .a11y_alt("Close graph options")
+                                    .child(
+                                        label()
+                                            .font_size(14.)
+                                            .color(rgb(GRAPH_LABEL))
+                                            .text("×"),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
+                rect()
+                    .height(Size::px(1.))
+                    .background(rgb(GRAPH_CARD_BORDER)),
+            )
+            .child(
+                rect()
+                    .padding(Gaps::new_all(18.))
+                    .spacing(14.)
+                    .child(
+                        label()
+                            .font_size(14.)
+                            .font_weight(FontWeight::BOLD)
+                            .color(rgb(GRAPH_LABEL_ACTIVE))
+                            .text("Afficher"),
+                    )
+                    .child(toggle_row(
+                        "Afficher les labels",
+                        labels_enabled,
+                        move || {
+                            let next = !labels_canvas.read().show_labels;
+                            labels_canvas.write().show_labels = next;
+                        },
+                    ))
+                    .child(toggle_row(
+                        "Afficher les statistiques",
+                        stats_enabled,
+                        move || {
+                            let next = !stats_canvas.read().show_stats;
+                            stats_canvas.write().show_stats = next;
+                        },
+                    ))
+                    .child(
+                        rect()
+                            .spacing(6.)
+                            .child(
+                                label()
+                                    .font_size(12.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(rgb(GRAPH_LABEL_ACTIVE))
+                                    .text(format!(
+                                        "Seuil d'apparition du texte · {:.1}",
+                                        viewport.label_threshold
+                                    )),
+                            )
+                            .child(
+                                Slider::new(move |value| {
+                                    threshold_canvas.write().label_threshold =
+                                        slider_to_range(value, 2., 20.);
+                                })
+                                .value(range_to_slider(viewport.label_threshold, 2., 20.))
+                                .size(Size::px(285.)),
+                            ),
+                    )
+                    .child(
+                        rect()
+                            .spacing(6.)
+                            .child(
+                                label()
+                                    .font_size(12.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(rgb(GRAPH_LABEL_ACTIVE))
+                                    .text(format!(
+                                        "Taille des nœuds · {:.2}×",
+                                        viewport.node_size_scale
+                                    )),
+                            )
+                            .child(
+                                Slider::new(move |value| {
+                                    nodes_canvas.write().node_size_scale =
+                                        slider_to_range(value, 0.5, 2.5);
+                                })
+                                .value(range_to_slider(viewport.node_size_scale, 0.5, 2.5))
+                                .size(Size::px(285.)),
+                            ),
+                    )
+                    .child(
+                        rect()
+                            .spacing(6.)
+                            .child(
+                                label()
+                                    .font_size(12.)
+                                    .font_weight(FontWeight::SEMI_BOLD)
+                                    .color(rgb(GRAPH_LABEL_ACTIVE))
+                                    .text(format!(
+                                        "Épaisseur des liens · {:.2}×",
+                                        viewport.link_thickness
+                                    )),
+                            )
+                            .child(
+                                Slider::new(move |value| {
+                                    links_canvas.write().link_thickness =
+                                        slider_to_range(value, 0.3, 2.5);
+                                })
+                                .value(range_to_slider(viewport.link_thickness, 0.3, 2.5))
+                                .size(Size::px(285.)),
+                            ),
                     ),
             )
             .into_element(),
     )
+}
+
+fn toggle_row(
+    title: &'static str,
+    enabled: bool,
+    on_toggle: impl FnMut() + 'static,
+) -> Element {
+    let mut on_toggle = on_toggle;
+    rect()
+        .height(Size::px(42.))
+        .horizontal()
+        .main_align(Alignment::SpaceBetween)
+        .cross_align(Alignment::Center)
+        .child(
+            label()
+                .font_size(13.)
+                .font_weight(FontWeight::SEMI_BOLD)
+                .color(rgb(GRAPH_LABEL_ACTIVE))
+                .text(title),
+        )
+        .child(
+            rect()
+                .width(Size::px(42.))
+                .height(Size::px(24.))
+                .padding(Gaps::new_all(3.))
+                .horizontal()
+                .main_align(if enabled {
+                    Alignment::End
+                } else {
+                    Alignment::Start
+                })
+                .cross_align(Alignment::Center)
+                .background(rgb(if enabled {
+                    GRAPH_PRIMARY
+                } else {
+                    GRAPH_CONTROL_SOFT
+                }))
+                .with_corner_radius(12.)
+                .on_mouse_up(move |_| on_toggle())
+                .a11y_alt(format!(
+                    "{title}: {}",
+                    if enabled { "enabled" } else { "disabled" }
+                ))
+                .child(
+                    rect()
+                        .width(Size::px(18.))
+                        .height(Size::px(18.))
+                        .background(Color::WHITE)
+                        .with_corner_radius(9.),
+                ),
+        )
+        .into_element()
 }
 
 fn trunc_label(value: &str, max_chars: usize) -> String {
@@ -872,6 +1356,16 @@ fn trunc_label(value: &str, max_chars: usize) -> String {
         .collect::<String>();
     truncated.push('…');
     truncated
+}
+
+fn label_max_chars(selected: bool, hovered: bool) -> usize {
+    if selected {
+        48
+    } else if hovered {
+        36
+    } else {
+        26
+    }
 }
 
 fn node_color(cluster_index: usize, connectivity: f32) -> Color {
@@ -893,7 +1387,7 @@ fn edge_color(kind: GraphEdgeType) -> Color {
         GraphEdgeType::ExplicitLink => Color::from_rgb(59, 155, 150),
         GraphEdgeType::Folder => Color::from_rgb(217, 138, 59),
         GraphEdgeType::Tag | GraphEdgeType::Lexical => Color::from_rgb(155, 108, 255),
-        GraphEdgeType::Other => Color::from_rgb(85, 92, 120),
+        GraphEdgeType::Other => Color::from_rgb(90, 100, 120),
     }
 }
 
@@ -904,6 +1398,28 @@ fn rgb(value: (u8, u8, u8)) -> Color {
 fn point(value: CursorPoint) -> [f32; 2] {
     let (x, y) = value.to_tuple();
     [x as f32, y as f32]
+}
+
+fn squared_distance(left: [f32; 2], right: [f32; 2]) -> f32 {
+    let dx = left[0] - right[0];
+    let dy = left[1] - right[1];
+    dx * dx + dy * dy
+}
+
+fn range_to_slider(value: f32, min: f32, max: f32) -> f64 {
+    (((value.clamp(min, max) - min) / (max - min)) * 100.) as f64
+}
+
+fn slider_to_range(value: f64, min: f32, max: f32) -> f32 {
+    min + (value.clamp(0., 100.) as f32 / 100.) * (max - min)
+}
+
+fn zoom_to_slider(zoom: f32) -> f64 {
+    range_to_slider(zoom, MIN_ZOOM, MAX_ZOOM)
+}
+
+fn slider_to_zoom(value: f64) -> f32 {
+    slider_to_range(value, MIN_ZOOM, MAX_ZOOM)
 }
 
 #[cfg(test)]
@@ -949,7 +1465,11 @@ mod tests {
             let layout = layout_graph_nodes(&nodes, &[], &[], &BTreeMap::new());
             assert_eq!(layout.len(), count);
             assert_eq!(
-                layout.iter().map(|node| node.id.as_str()).collect::<BTreeSet<_>>().len(),
+                layout
+                    .iter()
+                    .map(|node| node.id.as_str())
+                    .collect::<BTreeSet<_>>()
+                    .len(),
                 count
             );
         }
@@ -988,6 +1508,22 @@ mod tests {
     }
 
     #[test]
+    fn world_scaling_matches_atomic_graph_formula_exactly() {
+        assert_eq!(
+            world_size_for_count(144),
+            [BASE_WORLD_WIDTH, BASE_WORLD_HEIGHT]
+        );
+        let scale_205 = (205_f32.sqrt() / 12.).max(1.);
+        let expected = [
+            BASE_WORLD_WIDTH * scale_205,
+            BASE_WORLD_HEIGHT * scale_205,
+        ];
+        let actual = world_size_for_count(205);
+        assert!((actual[0] - expected[0]).abs() < 0.01);
+        assert!((actual[1] - expected[1]).abs() < 0.01);
+    }
+
+    #[test]
     fn connectivity_drives_tauri_node_size_formula() {
         let nodes = (0..4)
             .map(|index| note(index, format!("Note {index}")))
@@ -998,8 +1534,14 @@ mod tests {
             link(2, 0, 3, 1.0),
         ];
         let layout = layout_graph_nodes(&nodes, &edges, &[], &BTreeMap::new());
-        let hub = layout.iter().find(|node| node.id == "note-000.md").unwrap();
-        let leaf = layout.iter().find(|node| node.id == "note-001.md").unwrap();
+        let hub = layout
+            .iter()
+            .find(|node| node.id == "note-000.md")
+            .unwrap();
+        let leaf = layout
+            .iter()
+            .find(|node| node.id == "note-001.md")
+            .unwrap();
 
         assert_eq!(hub.radius, 9.);
         assert_eq!(leaf.radius, 5.);
@@ -1007,7 +1549,10 @@ mod tests {
     }
 
     #[test]
-    fn zoom_keeps_pointer_world_coordinate_anchored_and_respects_bounds() {
+    fn zoom_keeps_pointer_world_coordinate_anchored_and_respects_tauri_bounds() {
+        assert_eq!(MIN_ZOOM, 0.1);
+        assert_eq!(MAX_ZOOM, 4.);
+
         let mut state = GraphCanvasState::default();
         state.size = [1_000., 700.];
         state.content_size = world_size_for_count(205);
@@ -1019,7 +1564,20 @@ mod tests {
 
         assert!((before[0] - after[0]).abs() < 0.01);
         assert!((before[1] - after[1]).abs() < 0.01);
-        assert!((MIN_ZOOM..=MAX_ZOOM).contains(&state.zoom));
+
+        state.set_zoom_centered(100.);
+        assert_eq!(state.zoom, MAX_ZOOM);
+        state.set_zoom_centered(0.001);
+        assert_eq!(state.zoom, MIN_ZOOM);
+    }
+
+    #[test]
+    fn zoom_slider_round_trip_covers_tauri_visible_range() {
+        assert!((slider_to_zoom(0.) - MIN_ZOOM).abs() < f32::EPSILON);
+        assert!((slider_to_zoom(100.) - MAX_ZOOM).abs() < f32::EPSILON);
+        for zoom in [0.1, 0.5, 1., 2.5, 4.] {
+            assert!((slider_to_zoom(zoom_to_slider(zoom)) - zoom).abs() < 0.0001);
+        }
     }
 
     #[test]
@@ -1039,12 +1597,68 @@ mod tests {
     }
 
     #[test]
-    fn long_labels_are_truncated_visually_without_changing_node_identity() {
+    fn stage_click_deselects_but_pan_and_node_drag_do_not() {
+        let mut state = GraphCanvasState::default();
+        state.begin_pan([100., 100.]);
+        assert!(state.end_pointer_at([102., 101.]));
+
+        state.begin_pan([100., 100.]);
+        state.move_pointer([130., 100.]);
+        assert!(!state.end_pointer_at([130., 100.]));
+
+        state.begin_node_drag("note-001.md".to_string(), [100., 100.], [30., 40.]);
+        assert!(!state.end_pointer_at([100., 100.]));
+    }
+
+    #[test]
+    fn labels_use_tauri_normal_hover_and_selected_lengths() {
+        assert_eq!(label_max_chars(false, false), 26);
+        assert_eq!(label_max_chars(false, true), 36);
+        assert_eq!(label_max_chars(true, false), 48);
+
         let title = "This is a very long graph node label that should not flood the viewport";
-        let truncated = trunc_label(title, 28);
-        assert_eq!(truncated.chars().count(), 28);
-        assert!(truncated.ends_with('…'));
-        assert_eq!(trunc_label("Short", 28), "Short");
+        let normal = trunc_label(title, label_max_chars(false, false));
+        let hover = trunc_label(title, label_max_chars(false, true));
+        let selected = trunc_label(title, label_max_chars(true, false));
+        assert_eq!(normal.chars().count(), 26);
+        assert_eq!(hover.chars().count(), 36);
+        assert_eq!(selected.chars().count(), 48);
+        assert!(normal.ends_with('…'));
+        assert_eq!(trunc_label("Short", 26), "Short");
+    }
+
+    #[test]
+    fn display_option_defaults_and_reset_match_tauri() {
+        let mut state = GraphCanvasState::default();
+        assert!(state.options_open);
+        assert!(state.show_labels);
+        assert!(state.show_stats);
+        assert_eq!(state.label_threshold, 7.);
+        assert_eq!(state.node_size_scale, 1.);
+        assert_eq!(state.link_thickness, 1.);
+
+        state.show_labels = false;
+        state.show_stats = false;
+        state.label_threshold = 19.;
+        state.node_size_scale = 2.4;
+        state.link_thickness = 0.4;
+        state.reset_display_options();
+
+        assert!(state.show_labels);
+        assert!(state.show_stats);
+        assert_eq!(state.label_threshold, 7.);
+        assert_eq!(state.node_size_scale, 1.);
+        assert_eq!(state.link_thickness, 1.);
+    }
+
+    #[test]
+    fn display_radius_matches_tauri_focus_reducer() {
+        let base = 10.;
+        assert!((display_radius(base, true, false, false, true) - 14.5).abs() < 0.001);
+        assert!((display_radius(base, false, true, false, true) - 13.5).abs() < 0.001);
+        assert!((display_radius(base, false, false, true, true) - 11.2).abs() < 0.001);
+        assert!((display_radius(base, false, false, false, true) - 5.).abs() < 0.001);
+        assert_eq!(display_radius(base, false, false, false, false), base);
     }
 
     #[test]
