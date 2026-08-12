@@ -15,12 +15,22 @@ use muya_core::{
     Document, NodeId,
 };
 
-use crate::{editor::Delay, theme};
+use crate::{
+    editor::{Delay, EditorAction},
+    theme,
+};
 
 use super::{route_notice, ShellState};
 
 #[path = "editor_interactions.rs"]
 mod editor_interactions;
+
+const EDITOR_CONTENT_MAX: f32 = 780.;
+const EDITOR_BODY_SIZE: f32 = 16.;
+const EDITOR_BODY_LINE_HEIGHT: f32 = 1.58;
+const EDITOR_TOPBAR_HEIGHT: f32 = 52.;
+const EDITOR_COMPACT_TOPBAR_HEIGHT: f32 = 36.;
+const EDITOR_ACTION_SIZE: f32 = 30.;
 
 #[derive(Clone, Copy, Default)]
 struct InlineStyle {
@@ -41,13 +51,27 @@ enum ScriptStyle {
     Subscript,
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 struct BlockTextStyle {
     font_size: f32,
+    line_height: f32,
     bold: bool,
     italic: bool,
     code: bool,
     color: (u8, u8, u8, u8),
+}
+
+impl Default for BlockTextStyle {
+    fn default() -> Self {
+        Self {
+            font_size: EDITOR_BODY_SIZE,
+            line_height: EDITOR_BODY_LINE_HEIGHT,
+            bold: false,
+            italic: false,
+            code: false,
+            color: theme::TEXT,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -163,6 +187,7 @@ impl Component for EditableInlineBlock {
             .on_key_up(on_key_up)
             .on_ime_preedit(on_ime_preedit)
             .font_size(self.style.font_size)
+            .line_height(self.style.line_height)
             .color(theme::color(self.style.color));
         if self.style.bold {
             view = view.font_weight(FontWeight::BOLD);
@@ -190,6 +215,63 @@ impl Component for NoteEditorHost {
     fn render(&self) -> impl IntoElement {
         render_note_editor_host(self.state)
     }
+}
+
+fn dispatch_toolbar_action(
+    mut state: State<ShellState>,
+    mut autosave_generation: State<u64>,
+    action: EditorAction,
+    action_name: &'static str,
+) {
+    let result = state
+        .write()
+        .editor
+        .as_mut()
+        .ok_or_else(|| "cannot format without an open note".to_string())
+        .and_then(|editor| {
+            editor
+                .dispatch(action)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        });
+    match result {
+        Ok(()) => {
+            *autosave_generation.write() += 1;
+            eprintln!("[freya][editor] action:complete action={action_name}");
+        }
+        Err(error) => {
+            eprintln!("[freya][editor] action:failure action={action_name} error={error}");
+            state.write().error = Some(error);
+        }
+    }
+}
+
+fn editor_action_button(
+    text: &'static str,
+    accessibility_label: &'static str,
+    enabled: bool,
+    on_press: impl FnMut(Event<MouseEventData>) + 'static,
+) -> Element {
+    let mut button = rect()
+        .width(Size::px(EDITOR_ACTION_SIZE))
+        .height(Size::px(EDITOR_ACTION_SIZE))
+        .center()
+        .opacity(if enabled { 1. } else { 0.38 })
+        .background(theme::color(theme::SOFT))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(7.)
+        .a11y_alt(accessibility_label)
+        .child(
+            label()
+                .font_size(if text.len() > 2 { 11. } else { 14. })
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(if enabled { theme::TEXT } else { theme::MUTED }))
+                .text(text),
+        );
+    if enabled {
+        button = button.on_mouse_up(on_press);
+    }
+    button.into_element()
 }
 
 fn render_note_editor_host(mut state: State<ShellState>) -> Element {
@@ -279,80 +361,116 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         return route_notice("NoteEditorHost", "No note open");
     };
 
-    let undo = rect()
-        .width(Size::px(52.))
-        .height(Size::px(36.))
-        .center()
-        .background(theme::color(theme::SOFT))
-        .with_corner_radius(8.)
-        .on_mouse_up(move |_| {
-            let error = {
-                let mut shell = state.write();
-                shell
-                    .editor
-                    .as_mut()
-                    .and_then(|editor| editor.undo().err())
-                    .map(|error| error.to_string())
-            };
-            if let Some(error) = error {
-                eprintln!("[freya][editor] action:failure action=undo error={error}");
-                state.write().error = Some(error);
+    let compact = editor.topbar_compact();
+    let topbar_height = if compact {
+        EDITOR_COMPACT_TOPBAR_HEIGHT
+    } else {
+        EDITOR_TOPBAR_HEIGHT
+    };
+    let editor_snapshot = editor.snapshot();
+    let dirty = editor.is_dirty();
+    let markdown = editor.serialize();
+    let word_count = markdown.split_whitespace().count();
+    let char_count = markdown.chars().count();
+    let note_title = editor
+        .path()
+        .and_then(|path| path.file_stem())
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Untitled")
+        .to_string();
+    let note_file = editor
+        .path()
+        .and_then(|path| path.file_name())
+        .and_then(|name| name.to_str())
+        .unwrap_or("Unsaved note")
+        .to_string();
+
+    let undo = editor_action_button("↶", "Undo", editor_snapshot.can_undo, move |_| {
+        let result = state
+            .write()
+            .editor
+            .as_mut()
+            .ok_or_else(|| "cannot undo without an open note".to_string())
+            .and_then(|editor| editor.undo().map(|_| ()).map_err(|error| error.to_string()));
+        if let Err(error) = result {
+            state.write().error = Some(error);
+        } else {
+            *autosave_generation.write() += 1;
+        }
+    });
+    let redo = editor_action_button("↷", "Redo", editor_snapshot.can_redo, move |_| {
+        let result = state
+            .write()
+            .editor
+            .as_mut()
+            .ok_or_else(|| "cannot redo without an open note".to_string())
+            .and_then(|editor| editor.redo().map(|_| ()).map_err(|error| error.to_string()));
+        if let Err(error) = result {
+            state.write().error = Some(error);
+        } else {
+            *autosave_generation.write() += 1;
+        }
+    });
+    let save = editor_action_button("✓", "Save", true, move |_| {
+        let error = state
+            .write()
+            .editor
+            .as_mut()
+            .and_then(|editor| editor.save().err())
+            .map(|error| error.to_string());
+        if let Some(error) = error {
+            eprintln!("[freya][editor] action:failure action=save error={error}");
+            state.write().error = Some(error);
+        } else {
+            eprintln!("[freya][editor] action:complete action=save");
+        }
+    });
+    let close = editor_action_button("×", "Close note", true, move |_| {
+        let result = {
+            let mut shell = state.write();
+            let result = shell.editor.as_mut().map_or_else(
+                || Err("cannot close without an open note".to_string()),
+                |editor| editor.close().map_err(|error| error.to_string()),
+            );
+            if result.is_ok() {
+                shell.editor = None;
             }
-        })
-        .a11y_alt("Undo")
-        .child(label().text("↶"));
-    let save = rect()
-        .width(Size::px(72.))
-        .height(Size::px(36.))
-        .center()
-        .background(theme::color(theme::PRIMARY))
-        .with_corner_radius(8.)
-        .on_mouse_up(move |_| {
-            let error = state
-                .write()
-                .editor
-                .as_mut()
-                .and_then(|editor| editor.save().err())
-                .map(|error| error.to_string());
-            if let Some(error) = error {
-                eprintln!("[freya][editor] action:failure action=save error={error}");
-                state.write().error = Some(error);
-            } else {
-                eprintln!("[freya][editor] action:complete action=save");
-            }
-        })
-        .a11y_alt("Save")
-        .child(label().text("Save"));
-    let close = rect()
-        .width(Size::px(72.))
-        .height(Size::px(36.))
-        .center()
-        .background(theme::color(theme::SOFT))
-        .with_corner_radius(8.)
-        .on_mouse_up(move |_| {
-            let result = {
-                let mut shell = state.write();
-                let result = shell.editor.as_mut().map_or_else(
-                    || Err("cannot close without an open note".to_string()),
-                    |editor| editor.close().map_err(|error| error.to_string()),
-                );
-                if result.is_ok() {
-                    shell.editor = None;
-                }
-                result
-            };
-            if let Err(error) = result {
-                eprintln!("[freya][editor] action:failure action=close error={error}");
-                state.write().error = Some(error);
-            }
-        })
-        .a11y_alt("Close note")
-        .child(label().text("Close"));
+            result
+        };
+        if let Err(error) = result {
+            eprintln!("[freya][editor] action:failure action=close error={error}");
+            state.write().error = Some(error);
+        }
+    });
+
+    let bold = editor_action_button("B", "Bold", true, move |_| {
+        dispatch_toolbar_action(state, autosave_generation, EditorAction::ToggleStrong, "bold")
+    });
+    let italic = editor_action_button("I", "Italic", true, move |_| {
+        dispatch_toolbar_action(
+            state,
+            autosave_generation,
+            EditorAction::ToggleEmphasis,
+            "italic",
+        )
+    });
+    let strike = editor_action_button("S", "Strikethrough", true, move |_| {
+        dispatch_toolbar_action(
+            state,
+            autosave_generation,
+            EditorAction::ToggleStrike,
+            "strikethrough",
+        )
+    });
+    let inline_code = editor_action_button("</>", "Inline code unavailable", false, |_| {});
+    let link = editor_action_button("↗", "Link unavailable", false, |_| {});
+    let heading = editor_action_button("H1", "Heading unavailable", false, |_| {});
+    let bullets = editor_action_button("•", "Bulleted list unavailable", false, |_| {});
+    let ordered = editor_action_button("1.", "Ordered list unavailable", false, |_| {});
 
     let document = editor.session().document();
     let document_view = render_document(state, document, autosave_generation);
-    let compact = editor.topbar_compact();
-    let topbar_height = if compact { 36. } else { 44. };
     let error_view = snapshot.error.map(|error| {
         rect()
             .width(Size::fill())
@@ -363,40 +481,183 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             .into_element()
     });
 
-    rect()
+    let topbar = rect()
         .width(Size::fill())
-        .height(Size::fill())
-        .spacing(10.)
-        .child(
-            rect()
-                .height(Size::px(topbar_height))
-                .horizontal()
-                .spacing(8.)
-                .a11y_alt(if compact {
-                    "Editor topbar compact"
-                } else {
-                    "Editor topbar"
-                })
-                .child(undo)
-                .child(save)
-                .child(close),
-        )
-        .maybe_child(error_view)
+        .height(Size::px(topbar_height))
+        .horizontal()
+        .spacing(4.)
+        .center()
+        .a11y_alt(if compact {
+            "Editor topbar compact"
+        } else {
+            "Editor topbar"
+        })
+        .child(rect().width(Size::px(16.)))
         .child(
             rect()
                 .width(Size::fill())
-                .height(Size::fill())
-                .padding(Gaps::new_all(18.))
-                .background(theme::color(theme::SURFACE))
-                .with_corner_radius(10.)
-                .a11y_alt("Editor scroll")
                 .child(
-                    ScrollView::new_controlled(scroll_controller)
-                        .width(Size::fill())
-                        .height(Size::fill())
-                        .child(document_view),
+                    label()
+                        .font_size(14.)
+                        .line_height(1.28)
+                        .font_weight(FontWeight::BOLD)
+                        .color(theme::color(theme::TEXT))
+                        .max_lines(1)
+                        .text(note_title.clone()),
                 ),
         )
+        .child(undo)
+        .child(redo)
+        .child(save)
+        .child(close)
+        .child(rect().width(Size::px(16.)));
+
+    let topbar_separator = rect()
+        .width(Size::fill())
+        .height(Size::px(1.))
+        .horizontal()
+        .child(rect().width(Size::px(20.)))
+        .child(
+            rect()
+                .width(Size::fill())
+                .height(Size::px(1.))
+                .background(theme::color(theme::BORDER)),
+        )
+        .child(rect().width(Size::px(20.)));
+
+    let toolbar = rect()
+        .width(Size::fill())
+        .height(Size::px(50.))
+        .center()
+        .a11y_alt("Editor toolbar")
+        .child(
+            rect()
+                .width(Size::fill())
+                .max_width(Size::px(960.))
+                .height(Size::px(40.))
+                .horizontal()
+                .spacing(4.)
+                .padding(Gaps::new_all(5.))
+                .background(theme::color(theme::SURFACE))
+                .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+                .with_corner_radius(10.)
+                .child(bold)
+                .child(italic)
+                .child(strike)
+                .child(
+                    rect()
+                        .width(Size::px(1.))
+                        .height(Size::px(18.))
+                        .background(theme::color(theme::BORDER_STRONG)),
+                )
+                .child(inline_code)
+                .child(link)
+                .child(
+                    rect()
+                        .width(Size::px(1.))
+                        .height(Size::px(18.))
+                        .background(theme::color(theme::BORDER_STRONG)),
+                )
+                .child(heading)
+                .child(bullets)
+                .child(ordered),
+        );
+
+    let meta = rect()
+        .width(Size::fill())
+        .max_width(Size::px(EDITOR_CONTENT_MAX))
+        .spacing(10.)
+        .child(
+            label()
+                .font_size(28.)
+                .line_height(1.3)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(theme::TEXT))
+                .text(note_title),
+        )
+        .child(
+            rect()
+                .horizontal()
+                .spacing(8.)
+                .child(
+                    rect()
+                        .height(Size::px(24.))
+                        .padding(Gaps::new_all(5.))
+                        .background(theme::color(theme::SOFT))
+                        .with_corner_radius(7.)
+                        .child(
+                            label()
+                                .font_size(12.)
+                                .line_height(1.25)
+                                .font_weight(FontWeight::BOLD)
+                                .color(theme::color(theme::MUTED))
+                                .text(if dirty { "Edited" } else { "Saved" }),
+                        ),
+                )
+                .child(
+                    label()
+                        .font_size(12.)
+                        .line_height(1.25)
+                        .color(theme::color(theme::MUTED))
+                        .text(note_file),
+                ),
+        );
+
+    let editor_body = rect()
+        .width(Size::fill())
+        .spacing(18.)
+        .child(meta)
+        .child(document_view);
+
+    let centered_body = rect()
+        .width(Size::fill())
+        .center()
+        .child(
+            rect()
+                .width(Size::fill())
+                .max_width(Size::px(EDITOR_CONTENT_MAX))
+                .padding(Gaps::new_all(20.))
+                .child(editor_body),
+        );
+
+    let footer = rect()
+        .width(Size::fill())
+        .height(Size::px(32.))
+        .horizontal()
+        .spacing(8.)
+        .center()
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .a11y_alt("Editor footer")
+        .child(
+            label()
+                .font_size(11.)
+                .color(theme::color(theme::MUTED))
+                .text(format!("{word_count} words · {char_count} characters")),
+        )
+        .child(
+            label()
+                .font_size(11.)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(if dirty { theme::PRIMARY } else { theme::MUTED }))
+                .text(if dirty { "Unsaved changes" } else { "Saved" }),
+        );
+
+    rect()
+        .width(Size::fill())
+        .height(Size::fill())
+        .background(theme::color(theme::SURFACE))
+        .child(topbar)
+        .child(topbar_separator)
+        .maybe_child(error_view)
+        .child(toolbar)
+        .child(
+            ScrollView::new_controlled(scroll_controller)
+                .width(Size::fill())
+                .height(Size::fill())
+                .a11y_alt("Editor scroll")
+                .child(centered_body),
+        )
+        .child(footer)
         .a11y_alt("NoteEditorHost")
         .into_element()
 }
@@ -422,7 +683,7 @@ fn render_block_children(
 
     rect()
         .width(Size::fill())
-        .spacing(10.)
+        .spacing(12.)
         .children(children)
         .into_element()
 }
@@ -452,24 +713,34 @@ fn render_block(
             &format!("Heading {level}"),
             BlockTextStyle {
                 font_size: heading_font_size(*level),
+                line_height: 1.3,
                 bold: true,
                 ..BlockTextStyle::default()
             },
         ),
         NodeKind::Block(BlockKind::BlockQuote) => rect()
             .width(Size::fill())
-            .padding(Gaps::new_all(10.))
-            .border(
-                Border::new()
-                    .fill(theme::color(theme::BORDER_STRONG))
-                    .width(1.),
+            .horizontal()
+            .spacing(12.)
+            .child(
+                rect()
+                    .width(Size::px(3.))
+                    .height(Size::fill())
+                    .background(theme::color(theme::BORDER_STRONG))
+                    .with_corner_radius(2.),
             )
-            .child(render_block_children(
-                state,
-                document,
-                node_id,
-                autosave_generation,
-            ))
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .padding(Gaps::new_all(4.))
+                    .color(theme::color(theme::MUTED))
+                    .child(render_block_children(
+                        state,
+                        document,
+                        node_id,
+                        autosave_generation,
+                    )),
+            )
             .a11y_alt("Block quote")
             .into_element(),
         NodeKind::Block(BlockKind::List { kind, start }) => render_list(
@@ -488,7 +759,8 @@ fn render_block(
             if let Some(language) = language.as_deref().filter(|value| !value.is_empty()) {
                 children.push(
                     label()
-                        .font_size(12.)
+                        .font_size(11.)
+                        .line_height(1.25)
                         .font_weight(FontWeight::BOLD)
                         .color(theme::color(theme::MUTED))
                         .text(language.to_string())
@@ -501,6 +773,8 @@ fn render_block(
                 node_id,
                 "Code block",
                 BlockTextStyle {
+                    font_size: 14.,
+                    line_height: 1.45,
                     code: true,
                     color: theme::TEXT,
                     ..BlockTextStyle::default()
@@ -508,9 +782,11 @@ fn render_block(
             ));
             rect()
                 .width(Size::fill())
+                .spacing(8.)
                 .padding(Gaps::new_all(12.))
-                .background(theme::color(theme::BG))
-                .with_corner_radius(6.)
+                .background(theme::color(theme::SOFT))
+                .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+                .with_corner_radius(8.)
                 .children(children)
                 .a11y_alt("Code block")
                 .into_element()
@@ -526,6 +802,7 @@ fn render_block(
             .spacing(4.)
             .padding(Gaps::new_all(6.))
             .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+            .with_corner_radius(7.)
             .children(
                 document
                     .children(node_id)
@@ -973,7 +1250,8 @@ fn render_list(
                 )
             } else {
                 label()
-                    .font_size(16.)
+                    .font_size(EDITOR_BODY_SIZE)
+                    .line_height(EDITOR_BODY_LINE_HEIGHT)
                     .color(theme::color(theme::MUTED))
                     .text(marker)
                     .into_element()
@@ -981,7 +1259,7 @@ fn render_list(
             rect()
                 .width(Size::fill())
                 .horizontal()
-                .spacing(6.)
+                .spacing(8.)
                 .child(marker_view)
                 .child(render_block_children(
                     state,
@@ -995,7 +1273,7 @@ fn render_list(
 
     rect()
         .width(Size::fill())
-        .spacing(6.)
+        .spacing(7.)
         .children(items)
         .a11y_alt(list_accessibility_label(kind))
         .into_element()
@@ -1069,6 +1347,7 @@ fn render_unsupported_block(
         .padding(Gaps::new_all(8.))
         .background(theme::color(theme::SOFT))
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(7.)
         .child(
             label()
                 .font_size(13.)
@@ -1232,10 +1511,10 @@ fn styled_span(value: String, style: InlineStyle) -> Span<'static> {
 
 fn heading_font_size(level: u8) -> f32 {
     match level {
-        1 => 30.,
-        2 => 26.,
-        3 => 22.,
-        4 => 19.,
+        1 => 28.,
+        2 => 24.,
+        3 => 20.,
+        4 => 18.,
         5 => 17.,
         _ => 16.,
     }
@@ -1252,6 +1531,25 @@ mod tests {
         let mut spans = Vec::new();
         collect_inline_children(document, document.root, InlineStyle::default(), &mut spans);
         spans
+    }
+
+    #[test]
+    fn default_body_typography_matches_editor_reference_scale() {
+        let style = BlockTextStyle::default();
+        assert_eq!(style.font_size, 16.);
+        assert_eq!(style.line_height, 1.58);
+        assert_eq!(style.color, theme::TEXT);
+        assert!(!style.bold);
+        assert!(!style.code);
+    }
+
+    #[test]
+    fn heading_scale_tracks_note_editor_header_and_content_hierarchy() {
+        assert_eq!(heading_font_size(1), 28.);
+        assert_eq!(heading_font_size(2), 24.);
+        assert_eq!(heading_font_size(3), 20.);
+        assert!(heading_font_size(1) > heading_font_size(2));
+        assert!(heading_font_size(2) > heading_font_size(3));
     }
 
     #[test]
@@ -1349,6 +1647,9 @@ mod tests {
             .iter()
             .any(|kind| matches!(kind, BlockKind::ThematicBreak)));
         for label in [
+            "Editor topbar",
+            "Editor toolbar",
+            "Editor footer",
             "Heading 1",
             "Block quote",
             "Unordered list",
@@ -1361,7 +1662,7 @@ mod tests {
                         (element.accessibility().builder.label() == Some(label)).then_some(())
                     })
                     .is_some(),
-                "structured block {label:?} must be present in the Freya tree"
+                "editor surface element {label:?} must be present in the Freya tree"
             );
         }
     }
