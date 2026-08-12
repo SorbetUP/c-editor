@@ -72,6 +72,20 @@ fn click_library_card(runner: &mut TestingRunner, label: &str) {
     click_node(runner, node);
 }
 
+fn click_create_menu_action(runner: &mut TestingRunner, label: &str) {
+    let node = accessible_nodes(runner, label)
+        .into_iter()
+        .max_by(|left, right| {
+            left.layout()
+                .area
+                .min_x()
+                .partial_cmp(&right.layout().area.min_x())
+                .expect("create menu x positions must be ordered")
+        })
+        .unwrap_or_else(|| panic!("Create popover has no {label:?} action"));
+    click_node(runner, node);
+}
+
 fn create_folder_through_ui(runner: &mut TestingRunner) {
     click_label(runner, "Create");
     runner.sync_and_update();
@@ -79,9 +93,10 @@ fn create_folder_through_ui(runner: &mut TestingRunner) {
         !accessible_nodes(runner, "Folder").is_empty(),
         "the Create popover must expose the Folder action"
     );
-    // A fixture may itself contain a card named `Folder`; the menu row is the
-    // smaller accessible node, so `click_label` deterministically targets it.
-    click_label(runner, "Folder");
+    // The Tauri-parity popover is fixed to the lower-right corner. A vault may
+    // also contain a card named `Folder`, so select the rightmost accessible
+    // match rather than relying on relative node area.
+    click_create_menu_action(runner, "Folder");
     runner.sync_and_update();
 }
 
