@@ -98,6 +98,15 @@ fn drawing_canvas_nodes(runner: &TestingRunner) -> Vec<TestingNode> {
     })
 }
 
+fn assert_png(path: &std::path::Path) {
+    let bytes = fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    assert!(
+        bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "{} must be a real PNG preview",
+        path.display()
+    );
+}
+
 #[test]
 fn clicking_a_real_drawing_opens_the_native_renderer_not_markdown() {
     let fixture = FixtureVault::new("open");
@@ -193,7 +202,7 @@ fn missing_png_preview_does_not_block_the_canonical_scene_editor() {
 }
 
 #[test]
-fn create_rename_close_and_reopen_keeps_a_visible_real_scene() {
+fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
     let fixture = FixtureVault::new("create");
     let root = fixture.root.clone();
     let (mut runner, ()) = TestingRunner::new(
@@ -215,6 +224,7 @@ fn create_rename_close_and_reopen_keeps_a_visible_real_scene() {
     assert_eq!(drawing_canvas_nodes(&runner).len(), 1);
 
     let created_scene = fixture.root.join("Untitled Drawing.excalidraw");
+    let created_preview = created_scene.with_extension("png");
     assert!(
         created_scene.is_file(),
         "new native drawings must be visible library entries, not hidden .assets orphans"
@@ -231,18 +241,19 @@ fn create_rename_close_and_reopen_keeps_a_visible_real_scene() {
     assert_eq!(scene["title"], "Untitled Drawing");
     assert!(scene["elements"].is_array());
     assert!(scene["files"].is_object());
-    assert!(!created_scene.with_extension("png").exists());
+    assert_png(&created_preview);
 
-    // The standalone title is a real Freya Input. Append a suffix and submit;
-    // this must rename the canonical file and update its JSON title.
     click_label(&mut runner, "Untitled Drawing");
     runner.write_text(" Renamed");
     runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
 
     let renamed_scene = fixture.root.join("Untitled Drawing Renamed.excalidraw");
+    let renamed_preview = renamed_scene.with_extension("png");
     assert!(renamed_scene.is_file(), "Enter must commit the visible rename");
     assert!(!created_scene.exists(), "the old canonical path must be gone");
+    assert!(!created_preview.exists(), "the old preview path must be gone");
+    assert_png(&renamed_preview);
     let renamed_json: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(&renamed_scene).expect("read renamed drawing"),
     )
@@ -257,6 +268,7 @@ fn create_rename_close_and_reopen_keeps_a_visible_real_scene() {
         1,
         "after close, the renamed drawing must remain discoverable in the library"
     );
+    assert_png(&renamed_preview);
 
     click_label(&mut runner, "Untitled Drawing Renamed");
     runner.sync_and_update();
