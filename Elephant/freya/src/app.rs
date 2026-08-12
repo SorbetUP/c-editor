@@ -292,7 +292,7 @@ struct TopBarDragRegion;
 
 impl Component for TopBarDragRegion {
     fn render(&self) -> impl IntoElement {
-        let platform = use_platform();
+        let platform = freya::hooks::use_platform();
         rect()
             .position(
                 Position::new_absolute()
