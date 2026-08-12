@@ -323,7 +323,10 @@ impl DrawingCanvasState {
             return;
         };
         let before = self.document.clone();
-        self.document.elements[index].is_deleted = true;
+        if let Some(element) = self.document.elements.get_mut(index) {
+            element.is_deleted = true;
+            touch_element(element);
+        }
         self.selected = None;
         self.commit_history(before);
     }
@@ -394,10 +397,13 @@ impl DrawingCanvasState {
     pub(crate) fn end_pointer(&mut self) {
         let interaction = std::mem::replace(&mut self.interaction, Interaction::None);
         match interaction {
-            Interaction::MoveElement { before, .. }
-            | Interaction::DrawElement { before, .. }
-            | Interaction::Freedraw { before, .. } => {
+            Interaction::MoveElement { index, before, .. }
+            | Interaction::DrawElement { index, before, .. }
+            | Interaction::Freedraw { index, before } => {
                 if before.as_ref() != &self.document {
+                    if let Some(element) = self.document.elements.get_mut(index) {
+                        touch_element(element);
+                    }
                     self.undo.push(*before);
                     self.redo.clear();
                 }
@@ -438,7 +444,10 @@ impl DrawingCanvasState {
             return false;
         }
         let before = self.document.clone();
-        self.document.elements[index].is_deleted = true;
+        if let Some(element) = self.document.elements.get_mut(index) {
+            element.is_deleted = true;
+            touch_element(element);
+        }
         self.selected = None;
         self.commit_history(before);
         true
@@ -507,23 +516,48 @@ impl DrawingCanvasState {
     }
 }
 
-fn new_element(kind: &str, origin: [f32; 2], ordinal: usize) -> DrawingElement {
-    let now = SystemTime::now()
+fn timestamp_millis() -> u64 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .as_millis() as u64;
+        .as_millis() as u64
+}
+
+fn next_nonce(previous: u64) -> u32 {
+    (previous
+        .wrapping_mul(1_664_525)
+        .wrapping_add(1_013_904_223)
+        & 0x7fff_ffff) as u32
+}
+
+fn touch_element(element: &mut DrawingElement) {
+    let now = timestamp_millis();
+    let version = element
+        .extra
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .saturating_add(1);
+    let previous_nonce = element
+        .extra
+        .get("versionNonce")
+        .and_then(Value::as_u64)
+        .unwrap_or(now);
+    element.extra.insert("version".into(), json!(version));
+    element
+        .extra
+        .insert("versionNonce".into(), json!(next_nonce(previous_nonce)));
+    element.extra.insert("updated".into(), json!(now));
+}
+
+fn new_element(kind: &str, origin: [f32; 2], ordinal: usize) -> DrawingElement {
+    let now = timestamp_millis();
     let nonce = ((now ^ ordinal as u64) & 0x7fff_ffff) as u32;
     let mut extra = Map::new();
     extra.insert("roughness".into(), json!(1));
     extra.insert("seed".into(), json!(nonce));
     extra.insert("version".into(), json!(1));
-    extra.insert(
-        "versionNonce".into(),
-        json!(nonce
-            .wrapping_mul(1_664_525)
-            .wrapping_add(1_013_904_223)
-            & 0x7fff_ffff),
-    );
+    extra.insert("versionNonce".into(), json!(next_nonce(u64::from(nonce))));
     extra.insert("groupIds".into(), json!([]));
     extra.insert("frameId".into(), Value::Null);
     extra.insert("boundElements".into(), Value::Null);
@@ -557,7 +591,9 @@ fn new_element(kind: &str, origin: [f32; 2], ordinal: usize) -> DrawingElement {
 
 impl DrawingElement {
     pub fn bounds(&self) -> (f32, f32, f32, f32) {
-        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw") && !self.points.is_empty() {
+        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw")
+            && !self.points.is_empty()
+        {
             let min_x = self
                 .points
                 .iter()
@@ -598,7 +634,9 @@ impl DrawingElement {
     fn hit_test(&self, point: [f32; 2]) -> bool {
         let (x, y, width, height) = self.bounds();
         let padding = self.stroke_width.max(6.);
-        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw") && self.points.len() >= 2 {
+        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw")
+            && self.points.len() >= 2
+        {
             return self.points.windows(2).any(|segment| {
                 distance_to_segment(
                     point,
@@ -663,7 +701,7 @@ mod tests {
 
     fn empty_state() -> DrawingCanvasState {
         DrawingCanvasState::from_json(
-            r#"{
+            r##"{
               "type":"excalidraw",
               "version":2,
               "source":"https://excalidraw.com",
@@ -671,7 +709,7 @@ mod tests {
               "appState":{"viewBackgroundColor":"#121212"},
               "files":{},
               "futureField":{"keep":true}
-            }"#,
+            }"##,
         )
         .unwrap()
     }
@@ -689,6 +727,8 @@ mod tests {
         assert_eq!(value["futureField"]["keep"], true);
         assert_eq!(value["elements"][0]["type"], "rectangle");
         assert_eq!(value["elements"][0]["strokeStyle"], "solid");
+        assert_eq!(value["elements"][0]["version"], 2);
+        assert!(value["elements"][0]["updated"].as_u64().is_some());
     }
 
     #[test]
@@ -716,8 +756,10 @@ mod tests {
         state.end_pointer();
         assert_eq!(state.document.elements[0].x, 30.);
         assert_eq!(state.document.elements[0].y, 25.);
+        assert_eq!(state.document.elements[0].extra["version"], 3);
         assert!(state.delete_selected());
         assert!(state.document.elements[0].is_deleted);
+        assert_eq!(state.document.elements[0].extra["version"], 4);
         assert!(state.undo());
         assert!(!state.document.elements[0].is_deleted);
         assert!(state.redo());
@@ -727,7 +769,11 @@ mod tests {
     #[test]
     fn tool_state_creates_line_arrow_freedraw_and_eraser() {
         let mut state = empty_state();
-        for tool in [DrawingTool::Line, DrawingTool::Arrow, DrawingTool::Freedraw] {
+        for tool in [
+            DrawingTool::Line,
+            DrawingTool::Arrow,
+            DrawingTool::Freedraw,
+        ] {
             state.set_tool(tool);
             state.begin_pointer([0., 0.]);
             state.move_pointer([25., 15.]);
@@ -750,7 +796,10 @@ mod tests {
         state.begin_pointer([-120., -80.]);
         state.move_pointer([-20., -10.]);
         state.end_pointer();
-        assert_eq!(state.document.elements[0].bounds(), (-120., -80., 100., 70.));
+        assert_eq!(
+            state.document.elements[0].bounds(),
+            (-120., -80., 100., 70.)
+        );
         for _ in 0..200 {
             state.zoom_at([0., 0.], -1.);
         }
