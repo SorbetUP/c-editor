@@ -481,7 +481,8 @@ impl DrawingCanvasState {
         let Some(previous) = self.undo.pop() else {
             return false;
         };
-        self.redo.push(std::mem::replace(&mut self.document, previous));
+        self.redo
+            .push(std::mem::replace(&mut self.document, previous));
         self.selected = None;
         self.bump_revision();
         true
@@ -547,10 +548,7 @@ fn timestamp_millis() -> u64 {
 }
 
 fn next_nonce(previous: u64) -> u32 {
-    (previous
-        .wrapping_mul(1_664_525)
-        .wrapping_add(1_013_904_223)
-        & 0x7fff_ffff) as u32
+    (previous.wrapping_mul(1_664_525).wrapping_add(1_013_904_223) & 0x7fff_ffff) as u32
 }
 
 fn touch_element(element: &mut DrawingElement) {
@@ -614,9 +612,7 @@ fn new_element(kind: &str, origin: [f32; 2], ordinal: usize) -> DrawingElement {
 
 impl DrawingElement {
     pub fn bounds(&self) -> (f32, f32, f32, f32) {
-        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw")
-            && !self.points.is_empty()
-        {
+        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw") && !self.points.is_empty() {
             let min_x = self
                 .points
                 .iter()
@@ -637,12 +633,7 @@ impl DrawingElement {
                 .iter()
                 .map(|point| point[1])
                 .fold(f32::NEG_INFINITY, f32::max);
-            return (
-                self.x + min_x,
-                self.y + min_y,
-                max_x - min_x,
-                max_y - min_y,
-            );
+            return (self.x + min_x, self.y + min_y, max_x - min_x, max_y - min_y);
         }
         let x2 = self.x + self.width;
         let y2 = self.y + self.height;
@@ -659,9 +650,7 @@ impl DrawingElement {
         let center = [x + width / 2., y + height / 2.];
         let point = rotate_point_around(point, center, -self.angle);
         let padding = self.stroke_width.max(6.);
-        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw")
-            && self.points.len() >= 2
-        {
+        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw") && self.points.len() >= 2 {
             return self.points.windows(2).any(|segment| {
                 distance_to_segment(
                     point,
@@ -692,10 +681,7 @@ fn rotate_point_around(point: [f32; 2], center: [f32; 2], angle: f32) -> [f32; 2
     let cos = angle.cos();
     let x = point[0] - center[0];
     let y = point[1] - center[1];
-    [
-        center[0] + x * cos - y * sin,
-        center[1] + x * sin + y * cos,
-    ]
+    [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
 }
 
 fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -815,11 +801,7 @@ mod tests {
     #[test]
     fn tool_state_creates_line_arrow_freedraw_and_eraser() {
         let mut state = empty_state();
-        for tool in [
-            DrawingTool::Line,
-            DrawingTool::Arrow,
-            DrawingTool::Freedraw,
-        ] {
+        for tool in [DrawingTool::Line, DrawingTool::Arrow, DrawingTool::Freedraw] {
             state.set_tool(tool);
             state.begin_pointer([0., 0.]);
             state.move_pointer([25., 15.]);
@@ -894,19 +876,22 @@ mod tests {
     #[test]
     fn hit_test_follows_rotated_rectangle_instead_of_stale_axis_bounds() {
         let mut state = empty_state();
-        state.document.elements.push(serde_json::from_value(json!({
-            "id":"rotated-rect",
-            "type":"rectangle",
-            "x":0,
-            "y":0,
-            "width":100,
-            "height":20,
-            "angle":std::f32::consts::FRAC_PI_2,
-            "strokeColor":"#000000",
-            "backgroundColor":"transparent",
-            "strokeWidth":2,
-            "opacity":100
-        })).unwrap());
+        state.document.elements.push(
+            serde_json::from_value(json!({
+                "id":"rotated-rect",
+                "type":"rectangle",
+                "x":0,
+                "y":0,
+                "width":100,
+                "height":20,
+                "angle":std::f32::consts::FRAC_PI_2,
+                "strokeColor":"#000000",
+                "backgroundColor":"transparent",
+                "strokeWidth":2,
+                "opacity":100
+            }))
+            .unwrap(),
+        );
         state.set_tool(DrawingTool::Selection);
         state.begin_pointer([50., 50.]);
         assert_eq!(state.selected_element_id(), Some("rotated-rect"));
@@ -918,19 +903,22 @@ mod tests {
     #[test]
     fn hit_test_follows_rotated_line_segments() {
         let mut state = empty_state();
-        state.document.elements.push(serde_json::from_value(json!({
-            "id":"rotated-line",
-            "type":"line",
-            "x":0,
-            "y":0,
-            "width":100,
-            "height":0,
-            "points":[[0,0],[100,0]],
-            "angle":std::f32::consts::FRAC_PI_2,
-            "strokeColor":"#000000",
-            "strokeWidth":2,
-            "opacity":100
-        })).unwrap());
+        state.document.elements.push(
+            serde_json::from_value(json!({
+                "id":"rotated-line",
+                "type":"line",
+                "x":0,
+                "y":0,
+                "width":100,
+                "height":0,
+                "points":[[0,0],[100,0]],
+                "angle":std::f32::consts::FRAC_PI_2,
+                "strokeColor":"#000000",
+                "strokeWidth":2,
+                "opacity":100
+            }))
+            .unwrap(),
+        );
         state.set_tool(DrawingTool::Selection);
         state.begin_pointer([50., 40.]);
         assert_eq!(state.selected_element_id(), Some("rotated-line"));

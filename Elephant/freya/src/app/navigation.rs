@@ -607,16 +607,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     let entries = root_entries
         .iter()
         .filter(|entry| sidebar_entry_visible(entry))
-        .map(|entry| {
-            sidebar_entry(
-                entry,
-                0,
-                state,
-                palette,
-                expanded_paths,
-                sidebar_drag,
-            )
-        })
+        .map(|entry| sidebar_entry(entry, 0, state, palette, expanded_paths, sidebar_drag))
         .collect::<Vec<_>>();
 
     let mut resize_press_state = state;
@@ -776,13 +767,10 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             }
             let drop = drag_release.write().finish();
             if let Some((source, target)) = drop {
-                if let Some(new_path) = move_sidebar_entry(&mut drop_state.write(), &source, &target)
+                if let Some(new_path) =
+                    move_sidebar_entry(&mut drop_state.write(), &source, &target)
                 {
-                    rebase_expanded_paths(
-                        &mut drop_expanded_paths.write(),
-                        &source,
-                        &new_path,
-                    );
+                    rebase_expanded_paths(&mut drop_expanded_paths.write(), &source, &new_path);
                 }
             }
         })
@@ -852,12 +840,7 @@ fn sidebar_entry(
             .horizontal()
             .cross_align(Alignment::Center)
             .spacing(6.)
-            .background(sidebar_row_background(
-                active,
-                hovered,
-                drop_state,
-                palette,
-            ))
+            .background(sidebar_row_background(active, hovered, drop_state, palette))
             .border(sidebar_drop_border(drop_state, palette))
             .with_corner_radius(8.)
             .opacity(if dragging { 0.45 } else { 1. })
@@ -1090,7 +1073,10 @@ fn rebase_expanded_paths(paths: &mut HashSet<String>, source: &str, destination:
 fn moved_relative_path(source: &str, target_directory: &str) -> Option<String> {
     let source = normalize_sidebar_path(source);
     let target_directory = normalize_sidebar_path(target_directory);
-    let filename = source.rsplit('/').next().filter(|filename| !filename.is_empty())?;
+    let filename = source
+        .rsplit('/')
+        .next()
+        .filter(|filename| !filename.is_empty())?;
     Some(if target_directory.is_empty() {
         filename.to_string()
     } else {
@@ -1192,7 +1178,11 @@ fn folder_path_is_active(current_path: &str, folder_path: &str) -> bool {
 }
 
 fn note_is_active(snapshot: &ShellState, entry: &VaultEntry) -> bool {
-    let Some(document_path) = snapshot.editor.as_ref().and_then(|document| document.path()) else {
+    let Some(document_path) = snapshot
+        .editor
+        .as_ref()
+        .and_then(|document| document.path())
+    else {
         return false;
     };
     let Some(vault) = snapshot.vault.as_ref() else {

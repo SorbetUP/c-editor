@@ -5,7 +5,9 @@
 //! the full scene rather than becoming a lossy screenshot.
 
 use serde_json::Value;
-use skia_safe::{surfaces, Canvas, Color, EncodedImageFormat, Font, Paint, PaintStyle, Point, Rect};
+use skia_safe::{
+    surfaces, Canvas, Color, EncodedImageFormat, Font, Paint, PaintStyle, Point, Rect,
+};
 
 const EXPORT_PADDING: f32 = 10.;
 const DEFAULT_WIDTH: i32 = 512;
@@ -68,8 +70,9 @@ impl ExportTransform {
 }
 
 pub(super) fn render_png(raw: &str) -> Result<Vec<u8>, String> {
-    let scene: Value = serde_json::from_str(raw)
-        .map_err(|error| format!("Unable to export drawing preview: invalid scene JSON: {error}"))?;
+    let scene: Value = serde_json::from_str(raw).map_err(|error| {
+        format!("Unable to export drawing preview: invalid scene JSON: {error}")
+    })?;
     if scene.get("type").and_then(Value::as_str) != Some("excalidraw") {
         return Err("Unable to export drawing preview: expected type=excalidraw".to_owned());
     }
@@ -132,8 +135,12 @@ fn export_geometry(bounds: Option<Bounds>) -> (i32, i32, ExportTransform) {
     } else {
         1.
     };
-    let width = (bounds.width() * scale + EXPORT_PADDING * 2.).ceil().max(1.) as i32;
-    let height = (bounds.height() * scale + EXPORT_PADDING * 2.).ceil().max(1.) as i32;
+    let width = (bounds.width() * scale + EXPORT_PADDING * 2.)
+        .ceil()
+        .max(1.) as i32;
+    let height = (bounds.height() * scale + EXPORT_PADDING * 2.)
+        .ceil()
+        .max(1.) as i32;
     (width, height, ExportTransform { bounds, scale })
 }
 
@@ -180,12 +187,25 @@ fn draw_element(canvas: &Canvas, element: &Value, transform: ExportTransform) {
     let kind = string_value(element, "type", "");
     let opacity = number(element, "opacity", 100.).clamp(0., 100.);
     let stroke = parse_color(string_value(element, "strokeColor", "#1b1b1f"), opacity);
-    let fill = parse_color(string_value(element, "backgroundColor", "transparent"), opacity);
+    let fill = parse_color(
+        string_value(element, "backgroundColor", "transparent"),
+        opacity,
+    );
     let stroke_width = number(element, "strokeWidth", 2.).max(0.5);
     match kind {
-        "rectangle" => draw_box(canvas, element, transform, stroke, fill, stroke_width, false),
+        "rectangle" => draw_box(
+            canvas,
+            element,
+            transform,
+            stroke,
+            fill,
+            stroke_width,
+            false,
+        ),
         "ellipse" => draw_box(canvas, element, transform, stroke, fill, stroke_width, true),
-        "line" | "freedraw" => draw_polyline(canvas, element, transform, stroke, stroke_width, false),
+        "line" | "freedraw" => {
+            draw_polyline(canvas, element, transform, stroke, stroke_width, false)
+        }
         "arrow" => draw_polyline(canvas, element, transform, stroke, stroke_width, true),
         "text" => draw_text(canvas, element, transform, stroke),
         _ => {}
@@ -221,7 +241,10 @@ fn draw_box(
     }
     if fill != Color::TRANSPARENT {
         let mut paint = Paint::default();
-        paint.set_anti_alias(true).set_style(PaintStyle::Fill).set_color(fill);
+        paint
+            .set_anti_alias(true)
+            .set_style(PaintStyle::Fill)
+            .set_color(fill);
         if ellipse {
             canvas.draw_oval(rect, &paint);
         } else {
@@ -285,7 +308,14 @@ fn draw_polyline(
         .map(|value| value != "none")
         .unwrap_or(true);
     if start_arrow {
-        draw_arrowhead(canvas, points[0], points[1], transform, stroke, stroke_width);
+        draw_arrowhead(
+            canvas,
+            points[0],
+            points[1],
+            transform,
+            stroke,
+            stroke_width,
+        );
     }
     if end_arrow {
         let end = points.len() - 1;
@@ -336,7 +366,10 @@ fn draw_styled_segment(
     while offset < length {
         let piece_end = (offset + dash).min(length);
         let from = [start[0] + unit[0] * offset, start[1] + unit[1] * offset];
-        let to = [start[0] + unit[0] * piece_end, start[1] + unit[1] * piece_end];
+        let to = [
+            start[0] + unit[0] * piece_end,
+            start[1] + unit[1] * piece_end,
+        ];
         canvas.draw_line(transform.point(from), transform.point(to), &paint);
         offset += dash + gap;
     }
@@ -357,7 +390,10 @@ fn draw_arrowhead(
         .set_style(PaintStyle::Stroke)
         .set_stroke_width(transform.scalar(stroke_width).max(0.5))
         .set_color(stroke);
-    for branch in [base_angle + 150_f32.to_radians(), base_angle - 150_f32.to_radians()] {
+    for branch in [
+        base_angle + 150_f32.to_radians(),
+        base_angle - 150_f32.to_radians(),
+    ] {
         let end = [tip[0] + 12. * branch.cos(), tip[1] + 12. * branch.sin()];
         canvas.draw_line(transform.point(tip), transform.point(end), &paint);
     }
@@ -379,7 +415,10 @@ fn draw_text(canvas: &Canvas, element: &Value, transform: ExportTransform, color
     let mut font = Font::default();
     font.set_size(transform.scalar(font_size).max(1.));
     let mut paint = Paint::default();
-    paint.set_anti_alias(true).set_style(PaintStyle::Fill).set_color(color);
+    paint
+        .set_anti_alias(true)
+        .set_style(PaintStyle::Fill)
+        .set_color(color);
     canvas.save();
     if angle.abs() > f32::EPSILON {
         canvas.rotate(angle.to_degrees(), Some(center));
@@ -415,10 +454,7 @@ fn rotate_points(mut points: Vec<[f32; 2]>, center: [f32; 2], angle: f32) -> Vec
     for point in &mut points {
         let x = point[0] - center[0];
         let y = point[1] - center[1];
-        *point = [
-            center[0] + x * cos - y * sin,
-            center[1] + x * sin + y * cos,
-        ];
+        *point = [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos];
     }
     points
 }

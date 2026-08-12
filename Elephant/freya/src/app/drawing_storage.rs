@@ -229,12 +229,8 @@ pub(super) fn write_scene(root: &Path, relative_path: &str, raw: &str) -> Result
 
 fn restore_file(path: &Path, previous: Option<&[u8]>) -> Result<(), String> {
     match previous {
-        Some(bytes) => fs::write(path, bytes).map_err(|error| {
-            format!(
-                "Unable to restore drawing file {}: {error}",
-                path.display()
-            )
-        }),
+        Some(bytes) => fs::write(path, bytes)
+            .map_err(|error| format!("Unable to restore drawing file {}: {error}", path.display())),
         None => match fs::remove_file(path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -284,14 +280,23 @@ fn write_preview(root: &Path, scene_path: &Path, raw: &str) -> Result<(), String
 }
 
 fn temp_path(path: &Path, kind: &str) -> PathBuf {
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("tmp");
-    path.with_extension(format!("{extension}.freya-{kind}-tmp-{}", std::process::id()))
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("tmp");
+    path.with_extension(format!(
+        "{extension}.freya-{kind}-tmp-{}",
+        std::process::id()
+    ))
 }
 
 fn clear_stale_temp(path: &Path) -> Result<(), String> {
     if path.exists() {
         fs::remove_file(path).map_err(|error| {
-            format!("Unable to clear stale drawing save {}: {error}", path.display())
+            format!(
+                "Unable to clear stale drawing save {}: {error}",
+                path.display()
+            )
         })?;
     }
     Ok(())
@@ -456,10 +461,15 @@ fn scene_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
         let note_path = root.join(&visible_path);
         reject_symlink(&note_path, "drawing note")?;
         let canonical_note = fs::canonicalize(&note_path).map_err(|error| {
-            format!("Drawing note unavailable at {}: {error}", note_path.display())
+            format!(
+                "Drawing note unavailable at {}: {error}",
+                note_path.display()
+            )
         })?;
         if !canonical_note.starts_with(root) {
-            return Err(format!("Refusing drawing note outside vault: {relative_path}"));
+            return Err(format!(
+                "Refusing drawing note outside vault: {relative_path}"
+            ));
         }
         let markdown = fs::read_to_string(&canonical_note).map_err(|error| {
             format!(
@@ -506,10 +516,9 @@ fn scene_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
 
 fn reject_symlink(path: &Path, label: &str) -> Result<(), String> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
-            "Refusing symlinked {label}: {}",
-            path.display()
-        )),
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err(format!("Refusing symlinked {label}: {}", path.display()))
+        }
         Ok(_) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!(
@@ -614,8 +623,8 @@ fn markdown_asset_path(markdown: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::canvas::{DrawingCanvasState, DrawingTool};
+    use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TestVault(PathBuf);
@@ -668,7 +677,9 @@ mod tests {
         let raw = serde_json::to_string_pretty(&scene).unwrap();
         write_scene(&vault.0, &created.relative_path, &raw).unwrap();
         assert!(preview.is_file());
-        assert!(fs::read(&preview).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(fs::read(&preview)
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n"));
 
         let reopened = read_scene(&vault.0, &created.relative_path).unwrap();
         assert_eq!(reopened.element_count, 1);
@@ -751,7 +762,10 @@ mod tests {
         assert_eq!(reopened_json["elements"][0]["x"], -20.0);
         assert_eq!(reopened_json["elements"][0]["width"], 100.0);
         assert_eq!(reopened_json["elements"][1]["type"], "arrow");
-        assert_eq!(reopened_json["elements"][1]["points"][1], json!([40.0, 30.0]));
+        assert_eq!(
+            reopened_json["elements"][1]["points"][1],
+            json!([40.0, 30.0])
+        );
     }
 
     #[test]
@@ -826,10 +840,7 @@ mod tests {
         let created = create_scene(&vault.0, "Linked").unwrap();
         let png_relative = created.relative_path.replace(".excalidraw", ".png");
         assert!(vault.0.join(&png_relative).is_file());
-        assert_eq!(
-            read_scene(&vault.0, &png_relative).unwrap().title,
-            "Linked"
-        );
+        assert_eq!(read_scene(&vault.0, &png_relative).unwrap().title, "Linked");
 
         let note = vault.0.join("drawing-note.md");
         fs::write(&note, format!("![Linked]({png_relative})")).unwrap();

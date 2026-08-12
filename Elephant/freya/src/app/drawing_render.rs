@@ -51,16 +51,7 @@ fn render_element(
             element.angle,
             viewport,
         ));
-        render_selection_handles(
-            output,
-            index,
-            x,
-            y,
-            width,
-            height,
-            element.angle,
-            viewport,
-        );
+        render_selection_handles(output, index, x, y, width, height, element.angle, viewport);
     }
 }
 
@@ -410,10 +401,7 @@ fn rotate_point(point: [f32; 2], center: [f32; 2], angle: f32) -> [f32; 2] {
     let cos = angle.cos();
     let x = point[0] - center[0];
     let y = point[1] - center[1];
-    [
-        center[0] + x * cos - y * sin,
-        center[1] + x * sin + y * cos,
-    ]
+    [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
 }
 
 fn absolute(viewport: Viewport, x: f32, y: f32) -> Position {

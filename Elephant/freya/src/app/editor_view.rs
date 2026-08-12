@@ -251,7 +251,12 @@ fn dispatch_toolbar_action(
         .editor
         .as_mut()
         .ok_or_else(|| "cannot format without an open note".to_string())
-        .and_then(|editor| editor.dispatch(action).map(|_| ()).map_err(|error| error.to_string()));
+        .and_then(|editor| {
+            editor
+                .dispatch(action)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        });
     finish_toolbar_result(state, autosave_generation, action_name, result);
 }
 
@@ -298,7 +303,11 @@ fn action_button(
                 .font_family(UI_FONT)
                 .font_size(if text.chars().count() > 2 { 11. } else { 14. })
                 .font_weight(FontWeight::BOLD)
-                .color(theme::color(if enabled { foreground } else { palette.muted }))
+                .color(theme::color(if enabled {
+                    foreground
+                } else {
+                    palette.muted
+                }))
                 .text(text),
         );
     if bordered {
@@ -354,7 +363,11 @@ fn passive_chip(
         .height(Size::px(30.))
         .padding(Gaps::new(0., 8., 0., 8.))
         .center()
-        .background(theme::color(if hovered { palette.soft } else { palette.surface }))
+        .background(theme::color(if hovered {
+            palette.soft
+        } else {
+            palette.surface
+        }))
         .border(Border::new().fill(theme::color(palette.border)).width(1.))
         .with_corner_radius(8.)
         .on_pointer_enter(move |_| {
@@ -367,7 +380,11 @@ fn passive_chip(
             label()
                 .font_family(UI_FONT)
                 .font_size(14.)
-                .color(theme::color(if muted { palette.muted } else { palette.text }))
+                .color(theme::color(if muted {
+                    palette.muted
+                } else {
+                    palette.text
+                }))
                 .text(text.clone()),
         )
         .a11y_alt(text)
@@ -389,8 +406,14 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         let generation = *generation_for_effect.read();
         let (enabled, dirty, delay) = {
             let shell = state_for_effect.read();
-            let Some(editor) = shell.editor.as_ref() else { return };
-            (editor.autosave_enabled(), editor.is_dirty(), editor.autosave_delay())
+            let Some(editor) = shell.editor.as_ref() else {
+                return;
+            };
+            (
+                editor.autosave_enabled(),
+                editor.is_dirty(),
+                editor.autosave_delay(),
+            )
         };
         if !enabled || !dirty {
             return;
@@ -452,12 +475,8 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         let position_state = scroll_position;
         Callback::new(move |_| *position_state.read())
     });
-    let scroll_controller = ScrollController::managed(
-        scroll_notifier,
-        scroll_requests,
-        on_scroll,
-        get_scroll,
-    );
+    let scroll_controller =
+        ScrollController::managed(scroll_notifier, scroll_requests, on_scroll, get_scroll);
 
     let snapshot = state.read().clone();
     let Some(editor) = snapshot.editor.clone() else {
@@ -495,7 +514,9 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
     });
     let mut tags = document_tags(&markdown);
     if tags.is_empty() {
-        tags = library_entry.map(|entry| entry.tags.clone()).unwrap_or_default();
+        tags = library_entry
+            .map(|entry| entry.tags.clone())
+            .unwrap_or_default();
     }
     let date = document_created_at(&markdown)
         .or_else(|| library_entry.map(|entry| entry.updated_at.as_str().to_string()))
@@ -587,7 +608,9 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         true,
         palette,
         move |_| {
-            let Some(path) = pin_path.as_deref() else { return };
+            let Some(path) = pin_path.as_deref() else {
+                return;
+            };
             let mut shell = state.write();
             if shell
                 .library
@@ -595,7 +618,10 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
                 .iter()
                 .any(|candidate| candidate.as_str() == path)
             {
-                shell.library.pinned_paths.retain(|candidate| candidate.as_str() != path);
+                shell
+                    .library
+                    .pinned_paths
+                    .retain(|candidate| candidate.as_str() != path);
             } else {
                 shell.library.pinned_paths.push(RelativePath::new(path));
             }
@@ -715,7 +741,11 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         state,
         "inline-code",
         "</>",
-        if has_selection { "Inline code" } else { "Inline code requires a selection" },
+        if has_selection {
+            "Inline code"
+        } else {
+            "Inline code requires a selection"
+        },
         has_selection,
         false,
         None,
@@ -738,7 +768,11 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             state,
             "link",
             "↗",
-            if has_selection { "Link" } else { "Link requires a selection" },
+            if has_selection {
+                "Link"
+            } else {
+                "Link requires a selection"
+            },
             has_selection,
             *link_form_open.read(),
             Some(palette.primary),
@@ -833,13 +867,21 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
 
     let mut topbar = rect()
         .width(Size::fill())
-        .height(Size::px(if compact { COMPACT_TOPBAR_HEIGHT } else { TOPBAR_HEIGHT }))
+        .height(Size::px(if compact {
+            COMPACT_TOPBAR_HEIGHT
+        } else {
+            TOPBAR_HEIGHT
+        }))
         .horizontal()
         .spacing(8.)
         .center()
         .padding(Gaps::new(0., 12., 0., 12.))
         .background(theme::color(palette.bg))
-        .a11y_alt(if compact { "Editor topbar compact" } else { "Editor topbar" })
+        .a11y_alt(if compact {
+            "Editor topbar compact"
+        } else {
+            "Editor topbar"
+        })
         .child(
             rect().width(Size::fill()).child(
                 label()
@@ -873,7 +915,12 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             true,
         ));
     }
-    topbar = topbar.child(undo).child(redo).child(save).child(pin).child(close);
+    topbar = topbar
+        .child(undo)
+        .child(redo)
+        .child(save)
+        .child(pin)
+        .child(close);
 
     let toolbar = rect()
         .width(Size::fill())
@@ -897,16 +944,13 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .child(quote)
         .child(code_block);
 
-    let centered_body = rect()
-        .width(Size::fill())
-        .center()
-        .child(
-            rect()
-                .width(Size::fill())
-                .max_width(Size::px(CONTENT_MAX))
-                .padding(Gaps::new(24., 20., 36., 20.))
-                .child(document_view),
-        );
+    let centered_body = rect().width(Size::fill()).center().child(
+        rect()
+            .width(Size::fill())
+            .max_width(Size::px(CONTENT_MAX))
+            .padding(Gaps::new(24., 20., 36., 20.))
+            .child(document_view),
+    );
 
     let scale_down = {
         let mut scale = text_scale;
@@ -969,7 +1013,11 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             state,
             "theme-toggle",
             if dark { "☀" } else { "☾" },
-            if dark { "Use light editor theme" } else { "Use dark editor theme" },
+            if dark {
+                "Use light editor theme"
+            } else {
+                "Use dark editor theme"
+            },
             true,
             dark,
             Some(palette.primary),
@@ -998,9 +1046,17 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
                 .horizontal()
                 .spacing(12.)
                 .child(status_label(format!("{word_count} words"), palette, false))
-                .child(status_label(format!("{char_count} characters"), palette, false))
                 .child(status_label(
-                    if dirty { "Unsaved changes".to_string() } else { "Saved".to_string() },
+                    format!("{char_count} characters"),
+                    palette,
+                    false,
+                ))
+                .child(status_label(
+                    if dirty {
+                        "Unsaved changes".to_string()
+                    } else {
+                        "Saved".to_string()
+                    },
                     palette,
                     dirty,
                 )),
@@ -1067,7 +1123,9 @@ fn toolbar_command_button(
         TOOLBAR_ACTION,
         false,
         palette,
-        move |_| dispatch_toolbar_action(state, autosave_generation, action.clone(), interaction_id),
+        move |_| {
+            dispatch_toolbar_action(state, autosave_generation, action.clone(), interaction_id)
+        },
     )
 }
 
@@ -1075,8 +1133,16 @@ fn status_label(text: String, palette: theme::ThemePalette, accent: bool) -> Ele
     label()
         .font_family(UI_FONT)
         .font_size(12.)
-        .font_weight(if accent { FontWeight::BOLD } else { FontWeight::NORMAL })
-        .color(theme::color(if accent { palette.primary } else { palette.muted }))
+        .font_weight(if accent {
+            FontWeight::BOLD
+        } else {
+            FontWeight::NORMAL
+        })
+        .color(theme::color(if accent {
+            palette.primary
+        } else {
+            palette.muted
+        }))
         .text(text)
         .into_element()
 }
@@ -1091,9 +1157,22 @@ fn render_document(
     let children = document
         .children(document.root)
         .filter(|node| !matches!(node.kind, NodeKind::Block(BlockKind::FrontMatter { .. })))
-        .map(|node| render_block(state, document, node.id, autosave_generation, palette, text_scale))
+        .map(|node| {
+            render_block(
+                state,
+                document,
+                node.id,
+                autosave_generation,
+                palette,
+                text_scale,
+            )
+        })
         .collect::<Vec<_>>();
-    rect().width(Size::fill()).spacing(12.).children(children).into_element()
+    rect()
+        .width(Size::fill())
+        .spacing(12.)
+        .children(children)
+        .into_element()
 }
 
 fn render_block_children(
@@ -1110,7 +1189,16 @@ fn render_block_children(
         .children(
             document
                 .children(parent)
-                .map(|node| render_block(state, document, node.id, autosave_generation, palette, text_scale))
+                .map(|node| {
+                    render_block(
+                        state,
+                        document,
+                        node.id,
+                        autosave_generation,
+                        palette,
+                        text_scale,
+                    )
+                })
                 .collect::<Vec<_>>(),
         )
         .into_element()
@@ -1243,7 +1331,16 @@ fn render_block(
             .children(
                 document
                     .children(node_id)
-                    .map(|child| render_block(state, document, child.id, autosave_generation, palette, text_scale))
+                    .map(|child| {
+                        render_block(
+                            state,
+                            document,
+                            child.id,
+                            autosave_generation,
+                            palette,
+                            text_scale,
+                        )
+                    })
                     .collect::<Vec<_>>(),
             )
             .a11y_alt("Table")
@@ -1255,7 +1352,16 @@ fn render_block(
             .children(
                 document
                     .children(node_id)
-                    .map(|child| render_block(state, document, child.id, autosave_generation, palette, text_scale))
+                    .map(|child| {
+                        render_block(
+                            state,
+                            document,
+                            child.id,
+                            autosave_generation,
+                            palette,
+                            text_scale,
+                        )
+                    })
                     .collect::<Vec<_>>(),
             )
             .into_element(),
@@ -1267,7 +1373,11 @@ fn render_block(
                 state,
                 autosave_generation,
                 node_id,
-                if *header { "Table header cell" } else { "Table cell" },
+                if *header {
+                    "Table header cell"
+                } else {
+                    "Table cell"
+                },
                 BlockTextStyle {
                     bold: *header,
                     ..BlockTextStyle::default()
@@ -1463,9 +1573,12 @@ fn list_marker(kind: ListKind, number: u64, item_id: NodeId, document: &Document
     match kind {
         ListKind::Unordered => "•".to_string(),
         ListKind::Ordered => format!("{number}."),
-        ListKind::Task => {
-            if task_checked(item_id, document) { "☑" } else { "☐" }.to_string()
+        ListKind::Task => if task_checked(item_id, document) {
+            "☑"
+        } else {
+            "☐"
         }
+        .to_string(),
     }
 }
 
@@ -1490,11 +1603,17 @@ fn collect_inline_node(
     text_scale: f32,
     spans: &mut Vec<Span<'static>>,
 ) {
-    let Some(node) = document.node(node_id) else { return };
+    let Some(node) = document.node(node_id) else {
+        return;
+    };
     match &node.kind {
         NodeKind::Inline(kind) => match kind {
-            InlineKind::Text { value } => spans.push(styled_span(value.clone(), style, palette, text_scale)),
-            InlineKind::Escaped { value } => spans.push(styled_span(value.to_string(), style, palette, text_scale)),
+            InlineKind::Text { value } => {
+                spans.push(styled_span(value.clone(), style, palette, text_scale))
+            }
+            InlineKind::Escaped { value } => {
+                spans.push(styled_span(value.to_string(), style, palette, text_scale))
+            }
             InlineKind::Emphasis => {
                 let mut next = style;
                 next.emphasis = true;
@@ -1547,14 +1666,26 @@ fn collect_inline_node(
             InlineKind::InlineHtml { raw } => {
                 let mut next = style;
                 next.status = true;
-                spans.push(styled_span(format!("[HTML inline non rendu: {raw}]"), next, palette, text_scale));
+                spans.push(styled_span(
+                    format!("[HTML inline non rendu: {raw}]"),
+                    next,
+                    palette,
+                    text_scale,
+                ));
             }
             InlineKind::InlineMath { source } => {
                 let mut next = style;
                 next.status = true;
-                spans.push(styled_span(format!("[Math inline non rendu: {source}]"), next, palette, text_scale));
+                spans.push(styled_span(
+                    format!("[Math inline non rendu: {source}]"),
+                    next,
+                    palette,
+                    text_scale,
+                ));
             }
-            InlineKind::Emoji { value, .. } => spans.push(styled_span(value.clone(), style, palette, text_scale)),
+            InlineKind::Emoji { value, .. } => {
+                spans.push(styled_span(value.clone(), style, palette, text_scale))
+            }
             InlineKind::Superscript => {
                 let mut next = style;
                 next.script = ScriptStyle::Superscript;
@@ -1571,7 +1702,9 @@ fn collect_inline_node(
                 palette,
                 text_scale,
             )),
-            InlineKind::SoftBreak | InlineKind::HardBreak => spans.push(styled_span("\n".to_string(), style, palette, text_scale)),
+            InlineKind::SoftBreak | InlineKind::HardBreak => {
+                spans.push(styled_span("\n".to_string(), style, palette, text_scale))
+            }
         },
         NodeKind::Document | NodeKind::Block(_) => {
             collect_inline_children(document, node_id, style, palette, text_scale, spans)
@@ -1585,14 +1718,13 @@ fn styled_span(
     palette: theme::ThemePalette,
     text_scale: f32,
 ) -> Span<'static> {
-    let mut span = Span::new(value)
-        .color(theme::color(if style.status {
-            palette.danger
-        } else if style.link {
-            palette.primary
-        } else {
-            palette.text
-        }));
+    let mut span = Span::new(value).color(theme::color(if style.status {
+        palette.danger
+    } else if style.link {
+        palette.primary
+    } else {
+        palette.text
+    }));
     if style.strong {
         span = span.font_weight(FontWeight::BOLD);
     }
@@ -1660,7 +1792,9 @@ fn text_delta(before: &str, after: &str) -> Option<TextDelta> {
     Some(TextDelta {
         start_utf16,
         end_utf16,
-        inserted: after_chars[prefix..after_chars.len() - suffix].iter().collect(),
+        inserted: after_chars[prefix..after_chars.len() - suffix]
+            .iter()
+            .collect(),
     })
 }
 
@@ -1681,17 +1815,23 @@ pub(super) fn contains_node(document: &Document, root: NodeId, target: NodeId) -
         return true;
     }
     document.node(root).is_some_and(|node| {
-        node.children.iter().any(|child| contains_node(document, *child, target))
+        node.children
+            .iter()
+            .any(|child| contains_node(document, *child, target))
     })
 }
 
 pub(super) fn has_table_ancestor(document: &Document, mut node_id: NodeId) -> bool {
     loop {
-        let Some(node) = document.node(node_id) else { return false };
+        let Some(node) = document.node(node_id) else {
+            return false;
+        };
         if matches!(node.kind, NodeKind::Block(BlockKind::Table)) {
             return true;
         }
-        let Some(parent) = node.parent else { return false };
+        let Some(parent) = node.parent else {
+            return false;
+        };
         node_id = parent;
     }
 }
@@ -1703,7 +1843,10 @@ pub(super) fn sync_muya_selection(
 ) -> Result<(), String> {
     let (start, end) = {
         let editor = editable.editor().read();
-        (editor.selection().start() as u32, editor.selection().end() as u32)
+        (
+            editor.selection().start() as u32,
+            editor.selection().end() as u32,
+        )
     };
     let desired = {
         let snapshot = state.read();
@@ -1713,12 +1856,8 @@ pub(super) fn sync_muya_selection(
             .ok_or_else(|| "cannot update selection without an open note".to_string())?;
         let mut nodes = Vec::new();
         editable_text_nodes(editor.session().document(), block_id, &mut nodes);
-        let (start, end) = normalize_selection_offsets(
-            &nodes,
-            start,
-            end,
-            editor.session().snapshot().selection,
-        );
+        let (start, end) =
+            normalize_selection_offsets(&nodes, start, end, editor.session().snapshot().selection);
         let anchor = point_at_offset(&nodes, start, false)
             .ok_or_else(|| "editable block has no Muya text target".to_string())?;
         let focus = point_at_offset(&nodes, end, start != end)
@@ -1742,14 +1881,19 @@ pub(super) fn sync_editable_from_muya(
 ) {
     let (value, selection) = {
         let snapshot = state.read();
-        let Some(editor) = snapshot.editor.as_ref() else { return };
+        let Some(editor) = snapshot.editor.as_ref() else {
+            return;
+        };
         let document = editor.session().document();
         if document.node(block_id).is_none() {
             return;
         }
         let mut nodes = Vec::new();
         editable_text_nodes(document, block_id, &mut nodes);
-        let value = nodes.iter().map(|(_, value)| value.as_str()).collect::<String>();
+        let value = nodes
+            .iter()
+            .map(|(_, value)| value.as_str())
+            .collect::<String>();
         let selection = block_offset_for_selection(&nodes, editor.session().snapshot().selection);
         (value, selection)
     };
@@ -1778,7 +1922,10 @@ pub(super) fn apply_inline_delta(
         .ok_or_else(|| "cannot edit without an open note".to_string())?;
     let mut nodes = Vec::new();
     editable_text_nodes(editor.session().document(), block_id, &mut nodes);
-    let flattened = nodes.iter().map(|(_, value)| value.as_str()).collect::<String>();
+    let flattened = nodes
+        .iter()
+        .map(|(_, value)| value.as_str())
+        .collect::<String>();
     if flattened != before {
         return Err("editor changed while the previous keystroke was pending".to_string());
     }
@@ -1788,11 +1935,20 @@ pub(super) fn apply_inline_delta(
         .ok_or_else(|| "editor selection has no Muya text target".to_string())?;
     editor
         .set_selection(Selection {
-            anchor: SelectionPoint { node: nodes[start_index].0, offset_utf16: start_offset },
-            focus: SelectionPoint { node: nodes[end_index].0, offset_utf16: end_offset },
+            anchor: SelectionPoint {
+                node: nodes[start_index].0,
+                offset_utf16: start_offset,
+            },
+            focus: SelectionPoint {
+                node: nodes[end_index].0,
+                offset_utf16: end_offset,
+            },
         })
         .map_err(|error| error.to_string())?;
-    editor.dispatch_text(delta.inserted).map(|_| ()).map_err(|error| error.to_string())
+    editor
+        .dispatch_text(delta.inserted)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn segment_at_offset(nodes: &[(NodeId, String)], offset: u32) -> Option<(usize, u32)> {
@@ -1809,7 +1965,11 @@ fn segment_at_offset(nodes: &[(NodeId, String)], offset: u32) -> Option<(usize, 
         .map(|(_, value)| (nodes.len() - 1, value.encode_utf16().count() as u32))
 }
 
-fn point_at_offset(nodes: &[(NodeId, String)], offset: u32, is_end: bool) -> Option<SelectionPoint> {
+fn point_at_offset(
+    nodes: &[(NodeId, String)],
+    offset: u32,
+    is_end: bool,
+) -> Option<SelectionPoint> {
     let mut cursor = 0u32;
     for (index, (node, value)) in nodes.iter().enumerate() {
         let end = cursor + value.encode_utf16().count() as u32;
@@ -1821,7 +1981,10 @@ fn point_at_offset(nodes: &[(NodeId, String)], offset: u32, is_end: bool) -> Opt
         }
         if offset == end && is_end {
             if let Some((next, _)) = nodes.get(index + 1) {
-                return Some(SelectionPoint { node: *next, offset_utf16: 0 });
+                return Some(SelectionPoint {
+                    node: *next,
+                    offset_utf16: 0,
+                });
             }
         }
         cursor = end;
@@ -1859,9 +2022,15 @@ fn normalize_selection_offsets(
     end: u32,
     current: Selection,
 ) -> (u32, u32) {
-    let value = nodes.iter().map(|(_, value)| value.as_str()).collect::<String>();
+    let value = nodes
+        .iter()
+        .map(|(_, value)| value.as_str())
+        .collect::<String>();
     if start != end {
-        return (utf16_boundary_floor(&value, start), utf16_boundary_ceil(&value, end));
+        return (
+            utf16_boundary_floor(&value, start),
+            utf16_boundary_ceil(&value, end),
+        );
     }
     let floor = utf16_boundary_floor(&value, start);
     let ceil = utf16_boundary_ceil(&value, start);
@@ -1930,7 +2099,11 @@ fn document_title(markdown: &str, fallback: &str) -> String {
         markdown
     };
     body.lines()
-        .find_map(|line| line.strip_prefix("# ").map(str::trim).filter(|value| !value.is_empty()))
+        .find_map(|line| {
+            line.strip_prefix("# ")
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
         .map(str::to_string)
         .unwrap_or_else(|| fallback.to_string())
 }
@@ -1945,14 +2118,20 @@ fn document_created_at(markdown: &str) -> Option<String> {
 }
 
 fn document_tags(markdown: &str) -> Vec<String> {
-    let Some(frontmatter) = frontmatter(markdown) else { return Vec::new() };
+    let Some(frontmatter) = frontmatter(markdown) else {
+        return Vec::new();
+    };
     let lines = frontmatter.lines().collect::<Vec<_>>();
     let Some(index) = lines.iter().position(|line| {
-        line.split_once(':').is_some_and(|(key, _)| key.trim() == "tags")
+        line.split_once(':')
+            .is_some_and(|(key, _)| key.trim() == "tags")
     }) else {
         return Vec::new();
     };
-    let raw = lines[index].split_once(':').map(|(_, raw)| raw.trim()).unwrap_or("");
+    let raw = lines[index]
+        .split_once(':')
+        .map(|(_, raw)| raw.trim())
+        .unwrap_or("");
     let mut tags = if raw.starts_with('[') && raw.ends_with(']') {
         raw[1..raw.len() - 1]
             .split(',')
@@ -1984,7 +2163,12 @@ fn document_tags(markdown: &str) -> Vec<String> {
 }
 
 fn trim_yaml_scalar(value: &str) -> String {
-    value.trim().trim_matches('"').trim_matches('\'').trim().to_string()
+    value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string()
 }
 
 fn short_date(value: &str) -> String {
@@ -2015,7 +2199,10 @@ mod tests {
     fn metadata_reads_tauri_frontmatter_shape_without_rendering_it() {
         let markdown = "---\ncreatedAt: 2026-08-12T08:30:00Z\ntags: [rust, editor]\n---\n# Reference note\n\nBody";
         assert_eq!(document_title(markdown, "Fallback"), "Reference note");
-        assert_eq!(document_created_at(markdown).as_deref(), Some("2026-08-12T08:30:00Z"));
+        assert_eq!(
+            document_created_at(markdown).as_deref(),
+            Some("2026-08-12T08:30:00Z")
+        );
         assert_eq!(document_tags(markdown), vec!["rust", "editor"]);
         assert_eq!(short_date("2026-08-12T08:30:00Z"), "2026-08-12");
     }

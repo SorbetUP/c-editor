@@ -230,7 +230,10 @@ fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
         "new native drawings must be visible library entries, not hidden .assets orphans"
     );
     assert!(
-        !fixture.root.join(".assets/Untitled Drawing.excalidraw").exists(),
+        !fixture
+            .root
+            .join(".assets/Untitled Drawing.excalidraw")
+            .exists(),
         "standalone library creation must not strand the drawing under .assets"
     );
     let scene: serde_json::Value =
@@ -252,14 +255,22 @@ fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
 
     let renamed_scene = fixture.root.join("Untitled Drawing Renamed.excalidraw");
     let renamed_preview = renamed_scene.with_extension("png");
-    assert!(renamed_scene.is_file(), "Enter must commit the visible rename");
-    assert!(!created_scene.exists(), "the old canonical path must be gone");
-    assert!(!created_preview.exists(), "the old preview path must be gone");
+    assert!(
+        renamed_scene.is_file(),
+        "Enter must commit the visible rename"
+    );
+    assert!(
+        !created_scene.exists(),
+        "the old canonical path must be gone"
+    );
+    assert!(
+        !created_preview.exists(),
+        "the old preview path must be gone"
+    );
     assert_png(&renamed_preview);
-    let renamed_json: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(&renamed_scene).expect("read renamed drawing"),
-    )
-    .expect("renamed drawing JSON");
+    let renamed_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&renamed_scene).expect("read renamed drawing"))
+            .expect("renamed drawing JSON");
     assert_eq!(renamed_json["title"], "Untitled Drawing Renamed");
 
     click_label(&mut runner, "Close drawing · Esc");

@@ -74,7 +74,11 @@ fn library_error_notice(error: &str) -> Element {
         .position(Position::new_absolute().left(12.).right(12.).top(80.))
         .padding(Gaps::new_all(10.))
         .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER_STRONG)).width(1.))
+        .border(
+            Border::new()
+                .fill(theme::color(theme::BORDER_STRONG))
+                .width(1.),
+        )
         .with_corner_radius(8.)
         .layer(Layer::OverlayLevel(20))
         .a11y_alt(accessibility_label)
@@ -685,11 +689,7 @@ fn card_title_row(
                     .width(Size::fill())
                     .padding(Gaps::new(4., 6., 4., 6.))
                     .background(theme::color(theme::SURFACE))
-                    .border(
-                        Border::new()
-                            .fill(theme::color(theme::PRIMARY))
-                            .width(1.),
-                    )
+                    .border(Border::new().fill(theme::color(theme::PRIMARY)).width(1.))
                     .with_corner_radius(7.)
                     .child(
                         Input::new(rename_value)
@@ -762,18 +762,10 @@ fn folder_preview(entry: &LibraryEntry) -> Element {
             .height(Size::px(42.))
             .padding(Gaps::new(7., 8., 7., 8.))
             .center()
-            .background(theme::color(theme::mix(
-                theme::SURFACE,
-                theme::BG,
-                0.55,
-            )))
+            .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.55)))
             .border(
                 Border::new()
-                    .fill(theme::color(theme::mix(
-                        theme::BORDER,
-                        theme::BG,
-                        0.70,
-                    )))
+                    .fill(theme::color(theme::mix(theme::BORDER, theme::BG, 0.70)))
                     .width(1.),
             )
             .with_corner_radius(8.)
@@ -789,18 +781,10 @@ fn folder_preview(entry: &LibraryEntry) -> Element {
             .width(Size::fill())
             .padding(Gaps::new(7., 8., 7., 8.))
             .spacing(4.)
-            .background(theme::color(theme::mix(
-                theme::SURFACE,
-                theme::BG,
-                0.55,
-            )))
+            .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.55)))
             .border(
                 Border::new()
-                    .fill(theme::color(theme::mix(
-                        theme::BORDER,
-                        theme::BG,
-                        0.70,
-                    )))
+                    .fill(theme::color(theme::mix(theme::BORDER, theme::BG, 0.70)))
                     .width(1.),
             )
             .with_corner_radius(8.)

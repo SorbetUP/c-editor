@@ -475,7 +475,7 @@ pub fn render(
             let label_text = trunc_label(&node.title, max_chars);
             let pill_width = ((label_text.chars().count() as f32 * font_size * 0.58)
                 + if selected || hovered { 20. } else { 16. })
-                .clamp(42., 300.);
+            .clamp(42., 300.);
             let pill_height = font_size + if selected || hovered { 10. } else { 8. };
             let label_top = center[1] + display_radius + 4.;
 
@@ -500,7 +500,13 @@ pub fn render(
                             } else {
                                 rgb(GRAPH_CARD_BORDER)
                             })
-                            .width(if selected { 1.5 } else if hovered { 1.2 } else { 1. }),
+                            .width(if selected {
+                                1.5
+                            } else if hovered {
+                                1.2
+                            } else {
+                                1.
+                            }),
                     )
                     .with_corner_radius(pill_height / 2.)
                     .a11y_alt(node.title.clone())
@@ -669,9 +675,7 @@ pub fn render(
                 )
                 .child(
                     Slider::new(move |value| {
-                        zoom_canvas
-                            .write()
-                            .set_zoom_centered(slider_to_zoom(value));
+                        zoom_canvas.write().set_zoom_centered(slider_to_zoom(value));
                     })
                     .value(zoom_to_slider(viewport.zoom))
                     .size(Size::px(100.)),
@@ -850,8 +854,8 @@ fn layout_graph_nodes(
                 .get(&node.id)
                 .copied()
                 .map(|(position, cluster_index)| {
-                    let connectivity = edge_counts.get(&node.id).copied().unwrap_or(0) as f32
-                        / max_edges;
+                    let connectivity =
+                        edge_counts.get(&node.id).copied().unwrap_or(0) as f32 / max_edges;
                     let radius = 3.
                         + connectivity * 6.
                         + if node.kind == GraphNodeKind::Folder {
@@ -929,9 +933,7 @@ fn normalize_edge_weight(weight: f32, min_weight: f32, max_weight: f32) -> f32 {
     ((weight - min_weight) / range).clamp(0., 1.)
 }
 
-fn dedupe_undirected_edges<'a>(
-    edges: impl Iterator<Item = &'a GraphEdge>,
-) -> Vec<&'a GraphEdge> {
+fn dedupe_undirected_edges<'a>(edges: impl Iterator<Item = &'a GraphEdge>) -> Vec<&'a GraphEdge> {
     let mut seen = BTreeSet::<(&'a str, &'a str)>::new();
     edges
         .filter(|edge| {
@@ -971,10 +973,7 @@ fn render_edge(
     } else {
         base
     };
-    let midpoint = [
-        (source[0] + target[0]) / 2.,
-        (source[1] + target[1]) / 2.,
-    ];
+    let midpoint = [(source[0] + target[0]) / 2., (source[1] + target[1]) / 2.];
 
     rect()
         .key(("graph-edge", edge.id.clone()))
@@ -1064,10 +1063,9 @@ fn selected_card(
                     .cross_align(Alignment::Center)
                     .on_mouse_down(move |event: Event<MouseEventData>| {
                         if event.button == Some(MouseButton::Left) {
-                            drag_canvas.write().begin_card_drag(
-                                point(event.global_location),
-                                [left, top],
-                            );
+                            drag_canvas
+                                .write()
+                                .begin_card_drag(point(event.global_location), [left, top]);
                             event.stop_propagation();
                         }
                     })
@@ -1120,10 +1118,7 @@ fn selected_card(
                                     })
                                     .a11y_alt("Close graph note card")
                                     .child(
-                                        label()
-                                            .font_size(14.)
-                                            .color(rgb(GRAPH_LABEL))
-                                            .text("×"),
+                                        label().font_size(14.).color(rgb(GRAPH_LABEL)).text("×"),
                                     ),
                             ),
                     ),
@@ -1166,10 +1161,7 @@ fn selected_card(
     )
 }
 
-fn options_panel(
-    canvas: State<GraphCanvasState>,
-    viewport: &GraphCanvasState,
-) -> Option<Element> {
+fn options_panel(canvas: State<GraphCanvasState>, viewport: &GraphCanvasState) -> Option<Element> {
     if !viewport.options_open {
         return None;
     }
@@ -1225,10 +1217,7 @@ fn options_panel(
                                     })
                                     .a11y_alt("Reset graph display options")
                                     .child(
-                                        label()
-                                            .font_size(14.)
-                                            .color(rgb(GRAPH_LABEL))
-                                            .text("↺"),
+                                        label().font_size(14.).color(rgb(GRAPH_LABEL)).text("↺"),
                                     ),
                             )
                             .child(
@@ -1243,10 +1232,7 @@ fn options_panel(
                                     })
                                     .a11y_alt("Close graph options")
                                     .child(
-                                        label()
-                                            .font_size(14.)
-                                            .color(rgb(GRAPH_LABEL))
-                                            .text("×"),
+                                        label().font_size(14.).color(rgb(GRAPH_LABEL)).text("×"),
                                     ),
                             ),
                     ),
@@ -1354,11 +1340,7 @@ fn options_panel(
     )
 }
 
-fn toggle_row(
-    title: &'static str,
-    enabled: bool,
-    on_toggle: impl FnMut() + 'static,
-) -> Element {
+fn toggle_row(title: &'static str, enabled: bool, on_toggle: impl FnMut() + 'static) -> Element {
     let mut on_toggle = on_toggle;
     rect()
         .height(Size::px(42.))
@@ -1574,10 +1556,7 @@ mod tests {
             [BASE_WORLD_WIDTH, BASE_WORLD_HEIGHT]
         );
         let scale_205 = (205_f32.sqrt() / 12.).max(1.);
-        let expected = [
-            BASE_WORLD_WIDTH * scale_205,
-            BASE_WORLD_HEIGHT * scale_205,
-        ];
+        let expected = [BASE_WORLD_WIDTH * scale_205, BASE_WORLD_HEIGHT * scale_205];
         let actual = world_size_for_count(205);
         assert!((actual[0] - expected[0]).abs() < 0.01);
         assert!((actual[1] - expected[1]).abs() < 0.01);
@@ -1588,20 +1567,10 @@ mod tests {
         let nodes = (0..4)
             .map(|index| note(index, format!("Note {index}")))
             .collect::<Vec<_>>();
-        let edges = vec![
-            link(0, 0, 1, 0.2),
-            link(1, 0, 2, 0.6),
-            link(2, 0, 3, 1.0),
-        ];
+        let edges = vec![link(0, 0, 1, 0.2), link(1, 0, 2, 0.6), link(2, 0, 3, 1.0)];
         let layout = layout_graph_nodes(&nodes, &edges, &[], &BTreeMap::new());
-        let hub = layout
-            .iter()
-            .find(|node| node.id == "note-000.md")
-            .unwrap();
-        let leaf = layout
-            .iter()
-            .find(|node| node.id == "note-001.md")
-            .unwrap();
+        let hub = layout.iter().find(|node| node.id == "note-000.md").unwrap();
+        let leaf = layout.iter().find(|node| node.id == "note-001.md").unwrap();
 
         assert_eq!(hub.radius, 9.);
         assert_eq!(leaf.radius, 5.);
@@ -1735,11 +1704,7 @@ mod tests {
 
     #[test]
     fn renderer_deduplicates_undirected_pairs_without_mutating_edge_data() {
-        let edges = vec![
-            link(0, 0, 1, 0.2),
-            link(1, 1, 0, 0.8),
-            link(2, 0, 2, 0.4),
-        ];
+        let edges = vec![link(0, 0, 1, 0.2), link(1, 1, 0, 0.8), link(2, 0, 2, 0.4)];
         let rendered = dedupe_undirected_edges(edges.iter());
         assert_eq!(edges.len(), 3);
         assert_eq!(rendered.len(), 2);

@@ -35,7 +35,10 @@ pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
         .expanded()
         .background(background)
         .overflow(Overflow::Clip)
-        .a11y_alt(format!("Drawing canvas · {}", snapshot.active_tool().label()))
+        .a11y_alt(format!(
+            "Drawing canvas · {}",
+            snapshot.active_tool().label()
+        ))
         .on_mouse_down(move |event: Event<MouseEventData>| {
             if event.button == Some(MouseButton::Left) {
                 pointer_state

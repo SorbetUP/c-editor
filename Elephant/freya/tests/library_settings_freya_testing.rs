@@ -8,7 +8,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const LONG_NOTE_TITLE: &str = "A deliberately long library note title used to exercise card wrapping";
+const LONG_NOTE_TITLE: &str =
+    "A deliberately long library note title used to exercise card wrapping";
 
 struct FixtureVault {
     root: PathBuf,
@@ -163,9 +164,7 @@ fn click_action_for_card(runner: &mut TestingRunner, card_label: &str, action_la
                 .expect("card action areas must be ordered")
         })
         .unwrap_or_else(|| {
-            panic!(
-                "no Freya action {action_label:?} is contained by library card {card_label:?}"
-            )
+            panic!("no Freya action {action_label:?} is contained by library card {card_label:?}")
         });
     let area = node.layout().area;
     runner.click_cursor((

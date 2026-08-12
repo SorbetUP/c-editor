@@ -117,16 +117,9 @@ impl ShellState {
     }
 
     fn open_vault(&mut self, root: PathBuf) {
-        eprintln!(
-            "[freya][vault] action:open-start path={}",
-            root.display()
-        );
+        eprintln!("[freya][vault] action:open-start path={}", root.display());
         let mut next = shell_runtime::select_root(root);
-        if let Some(canonical_root) = next
-            .vault
-            .as_ref()
-            .map(|vault| vault.root().to_path_buf())
-        {
+        if let Some(canonical_root) = next.vault.as_ref().map(|vault| vault.root().to_path_buf()) {
             if let Err(error) = vault_picker::remember_vault(&canonical_root) {
                 eprintln!("[freya][vault] action:remember-failure error={error}");
                 next.error = Some(format!(
@@ -350,12 +343,11 @@ impl Component for TopBarDragRegion {
             TopBarDragGeometry::Leading { width } => rect()
                 .position(Position::new_absolute().left(0.).top(0.))
                 .width(Size::px(width)),
-            TopBarDragGeometry::Trailing { left } => rect()
-                .position(Position::new_absolute().left(left).right(0.).top(0.)),
+            TopBarDragGeometry::Trailing { left } => {
+                rect().position(Position::new_absolute().left(left).right(0.).top(0.))
+            }
         };
-        region
-            .height(Size::px(theme::TOPBAR_HEIGHT))
-            .window_drag()
+        region.height(Size::px(theme::TOPBAR_HEIGHT)).window_drag()
     }
 }
 

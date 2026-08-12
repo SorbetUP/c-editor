@@ -11,8 +11,8 @@ use crate::{
     vault_adapter::PageRequest,
 };
 
-use super::library_icons::{svg_icon, Icon as LibraryIcon};
 use super::super::ShellState;
+use super::library_icons::{svg_icon, Icon as LibraryIcon};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct CardMenuState {
@@ -174,9 +174,8 @@ pub(super) fn load_more_library_entries(mut state: State<ShellState>) -> bool {
                                     .filter(|entry| !existing_paths.contains(&entry.path)),
                             );
                             shell_page.has_more = raw_count > page_size || backend_has_more;
-                            shell_page.next_offset = shell_page
-                                .has_more
-                                .then_some(shell_page.entries.len());
+                            shell_page.next_offset =
+                                shell_page.has_more.then_some(shell_page.entries.len());
                         }
                         next.error = None;
                         eprintln!(
