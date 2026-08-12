@@ -28,6 +28,26 @@ runs:
           echo 'Frozen pnpm install failed; retrying without frozen lockfile so CI can reach tests.' >&2
           pnpm install --no-frozen-lockfile --ignore-scripts
         }
+
+        # Dependencies intentionally live in Elephant/node_modules for the renderer,
+        # while repository-level Node scripts use the standard root resolution path.
+        # Keep both views pointed at the exact same pnpm installation instead of
+        # performing a second install or relying on NODE_PATH (which ESM ignores).
+        node <<'NODE'
+        const fs = require('node:fs')
+        const path = require('node:path')
+        const target = path.resolve('Elephant/node_modules')
+        const link = path.resolve('node_modules')
+        if (!fs.existsSync(target)) throw new Error(`pnpm modules directory is missing: ${target}`)
+        if (!fs.existsSync(link)) {
+          fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+        }
+        const resolved = fs.realpathSync(link)
+        if (resolved !== fs.realpathSync(target)) {
+          throw new Error(`root node_modules does not resolve to Elephant/node_modules: ${resolved}`)
+        }
+        console.log(`[setup] root Node module resolution -> ${resolved}`)
+        NODE
       env:
         GITHUB_TOKEN: ${{ github.token }}
 
