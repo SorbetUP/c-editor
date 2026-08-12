@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "reference": {
+    "runtime": "tauri",
+    "sha": "a49531551dcb7a1e9178601edb36f98bbe4b7f28"
+  },
+  "visualCompared": [
+    "startup",
+    "search-open",
+    "search-results",
+    "library-after-search",
+    "root-library",
+    "note-open",
+    "note-edited",
+    "library-after-note",
+    "create-menu-open",
+    "library-after-menu",
+    "settings-general",
+    "settings-editor",
+    "graph-default"
+  ],
+  "sharedJourneyNotYetVisualGated": [
+    {
+      "id": "alpha-card-hover",
+      "reason": "Tauri acceptance bridge has no real pointer-motion control plane"
+    },
+    {
+      "id": "note-scrolled",
+      "reason": "Tauri acceptance bridge has no real wheel/scroll gesture control plane"
+    },
+    {
+      "id": "create-menu-hover",
+      "reason": "Tauri acceptance bridge has no real pointer-motion control plane"
+    },
+    {
+      "id": "rail-after-drag",
+      "reason": "Tauri acceptance bridge has no real drag pointer sequence"
+    }
+  ],
+  "knownSurfaceGap": [
+    {
+      "surface": "drawing",
+      "reason": "Freya native Drawing/Excalidraw renderer is not yet a comparable production surface; synthetic replacement screenshots are forbidden"
+    }
+  ],
+  "invariants": [
+    "same fixture file/hash list",
+    "same 1280x840 viewport and scale factor",
+    "real Tauri window capture",
+    "real Freya TestingRunner render",
+    "missing capture is INFRA_ERROR",
+    "blank/degenerate capture is INFRA_ERROR",
+    "no image registration before gating",
+    "parity differences remain report-only until FREYA_PARITY_HARD_GATE=1"
+  ]
+}
