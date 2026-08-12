@@ -94,8 +94,12 @@ fn remember_vault_at(path: &Path, root: &Path) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("startup state path has no parent: {}", path.display()))?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("create startup state directory {}: {error}", parent.display()))?;
+    fs::create_dir_all(parent).map_err(|error| {
+        format!(
+            "create startup state directory {}: {error}",
+            parent.display()
+        )
+    })?;
 
     let state = StartupState {
         version: 1,
