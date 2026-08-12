@@ -383,11 +383,15 @@ fn library_grid(state: State<ShellState>) -> Element {
         rect().spacing(6.).children(entries)
     };
 
-    rect()
+    ScrollView::new()
         .width(Size::fill())
         .height(Size::fill())
-        .padding(Gaps::new(72., 10., 10., 10.))
-        .child(surface)
+        .child(
+            rect()
+                .width(Size::fill())
+                .padding(Gaps::new(72., 10., 10., 10.))
+                .child(surface),
+        )
         .into_element()
 }
 
@@ -633,6 +637,7 @@ fn card_title_row(
 
         rect()
             .width(Size::fill())
+            .a11y_alt(format!("Rename {title}"))
             .on_mouse_up(|event: Event<MouseEventData>| event.stop_propagation())
             .on_global_key_down(move |event: Event<KeyboardEventData>| {
                 if event.key == Key::Named(NamedKey::Escape) {
