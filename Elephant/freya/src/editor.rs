@@ -14,8 +14,8 @@ use std::{
 
 use muya_core::{
     edit::PasteCommand,
-    features::{TableNavigationCommand, TaskCommand},
-    model::{InlineKind, InlineMarkKind, NodeKind},
+    features::{BlockTypeCommand, TableNavigationCommand, TaskCommand},
+    model::{InlineKind, InlineMarkKind, ListKind, NodeKind},
     Command, EditError, EditorSession as MuyaEditorSession, GraphemeCommand, MarkCommand,
     ParagraphBoundaryCommand, Selection, SelectionPoint, SessionCommand, SessionSnapshot,
     SessionUpdate, ViewPatch,
@@ -42,6 +42,10 @@ pub enum EditorAction {
     ToggleStrong,
     ToggleEmphasis,
     ToggleStrike,
+    SetHeading(u8),
+    SetListKind(ListKind),
+    ToggleBlockQuote,
+    ToggleCodeBlock,
     TableNavigation(TableNavigationCommand),
     SetTaskChecked {
         item: muya_core::NodeId,
@@ -181,6 +185,16 @@ impl EditorSession {
             EditorAction::ToggleStrong => SessionCommand::Mark(MarkCommand::ToggleStrong),
             EditorAction::ToggleEmphasis => SessionCommand::Mark(MarkCommand::ToggleEmphasis),
             EditorAction::ToggleStrike => SessionCommand::Mark(MarkCommand::ToggleStrike),
+            EditorAction::SetHeading(level) => SessionCommand::Core(Command::SetHeading(level)),
+            EditorAction::SetListKind(kind) => {
+                SessionCommand::BlockType(BlockTypeCommand::SetListKind(kind))
+            }
+            EditorAction::ToggleBlockQuote => {
+                SessionCommand::BlockType(BlockTypeCommand::ToggleBlockQuote)
+            }
+            EditorAction::ToggleCodeBlock => {
+                SessionCommand::BlockType(BlockTypeCommand::ToggleCodeBlock)
+            }
             EditorAction::TableNavigation(command) => SessionCommand::TableNavigation(command),
             EditorAction::SetTaskChecked {
                 item,
@@ -410,6 +424,33 @@ impl EditorDocument {
         selected_inline_markdown(self.session.document(), self.session.snapshot().selection)
     }
 
+    pub fn selected_text(&self) -> Result<String, String> {
+        selected_inline_text(self.session.document(), self.session.snapshot().selection)
+    }
+
+    /// Applies inline-code Markdown through Muya's real paste transaction so the
+    /// resulting `CodeSpan` remains part of the editable document and history.
+    pub fn apply_inline_code(&mut self) -> Result<EditorUpdate, String> {
+        let selected = self.selected_text()?;
+        let markdown = inline_code_markdown(&selected);
+        self.paste_markdown(markdown)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Wraps the current real selection in a Markdown link. The destination is
+    /// supplied by the Freya toolbar form rather than fabricated in document state.
+    pub fn link_selection(&mut self, destination: &str) -> Result<EditorUpdate, String> {
+        let selected = self.selected_text()?;
+        let destination = destination.trim();
+        if destination.is_empty() {
+            return Err("link destination cannot be empty".to_string());
+        }
+        let label = escape_link_label(&selected);
+        let destination = markdown_link_destination(destination);
+        self.paste_markdown(format!("[{label}]({destination})"))
+            .map_err(|error| error.to_string())
+    }
+
     pub fn set_selection(&mut self, selection: Selection) -> Result<EditorUpdate, EditorError> {
         let revision = self.session.revision();
         self.session.set_selection(revision, selection)
@@ -593,6 +634,7 @@ fn io_error(path: &Path, error: io::Error) -> EditorError {
 fn text_value(document: &muya_core::Document, node_id: muya_core::NodeId) -> Option<&str> {
     match &document.node(node_id)?.kind {
         NodeKind::Inline(InlineKind::Text { value }) => Some(value),
+        NodeKind::Inline(InlineKind::CodeSpan { code }) => Some(code),
         _ => None,
     }
 }
@@ -634,12 +676,38 @@ fn first_text_node(
     node_id: muya_core::NodeId,
 ) -> Option<muya_core::NodeId> {
     let node = document.node(node_id)?;
-    if matches!(node.kind, NodeKind::Inline(InlineKind::Text { .. })) {
+    if matches!(
+        node.kind,
+        NodeKind::Inline(InlineKind::Text { .. } | InlineKind::CodeSpan { .. })
+    ) {
         return Some(node_id);
     }
     node.children
         .iter()
         .find_map(|child| first_text_node(document, *child))
+}
+
+fn selected_inline_text(
+    document: &muya_core::Document,
+    selection: Selection,
+) -> Result<String, String> {
+    if selection.anchor.node != selection.focus.node {
+        return Err("selection spans multiple Muya inline nodes".to_string());
+    }
+    let value = text_value(document, selection.anchor.node)
+        .ok_or_else(|| "selection is not editable text".to_string())?;
+    let start = selection
+        .anchor
+        .offset_utf16
+        .min(selection.focus.offset_utf16);
+    let end = selection
+        .anchor
+        .offset_utf16
+        .max(selection.focus.offset_utf16);
+    if start == end {
+        return Err("formatting requires a non-empty selection".to_string());
+    }
+    utf16_slice(value, start, end)
 }
 
 fn selected_inline_markdown(
@@ -652,9 +720,8 @@ fn selected_inline_markdown(
     let node = document
         .node(selection.anchor.node)
         .ok_or_else(|| "copy selection has no Muya text node".to_string())?;
-    let NodeKind::Inline(InlineKind::Text { value }) = &node.kind else {
-        return Err("copy selection is not text".to_string());
-    };
+    let value = text_value(document, selection.anchor.node)
+        .ok_or_else(|| "copy selection is not text".to_string())?;
     let start = selection
         .anchor
         .offset_utf16
@@ -667,6 +734,9 @@ fn selected_inline_markdown(
         return Err("copy requires a non-empty selection".to_string());
     }
     let text = utf16_slice(value, start, end)?;
+    if matches!(node.kind, NodeKind::Inline(InlineKind::CodeSpan { .. })) {
+        return Ok(inline_code_markdown(&text));
+    }
     let mut wrappers = Vec::new();
     let mut parent = node.parent;
     while let Some(parent_id) = parent {
@@ -705,6 +775,43 @@ fn selected_inline_markdown(
     Ok(markdown)
 }
 
+fn inline_code_markdown(value: &str) -> String {
+    let mut longest_run = 0usize;
+    let mut current_run = 0usize;
+    for character in value.chars() {
+        if character == '`' {
+            current_run += 1;
+            longest_run = longest_run.max(current_run);
+        } else {
+            current_run = 0;
+        }
+    }
+    let delimiter = "`".repeat(longest_run + 1);
+    let needs_padding = value.starts_with('`')
+        || value.ends_with('`')
+        || (value.starts_with(' ') && value.ends_with(' '));
+    if needs_padding {
+        format!("{delimiter} {value} {delimiter}")
+    } else {
+        format!("{delimiter}{value}{delimiter}")
+    }
+}
+
+fn escape_link_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+}
+
+fn markdown_link_destination(value: &str) -> String {
+    if value.chars().any(char::is_whitespace) || value.contains(['(', ')']) {
+        format!("<{}>", value.replace('>', "%3E"))
+    } else {
+        value.to_string()
+    }
+}
+
 fn utf16_slice(value: &str, start: u32, end: u32) -> Result<String, String> {
     let mut cursor = 0_u32;
     let mut selected = String::new();
@@ -737,6 +844,36 @@ mod tests {
         std::env::temp_dir().join(format!("elephant-freya-editor-{label}-{nonce}.md"))
     }
 
+    fn select_all_first_inline(document: &mut EditorDocument) -> muya_core::NodeId {
+        let paragraph = document
+            .session()
+            .document()
+            .children(document.session().document().root)
+            .next()
+            .expect("fixture paragraph");
+        let inline = document
+            .session()
+            .document()
+            .children(paragraph.id)
+            .next()
+            .expect("fixture inline");
+        let value = text_value(document.session().document(), inline.id).expect("editable inline");
+        let end = value.encode_utf16().count() as u32;
+        document
+            .set_selection(Selection {
+                anchor: SelectionPoint {
+                    node: inline.id,
+                    offset_utf16: 0,
+                },
+                focus: SelectionPoint {
+                    node: inline.id,
+                    offset_utf16: end,
+                },
+            })
+            .expect("select fixture inline");
+        inline.id
+    }
+
     #[test]
     fn dispatches_text_undo_redo_and_serializes_the_real_document() {
         let mut document = EditorDocument::from_markdown("alpha");
@@ -754,6 +891,76 @@ mod tests {
         let redone = document.redo().expect("redo must succeed");
         assert_eq!(redone.markdown, "Xalpha");
         assert_eq!(document.serialize(), "Xalpha");
+    }
+
+    #[test]
+    fn toolbar_block_actions_use_real_muya_commands() {
+        let mut heading = EditorDocument::from_markdown("alpha");
+        heading
+            .dispatch(EditorAction::SetHeading(2))
+            .expect("heading command");
+        assert_eq!(heading.serialize(), "## alpha");
+
+        let mut bullets = EditorDocument::from_markdown("alpha");
+        bullets
+            .dispatch(EditorAction::SetListKind(ListKind::Unordered))
+            .expect("bullet list command");
+        assert_eq!(bullets.serialize(), "- alpha");
+
+        let mut ordered = EditorDocument::from_markdown("alpha");
+        ordered
+            .dispatch(EditorAction::SetListKind(ListKind::Ordered))
+            .expect("ordered list command");
+        assert_eq!(ordered.serialize(), "1. alpha");
+
+        let mut task = EditorDocument::from_markdown("alpha");
+        task.dispatch(EditorAction::SetListKind(ListKind::Task))
+            .expect("task list command");
+        assert_eq!(task.serialize(), "- [ ] alpha");
+
+        let mut quote = EditorDocument::from_markdown("alpha");
+        quote
+            .dispatch(EditorAction::ToggleBlockQuote)
+            .expect("quote command");
+        assert_eq!(quote.serialize(), "> alpha");
+    }
+
+    #[test]
+    fn toolbar_inline_code_and_link_replace_the_real_selection() {
+        let mut code = EditorDocument::from_markdown("alpha");
+        select_all_first_inline(&mut code);
+        code.apply_inline_code().expect("inline-code command");
+        assert_eq!(code.serialize(), "`alpha`");
+
+        let code_span = code
+            .session()
+            .document()
+            .children(code.session().document().root)
+            .next()
+            .and_then(|paragraph| code.session().document().children(paragraph.id).next())
+            .expect("rendered code span")
+            .id;
+        code.set_selection(Selection::collapsed(SelectionPoint {
+            node: code_span,
+            offset_utf16: 5,
+        }))
+        .expect("place caret inside code");
+        code.dispatch_text("!")
+            .expect("code span must remain editable after toolbar formatting");
+        assert_eq!(code.serialize(), "`alpha!`");
+
+        let mut link = EditorDocument::from_markdown("alpha");
+        select_all_first_inline(&mut link);
+        link.link_selection("https://example.com")
+            .expect("link command");
+        assert_eq!(link.serialize(), "[alpha](https://example.com)");
+    }
+
+    #[test]
+    fn inline_code_chooses_a_safe_backtick_delimiter() {
+        assert_eq!(inline_code_markdown("alpha"), "`alpha`");
+        assert_eq!(inline_code_markdown("a`b"), "``a`b``");
+        assert_eq!(inline_code_markdown("`a`"), "`` `a` ``");
     }
 
     #[test]
