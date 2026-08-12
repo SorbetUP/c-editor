@@ -151,7 +151,7 @@ fn has_background(runner: &TestingRunner, label: &str, expected: Fill) -> bool {
 }
 
 fn evidence_path(name: &str) -> PathBuf {
-    let dir = PathBuf::from("/private/tmp/freya-navigation-visual");
+    let dir = std::env::temp_dir().join("freya-navigation-visual");
     fs::create_dir_all(&dir).expect("create navigation visual evidence directory");
     dir.join(name)
 }

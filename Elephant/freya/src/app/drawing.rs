@@ -92,11 +92,8 @@ pub(super) fn request_create(mut state: State<ShellState>) {
     let result = root
         .ok_or_else(|| "No vault selected.".to_owned())
         .and_then(|root| {
-            let created = storage::create_standalone_scene(
-                &root,
-                &create_directory,
-                "Untitled Drawing",
-            )?;
+            let created =
+                storage::create_standalone_scene(&root, &create_directory, "Untitled Drawing")?;
             let scene = storage::read_scene(&root, &created.relative_path)?;
             let mut session = session_from_read(scene)?;
             session.focus_name = true;
@@ -159,8 +156,7 @@ pub(super) fn open_existing(mut state: State<ShellState>, relative_path: &str) {
 
 fn session_from_read(scene: storage::SceneRead) -> Result<DrawingSession, String> {
     let has_preview = scene.preview_size.is_some();
-    let rename_allowed =
-        storage::can_rename_standalone_scene(&scene.relative_path, has_preview);
+    let rename_allowed = storage::can_rename_standalone_scene(&scene.relative_path, has_preview);
     eprintln!(
         "[freya][drawing] scene:read path={} elements={} preview_bytes={} rename_allowed={}",
         scene.relative_path,
@@ -209,12 +205,7 @@ fn sync_active_identity(root: &Path, old_path: &str, new_path: &str, title: &str
     }
 }
 
-fn sync_active_canvas(
-    root: &Path,
-    relative_path: &str,
-    title: &str,
-    canvas: &DrawingCanvasState,
-) {
+fn sync_active_canvas(root: &Path, relative_path: &str, title: &str, canvas: &DrawingCanvasState) {
     if let Some((_, session)) = active_drawings()
         .iter_mut()
         .find(|(key, session)| key == root && session.relative_path == relative_path)
@@ -286,7 +277,11 @@ fn drawing_shell(
     let title_snapshot = title.read().clone();
     let dark = snapshot.is_dark_canvas();
     let shell = if dark { dark_shell() } else { light_shell() };
-    let surface = if dark { dark_surface() } else { light_surface() };
+    let surface = if dark {
+        dark_surface()
+    } else {
+        light_surface()
+    };
     let text = if dark { dark_text() } else { light_text() };
     let muted = if dark {
         Color::from_rgb(170, 170, 180)
@@ -346,7 +341,11 @@ fn drawing_shell(
                     match &event.key {
                         Key::Named(NamedKey::Enter)
                         | Key::Named(NamedKey::Escape)
-                        | Key::Named(NamedKey::Shift) => true,
+                        | Key::Named(NamedKey::Shift)
+                        | Key::Named(NamedKey::Home)
+                        | Key::Named(NamedKey::End)
+                        | Key::Named(NamedKey::ArrowLeft)
+                        | Key::Named(NamedKey::ArrowRight) => true,
                         Key::Named(NamedKey::Tab) => false,
                         _ => {
                             event.stop_propagation();
@@ -369,13 +368,22 @@ fn drawing_shell(
                     Color::from_argb(18, 40, 40, 52)
                 })
                 .with_corner_radius(4.)
-                .child(label().font_size(12.).color(text).text(title_snapshot.clone()))
+                .child(
+                    label()
+                        .font_size(12.)
+                        .color(text)
+                        .text(title_snapshot.clone()),
+                )
                 .into_element(),
         )
     };
 
     rect()
-        .key(("native-drawing-shell", path_snapshot.clone(), snapshot.revision))
+        .key((
+            "native-drawing-shell",
+            path_snapshot.clone(),
+            snapshot.revision,
+        ))
         .width(Size::fill())
         .height(Size::fill())
         .background(shell)
@@ -888,12 +896,7 @@ mod tests {
         clear_active(&root);
         set_active(root.clone(), session("Sketch.excalidraw", "Sketch", 0));
 
-        sync_active_canvas(
-            &root,
-            "Other.excalidraw",
-            "Other",
-            &canvas_with_elements(2),
-        );
+        sync_active_canvas(&root, "Other.excalidraw", "Other", &canvas_with_elements(2));
         assert_eq!(
             active_session(&root)
                 .unwrap()
