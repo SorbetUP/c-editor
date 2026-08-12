@@ -175,9 +175,7 @@ fn settings_panel_keeps_tauri_reference_geometry_when_space_is_available() {
     assert!(approximately(search.size.width, 350.));
     assert!(approximately(search.size.height, 36.));
 
-    let navigation = node_with_label(&runner, "Settings sections")
-        .layout()
-        .area;
+    let navigation = node_with_label(&runner, "Settings sections").layout().area;
     assert!(approximately(navigation.size.width, 196.));
 }
 
@@ -209,7 +207,10 @@ fn settings_search_is_live_and_opening_a_result_clears_search_mode() {
     runner.write_text("autosave");
     runner.sync_and_update();
 
-    assert_eq!(accessible_nodes(&runner, "Settings search results").len(), 1);
+    assert_eq!(
+        accessible_nodes(&runner, "Settings search results").len(),
+        1
+    );
     assert_eq!(accessible_nodes(&runner, "Open setting Autosave").len(), 1);
     assert_eq!(
         accessible_nodes(&runner, "Open setting Autosave delay").len(),
@@ -218,15 +219,17 @@ fn settings_search_is_live_and_opening_a_result_clears_search_mode() {
 
     click_label(&mut runner, "Open setting Autosave");
     assert!(accessible_nodes(&runner, "Settings search results").is_empty());
-    assert_eq!(accessible_nodes(&runner, "Settings section editor").len(), 1);
+    assert_eq!(
+        accessible_nodes(&runner, "Settings section editor").len(),
+        1
+    );
     assert_eq!(accessible_nodes(&runner, "Enable autosave").len(), 1);
 }
 
 #[test]
 fn color_mode_preserves_theme_family_and_round_trips_on_disk() {
-    let profile = ProfileOverride::new(
-        r#"{"theme":"nord-light","futurePreference":{"keep":true}}"#,
-    );
+    let profile =
+        ProfileOverride::new(r#"{"theme":"nord-light","futurePreference":{"keep":true}}"#);
     let fixture = FixtureVault::new();
     let mut runner = runner_for(&fixture);
     open_settings(&mut runner);
@@ -253,7 +256,10 @@ fn color_mode_preserves_theme_family_and_round_trips_on_disk() {
     .expect("settings panel remains a rectangle")
     .style
     .background;
-    assert_ne!(before, after, "changing color mode must recolor the live panel");
+    assert_ne!(
+        before, after,
+        "changing color mode must recolor the live panel"
+    );
 
     click_label(&mut runner, "Use Light color mode");
     let light = profile.read_preferences();
@@ -296,12 +302,18 @@ fn icon_rail_visibility_uses_the_real_hidden_list_and_persists() {
     click_label(&mut runner, "Hide Search in navigation");
     let hidden = profile.read_preferences();
     assert_eq!(hidden["iconRailHidden"], serde_json::json!(["search"]));
-    assert_eq!(accessible_nodes(&runner, "Show Search in navigation").len(), 1);
+    assert_eq!(
+        accessible_nodes(&runner, "Show Search in navigation").len(),
+        1
+    );
 
     click_label(&mut runner, "Show Search in navigation");
     let visible = profile.read_preferences();
     assert_eq!(visible["iconRailHidden"], serde_json::json!([]));
-    assert_eq!(accessible_nodes(&runner, "Hide Search in navigation").len(), 1);
+    assert_eq!(
+        accessible_nodes(&runner, "Hide Search in navigation").len(),
+        1
+    );
 }
 
 #[test]
@@ -315,7 +327,10 @@ fn editor_controls_persist_bounds_and_disabled_autosave_delay() {
     click_label(&mut runner, "Select Editor settings");
 
     click_label(&mut runner, "Increase Note margins");
-    assert_eq!(profile.read_preferences()["noteEditorMargin"], Value::from(48));
+    assert_eq!(
+        profile.read_preferences()["noteEditorMargin"],
+        Value::from(48)
+    );
     click_label(&mut runner, "Increase Note margins");
     assert_eq!(
         profile.read_preferences()["noteEditorMargin"],
@@ -333,10 +348,16 @@ fn editor_controls_persist_bounds_and_disabled_autosave_delay() {
     click_label(&mut runner, "Enable autosave");
     assert_eq!(profile.read_preferences()["autoSave"], Value::Bool(true));
     click_label(&mut runner, "Autosave delay");
-    assert_eq!(profile.read_preferences()["autoSaveDelay"], Value::from(250));
+    assert_eq!(
+        profile.read_preferences()["autoSaveDelay"],
+        Value::from(250)
+    );
 
     click_label(&mut runner, "Decrease Note margins");
-    assert_eq!(profile.read_preferences()["noteEditorMargin"], Value::from(44));
+    assert_eq!(
+        profile.read_preferences()["noteEditorMargin"],
+        Value::from(44)
+    );
 }
 
 #[test]
