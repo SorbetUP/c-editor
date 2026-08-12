@@ -38,12 +38,9 @@ pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
         })
         .on_global_pointer_move(move |event: Event<PointerEventData>| {
             if event.is_primary() {
-                let location = point(event.element_location());
-                if move_state.read().active_tool() == DrawingTool::Eraser {
-                    move_state.write().begin_pointer(location);
-                } else {
-                    move_state.write().move_pointer(location);
-                }
+                move_state
+                    .write()
+                    .move_pointer(point(event.element_location()));
                 event.stop_propagation();
             }
         })
