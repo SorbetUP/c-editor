@@ -44,7 +44,41 @@ jobs:
             Elephant/freya -> target
 
       - name: Check Freya shell
-        run: cargo check --manifest-path Elephant/freya/Cargo.toml
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          cargo check --manifest-path Elephant/freya/Cargo.toml 2>&1 | tee /tmp/freya-check.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 - /tmp/freya-check.log <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          filename = sys.argv[1]
+          raw = Path(filename).read_text(errors='replace')
+          ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+          lines = [ansi.sub('', line) for line in raw.splitlines()]
+          interesting = []
+          markers = ('error[E', 'error:', 'cannot find', 'mismatched types')
+          for index, line in enumerate(lines):
+              if any(marker in line for marker in markers):
+                  interesting.extend(lines[max(0, index - 2):min(len(lines), index + 10)])
+          if not interesting:
+              interesting = lines[-50:]
+          compact = []
+          seen = set()
+          for line in interesting:
+              if line not in seen:
+                  compact.append(line)
+                  seen.add(line)
+          message = '\n'.join(compact[-80:])
+          escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=Freya cargo check::{escaped}')
+          PY
+            exit "$status"
+          fi
 
       - name: Test Freya library
         run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1
