@@ -23,6 +23,7 @@ concurrency:
 env:
   TAURI_REFERENCE_SHA: a49531551dcb7a1e9178601edb36f98bbe4b7f28
   FREYA_PARITY_HARD_GATE: "0"
+  FREYA_PARITY_TAURI_STARTUP_TIMEOUT_MS: "900000"
   DISPLAY: ":99"
   DEBIAN_FRONTEND: noninteractive
 
@@ -86,6 +87,14 @@ jobs:
             .tauri-reference/Elephant/backend/tauri -> target
       - name: Install Tauri reference dependencies
         run: pnpm --dir .tauri-reference install --frozen-lockfile
+      - name: Normalize immutable Tauri config for portable Linux dev capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          node build/scripts/freya-parity/normalize-tauri-reference.mjs \
+            --repo-root .tauri-reference \
+            --expected-sha "$TAURI_REFERENCE_SHA" \
+            --output test-results/freya-parity/tauri-reference-normalization.json
       - name: Validate parity harness
         shell: bash
         run: |
@@ -95,6 +104,7 @@ jobs:
           node --check build/scripts/freya-parity/prepare-fixture.mjs
           node --check build/scripts/freya-parity/stage-freya-captures.mjs
           node --check build/scripts/freya-parity/capture-tauri-reference.mjs
+          node --check build/scripts/freya-parity/normalize-tauri-reference.mjs
       - name: Start deterministic X11 display
         shell: bash
         run: |
@@ -197,6 +207,7 @@ jobs:
           compression-level: 6
           path: |
             build/scripts/freya-parity/coverage.json
+            test-results/freya-parity/tauri-reference-normalization.json
             test-results/freya-parity/tauri/*/static.png
             test-results/freya-parity/tauri/*/stability.png
             test-results/freya-parity/tauri/metadata.json
