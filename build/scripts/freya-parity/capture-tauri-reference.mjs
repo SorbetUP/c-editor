@@ -14,15 +14,19 @@ const harnessRoot = path.resolve(import.meta.dirname, '../../..')
 const repoRoot = path.resolve(stringArg('--repo-root', harnessRoot))
 const output = path.resolve(stringArg('--output', 'test-results/freya-parity/tauri'))
 const scenarioPath = path.resolve(stringArg('--scenario', path.join(harnessRoot, 'migration/freya/differential-scenarios.json')))
-const configPath = path.resolve(stringArg('--config', path.join(import.meta.dirname, 'checkpoints.json')))
-const fixtureRoot = path.resolve(stringArg('--fixture-root', path.join(output, '_fixture')))
+const configPath = path.resolve(stringArg('--config', path.join(import.meta.dirname, 'checkpoints.json'))
+const fixtureRoot = path.resolve(stringArg('--fixture-root', path.join(output, '_fixture'))
 const expectedSha = stringArg('--expected-sha', process.env.TAURI_REFERENCE_SHA || '')
 const appPath = stringArg('--app-path', './build/scripts/build_dev.sh')
+const startupTimeoutMs = Number(process.env.FREYA_PARITY_TAURI_STARTUP_TIMEOUT_MS || 900000)
 const config = JSON.parse(await readFile(configPath, 'utf8'))
 const scenario = await loadScenario(scenarioPath)
 const viewport = scenario.viewport
 const originalHome = process.env.HOME || '/tmp'
 
+if (!Number.isFinite(startupTimeoutMs) || startupTimeoutMs < 30000) {
+  throw new Error(`INFRA_ERROR: invalid FREYA_PARITY_TAURI_STARTUP_TIMEOUT_MS=${process.env.FREYA_PARITY_TAURI_STARTUP_TIMEOUT_MS}`)
+}
 if (expectedSha) {
   const actual = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim()
   if (actual !== expectedSha) throw new Error(`INFRA_ERROR: Tauri reference SHA mismatch: expected ${expectedSha}, got ${actual}`)
@@ -91,7 +95,11 @@ async function waitText (text, timeout = 15000) {
 }
 function windowId () {
   const raw = execFileSync('xdotool', ['search', '--onlyvisible', '--name', '^Elephant$'], { encoding: 'utf8' }).trim().split(/\s+/).filter(Boolean)
-  if (!raw.length) throw new Error('INFRA_ERROR: visible Tauri window named Elephant was not found')
+  if (!raw.length) {
+    let tree = ''
+    try { tree = execFileSync('xwininfo', ['-root', '-tree'], { encoding: 'utf8' }) } catch {}
+    throw new Error(`INFRA_ERROR: visible Tauri window named Elephant was not found; X11 tree=${JSON.stringify(tree)}`)
+  }
   return raw.at(-1)
 }
 function pngDimensions (png) {
@@ -142,7 +150,7 @@ try {
   child.once('error', (error) => { spawnError = error; collect('[tauri-reference:spawn-error] ', `${error.stack || error}\n`) })
   child.stdout.on('data', (chunk) => collect('[tauri-reference] ', chunk))
   child.stderr.on('data', (chunk) => collect('[tauri-reference:error] ', chunk))
-  const deadline = Date.now() + 180000
+  const deadline = Date.now() + startupTimeoutMs
   while (Date.now() < deadline) {
     const match = logs.match(/ELEPHANT_ACCEPTANCE_TAURI_PORT=(\d+)/)
     if (match) { endpoint = `http://127.0.0.1:${match[1]}`; break }
@@ -150,7 +158,7 @@ try {
     if (child.exitCode !== null) throw new Error(`INFRA_ERROR: Tauri exited before acceptance server startup (${child.exitCode})`)
     await sleep(250)
   }
-  if (!endpoint) throw new Error('INFRA_ERROR: timed out waiting for Tauri acceptance server')
+  if (!endpoint) throw new Error(`INFRA_ERROR: timed out after ${startupTimeoutMs}ms waiting for Tauri acceptance server`)
   const health = await fetch(`${endpoint}/health`).then((response) => response.json())
   if (health.transport !== 'tauri') throw new Error(`INFRA_ERROR: acceptance transport is not Tauri: ${JSON.stringify(health)}`)
 
@@ -180,10 +188,8 @@ try {
   await command('click', '.en-settings-nav button:nth-of-type(2)'); await waitFor('.en-settings-content[data-active-section="editor"]'); await captureById('settings-editor')
   await command('click', '[aria-label="Close settings"]'); await waitGone('.en-settings-panel')
 
-  const graphInstall = await command('installOfficialAddon', 'elephant.graph')
-  if (!graphInstall) throw new Error('INFRA_ERROR: graph addon installation returned no evidence')
-  const graphEnable = await command('enableAddon', 'elephant.graph')
-  if (!graphEnable) throw new Error('INFRA_ERROR: graph addon enable returned no evidence')
+  await command('installOfficialAddon', 'elephant.graph')
+  await command('enableAddon', 'elephant.graph')
   await command('runAddonAction', 'elephant.graph.open'); await waitFor('.elephant-graph-package', 20000); await captureById('graph-default')
 
   const expected = config.checkpoints.map((entry) => entry.id)
