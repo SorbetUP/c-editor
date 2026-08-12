@@ -13,11 +13,6 @@ use freya::prelude::*;
 
 pub use drawing_scene::{DrawingCanvasState, DrawingTool};
 
-pub fn drawing_canvas() -> Element {
-    let state = use_consume::<State<DrawingCanvasState>>();
-    drawing_canvas_with_state(state)
-}
-
 pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
     let snapshot = state.read().clone();
     let mut pointer_state = state;
@@ -37,7 +32,7 @@ pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
             if event.button == Some(MouseButton::Left) {
                 pointer_state
                     .write()
-                    .begin_pointer(point(event.global_location));
+                    .begin_pointer(point(event.element_location));
                 event.stop_propagation();
             }
         })
@@ -45,7 +40,7 @@ pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
             if event.is_primary() {
                 move_state
                     .write()
-                    .move_pointer(point(event.global_location()));
+                    .move_pointer(point(event.element_location()));
                 event.stop_propagation();
             }
         })
@@ -57,7 +52,7 @@ pub fn drawing_canvas_with_state(state: State<DrawingCanvasState>) -> Element {
         .on_wheel(move |event: Event<WheelEventData>| {
             wheel_state
                 .write()
-                .zoom_at(point(event.global_location), event.delta_y);
+                .zoom_at(point(event.element_location), event.delta_y);
             event.stop_propagation();
         })
         .children(primitives)
