@@ -99,10 +99,7 @@ pub(super) fn search_results_content(
                             .child(
                                 label()
                                     .font_size(10.5)
-                                    .color(theme::token_color(
-                                        palette,
-                                        theme::ThemeToken::Muted,
-                                    ))
+                                    .color(theme::token_color(palette, theme::ThemeToken::Muted))
                                     .text(entry.description),
                             ),
                     )
