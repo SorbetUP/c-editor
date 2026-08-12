@@ -149,7 +149,11 @@ fn theme_selector(
                         .on_mouse_up(move |_| {
                             toggle_state.write().settings.toggle_theme_expansion();
                         })
-                        .child(label().font_size(14.).text(if expanded { "⌃" } else { "⌄" })),
+                        .child(
+                            label()
+                                .font_size(14.)
+                                .text(if expanded { "⌃" } else { "⌄" }),
+                        ),
                 ),
         );
 
@@ -159,17 +163,13 @@ fn theme_selector(
             let mut row = rect().width(Size::fill()).horizontal().spacing(9.);
             for family in pair {
                 let theme_id = if dark { family.dark } else { family.light };
-                row = row.child(
-                    rect()
-                        .width(Size::fill())
-                        .child(super::theme_variant(
-                            state,
-                            family.name,
-                            family.description,
-                            theme_id,
-                            current_theme == theme_id,
-                        )),
-                );
+                row = row.child(rect().width(Size::fill()).child(super::theme_variant(
+                    state,
+                    family.name,
+                    family.description,
+                    theme_id,
+                    current_theme == theme_id,
+                )));
             }
             if pair.len() == 1 {
                 row = row.child(rect().width(Size::fill()));
