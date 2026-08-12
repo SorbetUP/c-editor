@@ -6,6 +6,7 @@
 
 use super::ShellState;
 use freya::{components::SvgViewer, prelude::*};
+use serde_json::Value;
 use std::sync::Mutex;
 
 #[path = "drawing_storage.rs"]
@@ -51,6 +52,7 @@ struct DrawingSession {
     relative_path: String,
     title: String,
     canvas: DrawingCanvasState,
+    rename_allowed: bool,
 }
 
 pub(crate) fn error_accessibility_label(error: &str) -> &'static str {
@@ -143,19 +145,24 @@ pub(super) fn open_existing(mut state: State<ShellState>, relative_path: &str) {
 }
 
 fn session_from_read(scene: storage::SceneRead) -> Result<DrawingSession, String> {
+    let has_preview = scene.preview_size.is_some();
+    let rename_allowed =
+        storage::can_rename_standalone_scene(&scene.relative_path, has_preview);
     eprintln!(
-        "[freya][drawing] scene:read path={} elements={} preview_bytes={}",
+        "[freya][drawing] scene:read path={} elements={} preview_bytes={} rename_allowed={}",
         scene.relative_path,
         scene.element_count,
         scene
             .preview_size
             .map(|size| size.to_string())
-            .unwrap_or_else(|| "none".to_owned())
+            .unwrap_or_else(|| "none".to_owned()),
+        rename_allowed
     );
     Ok(DrawingSession {
         relative_path: scene.relative_path,
         title: scene.title,
         canvas: DrawingCanvasState::from_json(&scene.raw)?,
+        rename_allowed,
     })
 }
 
@@ -173,18 +180,41 @@ fn clear_active() {
     }
 }
 
-fn sync_active_canvas(relative_path: &str, canvas: &DrawingCanvasState) {
+fn sync_active_identity(old_path: &str, new_path: &str, title: &str) {
+    let update = |active: &mut Option<DrawingSession>| {
+        if let Some(session) = active
+            .as_mut()
+            .filter(|session| session.relative_path == old_path)
+        {
+            session.relative_path = new_path.to_owned();
+            session.title = title.to_owned();
+        }
+    };
+    match ACTIVE_DRAWING.lock() {
+        Ok(mut active) => update(&mut active),
+        Err(poisoned) => {
+            let mut active = poisoned.into_inner();
+            update(&mut active);
+        }
+    }
+}
+
+fn sync_active_canvas(relative_path: &str, title: &str, canvas: &DrawingCanvasState) {
     let update = |active: &mut Option<DrawingSession>| {
         if let Some(session) = active
             .as_mut()
             .filter(|session| session.relative_path == relative_path)
         {
+            session.title = title.to_owned();
             session.canvas = canvas.clone();
         }
     };
     match ACTIVE_DRAWING.lock() {
         Ok(mut active) => update(&mut active),
-        Err(poisoned) => update(&mut poisoned.into_inner()),
+        Err(poisoned) => {
+            let mut active = poisoned.into_inner();
+            update(&mut active);
+        }
     }
 }
 
@@ -208,15 +238,20 @@ struct DrawingPanel {
 
 impl Component for DrawingPanel {
     fn render(&self) -> impl IntoElement {
-        let initial = self.session.canvas.clone();
-        let canvas_state = use_state(move || initial);
+        let initial_canvas = self.session.canvas.clone();
+        let canvas_state = use_state(move || initial_canvas);
         let status = use_state(String::new);
+        let initial_path = self.session.relative_path.clone();
+        let relative_path = use_state(move || initial_path);
+        let initial_title = self.session.title.clone();
+        let title = use_state(move || initial_title);
         drawing_shell(
             self.state,
             canvas_state,
             status,
-            self.session.relative_path.clone(),
-            self.session.title.clone(),
+            relative_path,
+            title,
+            self.session.rename_allowed,
         )
     }
 }
@@ -225,10 +260,13 @@ fn drawing_shell(
     shell_state: State<ShellState>,
     canvas_state: State<DrawingCanvasState>,
     status: State<String>,
-    relative_path: String,
-    title: String,
+    relative_path: State<String>,
+    title: State<String>,
+    rename_allowed: bool,
 ) -> Element {
     let snapshot = canvas_state.read().clone();
+    let path_snapshot = relative_path.read().clone();
+    let title_snapshot = title.read().clone();
     let dark = snapshot.is_dark_canvas();
     let shell = if dark { dark_shell() } else { light_shell() };
     let surface = if dark { dark_surface() } else { light_surface() };
@@ -242,21 +280,87 @@ fn drawing_shell(
     let mut close_state = shell_state;
     let mut key_shell_state = shell_state;
     let save_shell_state = shell_state;
+    let submit_shell_state = shell_state;
     let save_canvas_state = canvas_state;
+    let submit_canvas_state = canvas_state;
     let save_status = status;
-    let save_path = relative_path.clone();
-    let key_path = relative_path.clone();
-    let mut key_canvas_state = canvas_state;
+    let submit_status = status;
+    let key_canvas_state = canvas_state;
     let key_status = status;
+    let key_path = relative_path;
+    let key_title = title;
+    let save_path = relative_path;
+    let save_title = title;
+    let submit_path = relative_path;
+    let submit_title = title;
+
+    let name_control = if rename_allowed {
+        Some(
+            Input::new(title)
+                .placeholder("Drawing name")
+                .flat()
+                .compact()
+                .width(Size::px(220.))
+                .on_submit(move |_| {
+                    save_scene(
+                        submit_shell_state,
+                        submit_canvas_state,
+                        submit_status,
+                        submit_path,
+                        submit_title,
+                        true,
+                    );
+                })
+                .on_pre_key_down(|event: Event<KeyboardEventData>| {
+                    let command = event.modifiers.ctrl() || event.modifiers.meta();
+                    if command
+                        && matches!(
+                            &event.key,
+                            Key::Character(value) if value.eq_ignore_ascii_case("s")
+                        )
+                    {
+                        // Let the shell own the save shortcut even while the name input is focused.
+                        return false;
+                    }
+                    match &event.key {
+                        Key::Named(NamedKey::Enter)
+                        | Key::Named(NamedKey::Escape)
+                        | Key::Named(NamedKey::Shift) => true,
+                        Key::Named(NamedKey::Tab) => false,
+                        _ => {
+                            event.stop_propagation();
+                            event.prevent_default();
+                            true
+                        }
+                    }
+                })
+                .into_element(),
+        )
+    } else {
+        Some(
+            rect()
+                .height(Size::px(20.))
+                .padding(Gaps::new(0., 8., 0., 8.))
+                .center()
+                .background(if dark {
+                    Color::from_argb(30, 148, 163, 184)
+                } else {
+                    Color::from_argb(18, 40, 40, 52)
+                })
+                .with_corner_radius(4.)
+                .child(label().font_size(12.).color(text).text(title_snapshot.clone()))
+                .into_element(),
+        )
+    };
 
     rect()
-        .key(("native-drawing-shell", relative_path.clone(), snapshot.revision))
+        .key(("native-drawing-shell", path_snapshot.clone(), snapshot.revision))
         .width(Size::fill())
         .height(Size::fill())
         .background(shell)
         .color(text)
         .overflow(Overflow::Clip)
-        .a11y_alt(format!("Drawing editor {title}"))
+        .a11y_alt(format!("Drawing editor {title_snapshot}"))
         .on_global_key_down(move |event: Event<KeyboardEventData>| {
             if event.key == Key::Named(NamedKey::Escape) {
                 clear_active();
@@ -277,7 +381,14 @@ fn drawing_shell(
                 if let Key::Character(value) = &event.key {
                     match value.to_ascii_lowercase().as_str() {
                         "s" => {
-                            save_scene(key_shell_state, key_canvas_state, key_status, &key_path);
+                            save_scene(
+                                key_shell_state,
+                                key_canvas_state,
+                                key_status,
+                                key_path,
+                                key_title,
+                                rename_allowed,
+                            );
                             event.stop_propagation();
                         }
                         "z" if event.modifiers.shift() => {
@@ -315,19 +426,7 @@ fn drawing_shell(
                         })
                         .width(1.),
                 )
-                .child(
-                    rect()
-                        .height(Size::px(20.))
-                        .padding(Gaps::new(0., 8., 0., 8.))
-                        .center()
-                        .background(if dark {
-                            Color::from_argb(30, 148, 163, 184)
-                        } else {
-                            Color::from_argb(18, 40, 40, 52)
-                        })
-                        .with_corner_radius(4.)
-                        .child(label().font_size(12.).color(text).text(title.clone())),
-                )
+                .maybe_child(name_control)
                 .child(
                     rect()
                         .horizontal()
@@ -355,7 +454,9 @@ fn drawing_shell(
                                     save_shell_state,
                                     save_canvas_state,
                                     save_status,
-                                    &save_path,
+                                    save_path,
+                                    save_title,
+                                    rename_allowed,
                                 );
                                 event.stop_propagation();
                             },
@@ -384,32 +485,76 @@ fn save_scene(
     mut shell_state: State<ShellState>,
     canvas_state: State<DrawingCanvasState>,
     mut status: State<String>,
-    relative_path: &str,
+    mut relative_path: State<String>,
+    mut title: State<String>,
+    rename_allowed: bool,
 ) {
-    let root = shell_state
-        .read()
+    let shell_snapshot = shell_state.read().clone();
+    let root = shell_snapshot
         .vault
         .as_ref()
         .map(|vault| vault.root().to_path_buf());
-    let canvas_snapshot = canvas_state.read().clone();
-    let result = root
-        .ok_or_else(|| "No vault selected.".to_owned())
-        .and_then(|root| {
-            canvas_snapshot
-                .serialize_json()
-                .and_then(|raw| storage::write_scene(&root, relative_path, &raw))
-        });
+    let library_path = shell_snapshot.library.current_path.as_str().to_owned();
+    let old_path = relative_path.read().clone();
+    let requested_title = title.read().trim().to_owned();
+    let requested_title = if requested_title.is_empty() {
+        "Untitled Drawing".to_owned()
+    } else {
+        requested_title
+    };
+    let Some(root) = root else {
+        let error = "No vault selected.".to_owned();
+        *status.write() = "Save failed".to_owned();
+        shell_state.write().error = Some(format!("Drawing save failed: {error}"));
+        return;
+    };
+
+    let (target_path, target_title) = if rename_allowed {
+        match storage::rename_standalone_scene(&root, &old_path, &requested_title) {
+            Ok(renamed) => {
+                if renamed.relative_path != old_path || renamed.title != *title.read() {
+                    sync_active_identity(&old_path, &renamed.relative_path, &renamed.title);
+                    *relative_path.write() = renamed.relative_path.clone();
+                    *title.write() = renamed.title.clone();
+                    shell_state.write().reload_directory(&library_path);
+                }
+                (renamed.relative_path, renamed.title)
+            }
+            Err(error) => {
+                eprintln!(
+                    "[freya][drawing] action:failure action=rename path={} error={error}",
+                    old_path
+                );
+                *status.write() = "Rename failed".to_owned();
+                shell_state.write().error = Some(format!("Drawing save failed: {error}"));
+                return;
+            }
+        }
+    } else {
+        (old_path, title.read().clone())
+    };
+
+    let mut canvas_snapshot = canvas_state.read().clone();
+    if rename_allowed {
+        canvas_snapshot
+            .document
+            .extra
+            .insert("title".to_owned(), Value::String(target_title.clone()));
+    }
+    let result = canvas_snapshot
+        .serialize_json()
+        .and_then(|raw| storage::write_scene(&root, &target_path, &raw));
     match result {
         Ok(()) => {
-            eprintln!("[freya][drawing] action:complete action=save path={relative_path}");
-            sync_active_canvas(relative_path, &canvas_snapshot);
+            eprintln!("[freya][drawing] action:complete action=save path={target_path}");
+            sync_active_canvas(&target_path, &target_title, &canvas_snapshot);
             *status.write() = "Saved".to_owned();
             shell_state.write().error = None;
         }
         Err(error) => {
             eprintln!(
                 "[freya][drawing] action:failure action=save path={} error={error}",
-                relative_path
+                target_path
             );
             *status.write() = "Save failed".to_owned();
             shell_state.write().error = Some(format!("Drawing save failed: {error}"));
@@ -702,19 +847,36 @@ mod tests {
             relative_path: "Sketch.excalidraw".to_owned(),
             title: "Sketch".to_owned(),
             canvas: canvas_with_elements(0),
+            rename_allowed: true,
         });
 
-        sync_active_canvas("Other.excalidraw", &canvas_with_elements(2));
+        sync_active_canvas("Other.excalidraw", "Other", &canvas_with_elements(2));
         assert_eq!(
             active_session().unwrap().canvas.renderable_elements().len(),
             0
         );
 
-        sync_active_canvas("Sketch.excalidraw", &canvas_with_elements(2));
-        assert_eq!(
-            active_session().unwrap().canvas.renderable_elements().len(),
-            2
-        );
+        sync_active_canvas("Sketch.excalidraw", "Sketch", &canvas_with_elements(2));
+        let active = active_session().unwrap();
+        assert_eq!(active.canvas.renderable_elements().len(), 2);
+        assert_eq!(active.title, "Sketch");
+        clear_active();
+    }
+
+    #[test]
+    fn identity_sync_moves_the_live_session_to_the_real_renamed_path() {
+        clear_active();
+        set_active(DrawingSession {
+            relative_path: "Old.excalidraw".to_owned(),
+            title: "Old".to_owned(),
+            canvas: canvas_with_elements(1),
+            rename_allowed: true,
+        });
+        sync_active_identity("Old.excalidraw", "New.excalidraw", "New");
+        let active = active_session().unwrap();
+        assert_eq!(active.relative_path, "New.excalidraw");
+        assert_eq!(active.title, "New");
+        assert_eq!(active.canvas.renderable_elements().len(), 1);
         clear_active();
     }
 }
