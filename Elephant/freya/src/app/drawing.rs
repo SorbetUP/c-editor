@@ -61,6 +61,7 @@ struct DrawingSession {
     title: String,
     canvas: DrawingCanvasState,
     rename_allowed: bool,
+    focus_name: bool,
 }
 
 pub(crate) fn error_accessibility_label(error: &str) -> &'static str {
@@ -97,7 +98,8 @@ pub(super) fn request_create(mut state: State<ShellState>) {
                 "Untitled Drawing",
             )?;
             let scene = storage::read_scene(&root, &created.relative_path)?;
-            let session = session_from_read(scene)?;
+            let mut session = session_from_read(scene)?;
+            session.focus_name = true;
             Ok((root, created.path, session))
         });
 
@@ -174,6 +176,7 @@ fn session_from_read(scene: storage::SceneRead) -> Result<DrawingSession, String
         title: scene.title,
         canvas: DrawingCanvasState::from_json(&scene.raw)?,
         rename_allowed,
+        focus_name: false,
     })
 }
 
@@ -264,6 +267,7 @@ impl Component for DrawingPanel {
             relative_path,
             title,
             self.session.rename_allowed,
+            self.session.focus_name,
         )
     }
 }
@@ -275,6 +279,7 @@ fn drawing_shell(
     relative_path: State<String>,
     title: State<String>,
     rename_allowed: bool,
+    focus_name: bool,
 ) -> Element {
     let snapshot = canvas_state.read().clone();
     let path_snapshot = relative_path.read().clone();
@@ -315,7 +320,8 @@ fn drawing_shell(
                 .placeholder("Drawing name")
                 .flat()
                 .compact()
-                .width(Size::px(220.))
+                .auto_focus(focus_name)
+                .width(Size::px(420.))
                 .on_submit(move |submitted_title: String| {
                     save_scene(
                         submit_shell_state,
@@ -872,6 +878,7 @@ mod tests {
             title: title.to_owned(),
             canvas: canvas_with_elements(elements),
             rename_allowed: true,
+            focus_name: false,
         }
     }
 
