@@ -87,6 +87,25 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
     runner.click_cursor(node.layout().area.center().to_f64());
 }
 
+/// A drawing title may also be visible in library/recent-note chrome. The
+/// editable Input is the compact accessibility node carrying the same value,
+/// so target the smallest matching node instead of the library-card helper.
+fn click_compact_label(runner: &mut TestingRunner, label: &str) {
+    let node = labeled_nodes(runner, label)
+        .into_iter()
+        .filter(|node| node.layout().area.size.area() > 0.0)
+        .min_by(|left, right| {
+            left.layout()
+                .area
+                .size
+                .area()
+                .partial_cmp(&right.layout().area.size.area())
+                .expect("accessible node areas must be ordered")
+        })
+        .unwrap_or_else(|| panic!("missing compact Freya accessibility label {label:?}"));
+    runner.click_cursor(node.layout().area.center().to_f64());
+}
+
 fn drawing_canvas_nodes(runner: &TestingRunner) -> Vec<TestingNode> {
     runner.find_many(|node, element| {
         element
@@ -243,7 +262,7 @@ fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
     assert!(scene["files"].is_object());
     assert_png(&created_preview);
 
-    click_label(&mut runner, "Untitled Drawing");
+    click_compact_label(&mut runner, "Untitled Drawing");
     runner.write_text(" Renamed");
     runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
