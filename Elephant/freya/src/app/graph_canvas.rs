@@ -58,6 +58,10 @@ enum DragState {
         pointer: [f32; 2],
         position: [f32; 2],
     },
+    Card {
+        pointer: [f32; 2],
+        position: [f32; 2],
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,6 +82,7 @@ pub struct GraphCanvasState {
     node_size_scale: f32,
     link_thickness: f32,
     card_collapsed: bool,
+    card_position: Option<[f32; 2]>,
 }
 
 impl Default for GraphCanvasState {
@@ -100,6 +105,7 @@ impl Default for GraphCanvasState {
             node_size_scale: DEFAULT_NODE_SIZE_SCALE,
             link_thickness: DEFAULT_LINK_THICKNESS,
             card_collapsed: false,
+            card_position: None,
         }
     }
 }
@@ -208,6 +214,10 @@ impl GraphCanvasState {
         });
     }
 
+    fn begin_card_drag(&mut self, pointer: [f32; 2], position: [f32; 2]) {
+        self.dragging = Some(DragState::Card { pointer, position });
+    }
+
     fn move_pointer(&mut self, pointer: [f32; 2]) {
         match self.dragging.clone() {
             Some(DragState::Pan {
@@ -230,6 +240,15 @@ impl GraphCanvasState {
                         position[1] + (pointer[1] - start[1]) / self.zoom,
                     ],
                 );
+            }
+            Some(DragState::Card {
+                pointer: start,
+                position,
+            }) => {
+                self.card_position = Some([
+                    position[0] + pointer[0] - start[0],
+                    position[1] + pointer[1] - start[1],
+                ]);
             }
             None => {}
         }
@@ -322,23 +341,27 @@ pub fn render(
     let active_id = selected_id.as_deref().or(hovered_id.as_deref());
     let neighbors = build_neighbors(edges.iter().copied());
 
-    let visible_weights = edges
+    let visible_edges = edges
         .iter()
+        .copied()
         .filter(|edge| {
             visible_ids.contains(edge.source.as_str()) && visible_ids.contains(edge.target.as_str())
         })
-        .map(|edge| edge.weight)
         .collect::<Vec<_>>();
-    let min_weight = visible_weights.iter().copied().reduce(f32::min).unwrap_or(0.);
-    let max_weight = visible_weights.iter().copied().reduce(f32::max).unwrap_or(1.);
+    let visible_edge_count = visible_edges.len();
+    let min_weight = visible_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .reduce(f32::min)
+        .unwrap_or(0.);
+    let max_weight = visible_edges
+        .iter()
+        .map(|edge| edge.weight)
+        .reduce(f32::max)
+        .unwrap_or(1.);
 
     let mut edge_elements = Vec::new();
-    for edge in edges {
-        if !visible_ids.contains(edge.source.as_str())
-            || !visible_ids.contains(edge.target.as_str())
-        {
-            continue;
-        }
+    for edge in dedupe_undirected_edges(visible_edges.iter().copied()) {
         let Some(source) = nodes.iter().find(|node| node.id == edge.source) else {
             continue;
         };
@@ -387,8 +410,10 @@ pub fn render(
         let position = node.position;
         let mut node_canvas = canvas.clone();
         let mut node_explorer = explorer.clone();
-        let effective_threshold =
-            viewport.label_threshold * (1. / viewport.zoom.max(MIN_ZOOM)).max(0.5);
+        // Sigma scales node size with its camera before applying the threshold.
+        // Freya keeps node radii in screen pixels, so applying the camera ratio
+        // again would incorrectly hide labels after fit-to-content.
+        let effective_threshold = viewport.label_threshold;
         let label_visible =
             selected || hovered || (viewport.show_labels && display_radius >= effective_threshold);
 
@@ -429,6 +454,7 @@ pub fn render(
                             .begin_node_drag(id.clone(), pointer, position);
                         node_canvas.write().focus_on(position);
                         node_canvas.write().card_collapsed = false;
+                        node_canvas.write().card_position = None;
                         node_explorer.write().select_graph_node(id.clone());
                         event.stop_propagation();
                     }
@@ -500,7 +526,9 @@ pub fn render(
         }
     }
 
-    let stats_text = format!("{} nœuds · {} liens", visible_ids.len(), edge_elements.len());
+    // AtomicGraphView reports the filtered edge count even though Graphology
+    // draws only the first edge for each undirected node pair.
+    let stats_text = format!("{} nœuds · {} liens", visible_ids.len(), visible_edge_count);
     let viewport_label = viewport.viewport_label();
     let selected_card = selected_card(&mut explorer, snapshot, &nodes, &viewport, canvas.clone());
     let options_panel = options_panel(canvas.clone(), &viewport);
@@ -537,6 +565,7 @@ pub fn render(
                         .begin_node_drag(node.id.clone(), pointer, node.position);
                     stage_canvas.write().focus_on(node.position);
                     stage_canvas.write().card_collapsed = false;
+                    stage_canvas.write().card_position = None;
                     stage_explorer.write().select_graph_node(node.id.clone());
                 } else {
                     stage_canvas.write().begin_pan(pointer);
@@ -568,6 +597,7 @@ pub fn render(
             if stage_click {
                 end_explorer.write().graph.selected_node_id = None;
                 end_canvas.write().card_collapsed = false;
+                end_canvas.write().card_position = None;
             }
         })
         .on_wheel(move |event: Event<WheelEventData>| {
@@ -601,6 +631,7 @@ pub fn render(
                 .background(rgb(GRAPH_CONTROL_BG))
                 .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
                 .with_corner_radius(13.)
+                .on_mouse_down(|event: Event<MouseEventData>| event.stop_propagation())
                 .a11y_alt(stats_text.clone())
                 .child(
                     label()
@@ -617,6 +648,7 @@ pub fn render(
                 .horizontal()
                 .cross_align(Alignment::Center)
                 .spacing(10.)
+                .on_mouse_down(|event: Event<MouseEventData>| event.stop_propagation())
                 .a11y_alt("Graph zoom controls")
                 .child(
                     rect()
@@ -665,6 +697,7 @@ pub fn render(
                 }))
                 .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
                 .with_corner_radius(10.)
+                .on_mouse_down(|event: Event<MouseEventData>| event.stop_propagation())
                 .on_mouse_up(move |_| {
                     let open = options_canvas.read().options_open;
                     options_canvas.write().options_open = !open;
@@ -892,12 +925,24 @@ fn hit_test_node<'a>(
 }
 
 fn normalize_edge_weight(weight: f32, min_weight: f32, max_weight: f32) -> f32 {
-    let range = max_weight - min_weight;
-    if range.abs() < f32::EPSILON {
-        1.
-    } else {
-        ((weight - min_weight) / range).clamp(0., 1.)
-    }
+    let range = (max_weight - min_weight).max(0.001);
+    ((weight - min_weight) / range).clamp(0., 1.)
+}
+
+fn dedupe_undirected_edges<'a>(
+    edges: impl Iterator<Item = &'a GraphEdge>,
+) -> Vec<&'a GraphEdge> {
+    let mut seen = BTreeSet::<(&'a str, &'a str)>::new();
+    edges
+        .filter(|edge| {
+            let pair = if edge.source.as_str() <= edge.target.as_str() {
+                (edge.source.as_str(), edge.target.as_str())
+            } else {
+                (edge.target.as_str(), edge.source.as_str())
+            };
+            seen.insert(pair)
+        })
+        .collect()
 }
 
 fn render_edge(
@@ -925,8 +970,7 @@ fn render_edge(
         base * 0.3
     } else {
         base
-    }
-    .max(0.12);
+    };
     let midpoint = [
         (source[0] + target[0]) / 2.,
         (source[1] + target[1]) / 2.,
@@ -966,8 +1010,10 @@ fn selected_card(
         .iter()
         .find(|node| node.id == selected_id)?;
     let center = viewport.screen_position(selected_canvas.position);
-    let left = (center[0] + 40.).clamp(16., (viewport.size[0] - 396.).max(16.));
-    let top = (center[1] - 60.).clamp(16., (viewport.size[1] - 92.).max(16.));
+    let default_position = [center[0] + 40., center[1] - 60.];
+    let card_position = viewport.card_position.unwrap_or(default_position);
+    let left = card_position[0].clamp(16., (viewport.size[0] - 396.).max(16.));
+    let top = card_position[1].clamp(16., (viewport.size[1] - 92.).max(16.));
     let title = selected.title.clone();
     let summary = if selected.summary.trim().is_empty() {
         "Aucun résumé pour cette note.".to_string()
@@ -995,7 +1041,8 @@ fn selected_card(
     let mut open_state = state.clone();
     let mut close_state = state.clone();
     let mut close_canvas = canvas.clone();
-    let mut collapse_canvas = canvas;
+    let mut collapse_canvas = canvas.clone();
+    let mut drag_canvas = canvas;
 
     Some(
         rect()
@@ -1006,6 +1053,7 @@ fn selected_card(
             .background(rgb(GRAPH_CARD_BG))
             .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
             .with_corner_radius(14.)
+            .on_mouse_down(|event: Event<MouseEventData>| event.stop_propagation())
             .a11y_alt(format!("Graph node selected {title}"))
             .child(
                 rect()
@@ -1014,6 +1062,15 @@ fn selected_card(
                     .horizontal()
                     .main_align(Alignment::SpaceBetween)
                     .cross_align(Alignment::Center)
+                    .on_mouse_down(move |event: Event<MouseEventData>| {
+                        if event.button == Some(MouseButton::Left) {
+                            drag_canvas.write().begin_card_drag(
+                                point(event.global_location),
+                                [left, top],
+                            );
+                            event.stop_propagation();
+                        }
+                    })
                     .child(
                         label()
                             .font_size(15.)
@@ -1025,6 +1082,7 @@ fn selected_card(
                         rect()
                             .horizontal()
                             .spacing(4.)
+                            .on_mouse_down(|event: Event<MouseEventData>| event.stop_propagation())
                             .child(
                                 rect()
                                     .width(Size::px(28.))
@@ -1058,6 +1116,7 @@ fn selected_card(
                                     .on_mouse_up(move |_| {
                                         close_state.write().graph.selected_node_id = None;
                                         close_canvas.write().card_collapsed = false;
+                                        close_canvas.write().card_position = None;
                                     })
                                     .a11y_alt("Close graph note card")
                                     .child(
@@ -1134,6 +1193,7 @@ fn options_panel(
             .border(Border::new().fill(rgb(GRAPH_CARD_BORDER)).width(1.))
             .with_corner_radius(16.)
             .overflow(Overflow::Clip)
+            .on_mouse_down(|event: Event<MouseEventData>| event.stop_propagation())
             .a11y_alt("Graph display options")
             .child(
                 rect()
@@ -1666,6 +1726,35 @@ mod tests {
         assert_eq!(normalize_edge_weight(0.2, 0.2, 1.0), 0.0);
         assert!((normalize_edge_weight(0.6, 0.2, 1.0) - 0.5).abs() < f32::EPSILON);
         assert_eq!(normalize_edge_weight(1.0, 0.2, 1.0), 1.0);
-        assert_eq!(normalize_edge_weight(1.0, 1.0, 1.0), 1.0);
+        assert_eq!(
+            normalize_edge_weight(1.0, 1.0, 1.0),
+            0.0,
+            "AtomicGraphView keeps equal-weight edges at the minimum base thickness"
+        );
+    }
+
+    #[test]
+    fn renderer_deduplicates_undirected_pairs_without_mutating_edge_data() {
+        let edges = vec![
+            link(0, 0, 1, 0.2),
+            link(1, 1, 0, 0.8),
+            link(2, 0, 2, 0.4),
+        ];
+        let rendered = dedupe_undirected_edges(edges.iter());
+        assert_eq!(edges.len(), 3);
+        assert_eq!(rendered.len(), 2);
+        assert_eq!(rendered[0].id, "edge-0");
+        assert_eq!(rendered[1].id, "edge-2");
+    }
+
+    #[test]
+    fn preview_card_drag_tracks_pointer_without_affecting_world_pan() {
+        let mut state = GraphCanvasState::default();
+        let pan = state.pan;
+        state.begin_card_drag([100., 100.], [300., 200.]);
+        state.move_pointer([125., 85.]);
+        assert_eq!(state.card_position, Some([325., 185.]));
+        assert_eq!(state.pan, pan);
+        assert!(!state.end_pointer_at([125., 85.]));
     }
 }
