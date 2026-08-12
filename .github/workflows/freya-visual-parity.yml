@@ -67,6 +67,22 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Validate parity harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/freya-parity
+          {
+            echo "== Python comparator tests =="
+            python3 -m unittest discover -s build/scripts/freya-parity -p 'test_*.py' -v
+            echo "== Python syntax =="
+            python3 -m py_compile build/scripts/freya-parity/compare.py build/scripts/freya-parity/test_compare.py
+            echo "== Node syntax =="
+            node --check build/scripts/freya-parity/prepare-fixture.mjs
+            node --check build/scripts/freya-parity/stage-freya-captures.mjs
+            node --check build/scripts/freya-parity/capture-tauri-reference.mjs
+            node --check build/scripts/freya-parity/normalize-tauri-reference.mjs
+          } 2>&1 | tee test-results/freya-parity/harness-validation.log
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
         with:
@@ -102,16 +118,6 @@ jobs:
             --repo-root .tauri-reference \
             --expected-sha "$TAURI_REFERENCE_SHA" \
             --output test-results/freya-parity/tauri-reference-normalization.json
-      - name: Validate parity harness
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 -m unittest discover -s build/scripts/freya-parity -p 'test_*.py' -v
-          python3 -m py_compile build/scripts/freya-parity/compare.py build/scripts/freya-parity/test_compare.py
-          node --check build/scripts/freya-parity/prepare-fixture.mjs
-          node --check build/scripts/freya-parity/stage-freya-captures.mjs
-          node --check build/scripts/freya-parity/capture-tauri-reference.mjs
-          node --check build/scripts/freya-parity/normalize-tauri-reference.mjs
       - name: Start deterministic X11 display
         shell: bash
         run: |
@@ -214,6 +220,7 @@ jobs:
           compression-level: 6
           path: |
             build/scripts/freya-parity/coverage.json
+            test-results/freya-parity/harness-validation.log
             test-results/freya-parity/tauri-reference-normalization.json
             test-results/freya-parity/tauri/*/static.png
             test-results/freya-parity/tauri/*/stability.png
