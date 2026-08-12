@@ -833,7 +833,8 @@ mod tests {
         state.set_tool(DrawingTool::Eraser);
         state.begin_pointer([20., 17.]);
         state.end_pointer();
-        assert!(state.document.elements[0].is_deleted);
+        assert!(state.document.elements[2].is_deleted);
+        assert!(!state.document.elements[0].is_deleted);
     }
 
     #[test]
