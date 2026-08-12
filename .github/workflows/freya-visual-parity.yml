@@ -87,6 +87,13 @@ jobs:
             .tauri-reference/Elephant/backend/tauri -> target
       - name: Install Tauri reference dependencies
         run: pnpm --dir .tauri-reference install --frozen-lockfile
+      - name: Materialize Tauri reference official addon resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .tauri-reference/build/scripts/prepare-tauri-addon-resources.mjs
+          test -f .tauri-reference/Elephant/backend/tauri/resources/official-addons/catalog.json
+          test -d .tauri-reference/Elephant/backend/tauri/resources/official-addons/official
       - name: Normalize immutable Tauri config for portable Linux dev capture
         shell: bash
         run: |
