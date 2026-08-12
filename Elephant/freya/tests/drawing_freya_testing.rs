@@ -1,5 +1,5 @@
 use elephant_freya::app::app_with_vault;
-use freya::prelude::{Key, NamedKey};
+use freya::prelude::{AccessibilityRole, Key, NamedKey};
 use freya_testing::{TestingNode, TestingRunner};
 use serde_json::json;
 use std::{
@@ -87,23 +87,18 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
     runner.click_cursor(node.layout().area.center().to_f64());
 }
 
-/// A drawing title may also be visible in library/recent-note chrome. The
-/// editable Input is the compact accessibility node carrying the same value,
-/// so target the smallest matching node instead of the library-card helper.
-fn click_compact_label(runner: &mut TestingRunner, label: &str) {
-    let node = labeled_nodes(runner, label)
-        .into_iter()
-        .filter(|node| node.layout().area.size.area() > 0.0)
-        .min_by(|left, right| {
-            left.layout()
-                .area
-                .size
-                .area()
-                .partial_cmp(&right.layout().area.size.area())
-                .expect("accessible node areas must be ordered")
-        })
-        .unwrap_or_else(|| panic!("missing compact Freya accessibility label {label:?}"));
-    runner.click_cursor(node.layout().area.center().to_f64());
+fn click_text_input(runner: &mut TestingRunner, label: &str) {
+    let nodes = runner.find_many(|node, element| {
+        let accessibility = &element.accessibility().builder;
+        (accessibility.label() == Some(label) && accessibility.role() == AccessibilityRole::TextInput)
+            .then_some(node)
+    });
+    assert_eq!(
+        nodes.len(),
+        1,
+        "drawing title must expose exactly one TextInput accessibility node"
+    );
+    runner.click_cursor(nodes[0].layout().area.center().to_f64());
 }
 
 fn drawing_canvas_nodes(runner: &TestingRunner) -> Vec<TestingNode> {
@@ -262,7 +257,7 @@ fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
     assert!(scene["files"].is_object());
     assert_png(&created_preview);
 
-    click_compact_label(&mut runner, "Untitled Drawing");
+    click_text_input(&mut runner, "Untitled Drawing");
     runner.write_text(" Renamed");
     runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
