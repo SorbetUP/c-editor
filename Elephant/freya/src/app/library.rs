@@ -32,6 +32,9 @@ use library_icons::{svg_icon, Icon as LibraryIcon};
 
 pub(super) fn main_content(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
+    if let Some(panel) = drawing::active_panel(state) {
+        return panel;
+    }
     let showing_library = snapshot.editor.is_none() && snapshot.view == WorkspaceView::Notes;
     let body = if snapshot.editor.is_some() {
         editor_view::note_editor_host(state)
