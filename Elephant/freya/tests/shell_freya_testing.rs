@@ -95,7 +95,7 @@ fn converted_shell_exposes_vue_source_contracts_through_freya_accessibility() {
 
     assert_eq!(accessible_nodes(&runner, "TopVaultBar").len(), 1);
     assert!(accessible_nodes(&runner, "Create").len() >= 1);
-    assert!(accessible_nodes(&runner, "Sort: updated-newest").len() >= 1);
+    assert!(accessible_nodes(&runner, "Sort: Updated newest").len() >= 1);
     assert!(accessible_nodes(&runner, "Show notes as list").len() >= 1);
     assert!(accessible_nodes(&runner, "Alpha").len() >= 1);
     assert!(accessible_nodes(&runner, "Projects").len() >= 1);
