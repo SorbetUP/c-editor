@@ -61,7 +61,7 @@ describe('Rust editor addon runtime', () => {
     expect(trusted).toContain("host?.get('editor.runtime')")
     expect(renderer).toContain("data-elephant-editor-kind")
     expect(runtime).toContain("host.provide('editor.runtime'")
-    expect(runtime).toContain("node.classList.contains('ag-fence-code')")
+    expect(runtime).not.toContain('ag-fence-code')
     expect(codeExecution).toContain("runtime?.engine === 'rust'")
   })
 })
