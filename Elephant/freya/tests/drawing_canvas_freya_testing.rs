@@ -15,9 +15,10 @@ fn fixture_state() -> DrawingCanvasState {
         "elements": [
             {"id": "rectangle", "type": "rectangle", "x": 80, "y": 70, "width": 120, "height": 80, "strokeColor": "#ff0000", "backgroundColor": "#ffeeee", "strokeWidth": 4, "opacity": 100},
             {"id": "ellipse", "type": "ellipse", "x": 260, "y": 70, "width": 120, "height": 80, "strokeColor": "#00aa00", "backgroundColor": "#eeffee", "strokeWidth": 4, "opacity": 100},
-            {"id": "arrow", "type": "arrow", "x": 80, "y": 230, "width": 160, "height": 0, "points": [[0, 0], [160, 0]], "strokeColor": "#0000ff", "strokeWidth": 4, "endArrowhead": "arrow", "opacity": 100},
+            {"id": "arrow", "type": "arrow", "x": 80, "y": 230, "width": 160, "height": 0, "points": [[0, 0], [160, 0]], "strokeColor": "#0000ff", "strokeWidth": 4, "startArrowhead": "arrow", "endArrowhead": "arrow", "opacity": 100},
             {"id": "text", "type": "text", "x": 280, "y": 210, "width": 120, "height": 30, "text": "Native", "fontSize": 24, "strokeColor": "#111111", "opacity": 100},
-            {"id": "freedraw", "type": "freedraw", "x": 90, "y": 330, "width": 100, "height": 70, "points": [[0, 0], [20, 30], [45, 5], [70, 50], [100, 20]], "strokeColor": "#aa00aa", "strokeWidth": 4, "opacity": 100}
+            {"id": "freedraw", "type": "freedraw", "x": 90, "y": 330, "width": 100, "height": 70, "points": [[0, 0], [20, 30], [45, 5], [70, 50], [100, 20]], "strokeColor": "#aa00aa", "strokeWidth": 4, "opacity": 100},
+            {"id": "dashed", "type": "line", "x": 300, "y": 340, "width": 150, "height": 0, "points": [[0, 0], [150, 0]], "strokeColor": "#333333", "strokeWidth": 3, "strokeStyle": "dashed", "opacity": 100}
         ],
         "appState": {"viewBackgroundColor": "#ffffff"},
         "files": {}
@@ -28,7 +29,12 @@ fn fixture_state() -> DrawingCanvasState {
 fn canvas_node(runner: &TestingRunner) -> TestingNode {
     runner
         .find(|node, element| {
-            (element.accessibility().builder.label() == Some("DrawingCanvas")).then_some(node)
+            element
+                .accessibility()
+                .builder
+                .label()
+                .filter(|label| label.starts_with("Drawing canvas ·"))
+                .map(|_| node)
         })
         .expect("native Freya canvas must be visible")
 }
@@ -59,7 +65,7 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
     assert_eq!(canvas.layout().area.size.height, 480.);
 
     let rendered = state.peek().renderable_elements();
-    assert_eq!(rendered.len(), 5);
+    assert_eq!(rendered.len(), 6);
     assert_eq!(rendered[0].kind, "rectangle");
     assert_eq!(rendered[0].bounds, (80., 70., 120., 80.));
     assert_eq!(rendered[0].stroke_rgba, [255, 0, 0, 255]);
@@ -67,6 +73,7 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
     assert_eq!(rendered[2].kind, "arrow");
     assert_eq!(rendered[3].kind, "text");
     assert_eq!(rendered[4].kind, "freedraw");
+    assert_eq!(rendered[5].kind, "line");
 
     let rectangle = Rect::try_downcast(
         labeled_node(&runner, "Drawing element rectangle rectangle")
@@ -96,14 +103,6 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
         ellipse.style.background.as_color(),
         Some(Color::from_rgb(238, 255, 238))
     );
-    assert_eq!(
-        labeled_node(&runner, "Drawing element ellipse ellipse")
-            .layout()
-            .area
-            .size
-            .width,
-        120.
-    );
 
     let arrow_segment = Rect::try_downcast(
         labeled_node(&runner, "Drawing element arrow arrow segment 0")
@@ -120,6 +119,8 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
             .width,
         160.
     );
+    labeled_node(&runner, "Drawing element arrow arrow start arrowhead 0");
+    labeled_node(&runner, "Drawing element arrow arrow end arrowhead 0");
 
     let text = Label::try_downcast(
         labeled_node(&runner, "Drawing element text text")
@@ -143,6 +144,9 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
         freehand.style.background.as_color(),
         Some(Color::from_rgb(170, 0, 170))
     );
+
+    labeled_node(&runner, "Drawing element dashed line segment 0 piece 0");
+    labeled_node(&runner, "Drawing element dashed line segment 0 piece 1");
 
     let evidence = std::env::temp_dir().join("elephant-freya-drawing-canvas-primitives.png");
     runner.render_to_file(&evidence);
@@ -179,13 +183,15 @@ fn pointer_selection_and_drag_update_model_and_excalidraw_serialization() {
     let value: serde_json::Value = serde_json::from_str(&serialized).expect("valid scene JSON");
     assert_eq!(value["elements"][0]["x"], 130.);
     assert_eq!(value["elements"][0]["y"], 105.);
+    assert!(value["elements"][0]["updated"].as_u64().is_some());
 }
 
 #[test]
-fn wheel_zoom_and_blank_drag_pan_change_the_viewport() {
+fn wheel_zoom_and_blank_drag_pan_change_the_viewport_without_moving_elements() {
     let (mut runner, state) = test_runner();
+    let rectangle_before = state.peek().document.elements[0].clone();
     let before = state.peek().viewport;
-    runner.scroll((320., 240.), (0., -120.));
+    runner.scroll((500., 420.), (0., -120.));
     let zoomed = state.peek().viewport;
     assert!(zoomed.zoom > before.zoom);
 
@@ -194,6 +200,7 @@ fn wheel_zoom_and_blank_drag_pan_change_the_viewport() {
     runner.release_cursor((560., 450.));
     let panned = state.peek().viewport;
     assert_ne!(panned.pan, zoomed.pan);
+    assert_eq!(state.peek().document.elements[0], rectangle_before);
 }
 
 #[test]

@@ -52,9 +52,6 @@ function lineOf(source, offset) {
   return source.slice(0, offset).split('\n').length
 }
 
-function attr(node, name) {
-  return node.props?.find((prop) => prop.type === NodeTypes.ATTRIBUTE && prop.name === name)
-}
 
 function directive(node, name) {
   return node.props?.find((prop) => prop.type === NodeTypes.DIRECTIVE && prop.name === name)

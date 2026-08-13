@@ -1,4 +1,5 @@
 use elephant_freya::app::app_with_vault;
+use freya::prelude::{Key, NamedKey};
 use freya_testing::{TestingNode, TestingRunner};
 use serde_json::json;
 use std::{
@@ -22,14 +23,24 @@ impl FixtureVault {
         Self { root }
     }
 
-    fn seed_scene(&self, name: &str) -> PathBuf {
+    fn seed_scene(&self, name: &str, preview: bool) -> PathBuf {
         let path = self.root.join(name);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create scene parent");
+        }
+        let title = path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Drawing");
         let scene = json!({
             "type": "excalidraw",
             "version": 2,
             "source": "elephant-freya-drawing-test",
-            "elements": [],
-            "appState": {},
+            "title": title,
+            "elements": [
+                {"id":"fixture-rect","type":"rectangle","x":20,"y":20,"width":80,"height":50,"strokeColor":"#1b1b1f","backgroundColor":"transparent","strokeWidth":2,"opacity":100}
+            ],
+            "appState": {"viewBackgroundColor":"#ffffff"},
             "files": {}
         });
         fs::write(
@@ -37,12 +48,14 @@ impl FixtureVault {
             serde_json::to_vec_pretty(&scene).expect("serialize scene"),
         )
         .expect("write Excalidraw scene");
-        fs::copy(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../frontend/src/muya/lib/assets/pngicon/image/2.png"),
-            path.with_extension("png"),
-        )
-        .expect("copy real Excalidraw preview fixture");
+        if preview {
+            fs::copy(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../frontend/src/muya/lib/assets/pngicon/image/2.png"),
+                path.with_extension("png"),
+            )
+            .expect("copy real Excalidraw preview fixture");
+        }
         path
     }
 }
@@ -74,10 +87,30 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
     runner.click_cursor(node.layout().area.center().to_f64());
 }
 
+fn drawing_canvas_nodes(runner: &TestingRunner) -> Vec<TestingNode> {
+    runner.find_many(|node, element| {
+        element
+            .accessibility()
+            .builder
+            .label()
+            .filter(|label| label.starts_with("Drawing canvas ·"))
+            .map(|_| node)
+    })
+}
+
+fn assert_png(path: &std::path::Path) {
+    let bytes = fs::read(path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    assert!(
+        bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "{} must be a real PNG preview",
+        path.display()
+    );
+}
+
 #[test]
-fn clicking_a_real_drawing_does_not_open_the_markdown_editor() {
+fn clicking_a_real_drawing_opens_the_native_renderer_not_markdown() {
     let fixture = FixtureVault::new("open");
-    let scene_path = fixture.seed_scene("Sketch.excalidraw");
+    let scene_path = fixture.seed_scene("Sketch.excalidraw", true);
     let root = fixture.root.clone();
     let (mut runner, ()) = TestingRunner::new(
         move || app_with_vault(root.clone()),
@@ -94,31 +127,30 @@ fn clicking_a_real_drawing_does_not_open_the_markdown_editor() {
         "a real Excalidraw entry must not be routed into the Markdown editor"
     );
     assert_eq!(
-        labeled_nodes(&runner, "Native drawing renderer unavailable").len(),
+        labeled_nodes(&runner, "Drawing editor Sketch").len(),
         1,
-        "Freya must expose the renderer limitation instead of a fake canvas"
+        "the native drawing shell must own the opened scene"
     );
-    assert!(
-        scene_path.is_file(),
-        "opening must not delete the source scene"
+    assert_eq!(drawing_canvas_nodes(&runner).len(), 1);
+    assert_eq!(
+        labeled_nodes(&runner, "Drawing element fixture-rect rectangle").len(),
+        1,
+        "the persisted Excalidraw element must be rendered natively"
     );
-    assert!(
-        scene_path.with_extension("png").is_file(),
-        "the persisted Excalidraw preview companion must remain available"
-    );
+    assert!(scene_path.is_file());
+    assert!(scene_path.with_extension("png").is_file());
     assert!(
         fs::read_to_string(scene_path)
             .expect("read source scene")
             .contains("elephant-freya-drawing-test"),
-        "the real Excalidraw JSON must remain the source of truth"
+        "opening must preserve the real Excalidraw JSON source"
     );
 }
 
 #[test]
-fn clicking_a_markdown_drawing_reads_its_real_scene_and_preview_paths() {
+fn clicking_a_markdown_drawing_resolves_its_real_sidecar_into_native_canvas() {
     let fixture = FixtureVault::new("markdown");
-    fs::create_dir_all(fixture.root.join(".assets")).expect("create asset directory");
-    let scene_path = fixture.seed_scene(".assets/visual.excalidraw");
+    let scene_path = fixture.seed_scene(".assets/visual.excalidraw", true);
     fs::write(
         fixture.root.join("Visual drawing.md"),
         "---\ntitle: \"Visual drawing\"\ntype: \"drawing\"\n---\n\n# Visual drawing\n\n![Excalidraw: Visual drawing](.assets/visual.png)\n",
@@ -136,20 +168,19 @@ fn clicking_a_markdown_drawing_reads_its_real_scene_and_preview_paths() {
     runner.sync_and_update();
 
     assert!(labeled_nodes(&runner, "NoteEditorHost").is_empty());
+    assert_eq!(drawing_canvas_nodes(&runner).len(), 1);
     assert_eq!(
-        labeled_nodes(&runner, "Native drawing renderer unavailable").len(),
-        1,
-        "Markdown drawing cards must resolve the persisted scene and preview before the renderer gate"
+        labeled_nodes(&runner, "Drawing element fixture-rect rectangle").len(),
+        1
     );
     assert!(scene_path.is_file());
     assert!(scene_path.with_extension("png").is_file());
 }
 
 #[test]
-fn missing_persisted_preview_surfaces_a_real_drawing_error() {
+fn missing_png_preview_does_not_block_the_canonical_scene_editor() {
     let fixture = FixtureVault::new("missing-preview");
-    let scene_path = fixture.seed_scene("Missing preview.excalidraw");
-    fs::remove_file(scene_path.with_extension("png")).expect("remove preview fixture");
+    let scene_path = fixture.seed_scene("Missing preview.excalidraw", false);
     let root = fixture.root.clone();
     let (mut runner, ()) = TestingRunner::new(
         move || app_with_vault(root.clone()),
@@ -162,15 +193,16 @@ fn missing_persisted_preview_surfaces_a_real_drawing_error() {
     runner.sync_and_update();
 
     assert!(labeled_nodes(&runner, "NoteEditorHost").is_empty());
-    assert_eq!(
-        labeled_nodes(&runner, "Drawing preview unavailable").len(),
-        1,
-        "a missing persisted PNG must remain a visible production error"
+    assert_eq!(drawing_canvas_nodes(&runner).len(), 1);
+    assert!(
+        labeled_nodes(&runner, "Drawing preview unavailable").is_empty(),
+        "PNG is a derived preview and must not gate editing the canonical scene"
     );
+    assert!(scene_path.is_file());
 }
 
 #[test]
-fn create_drawing_action_persists_real_scene_format_and_reports_renderer_blocker() {
+fn create_rename_close_and_reopen_keeps_scene_and_native_png_visible() {
     let fixture = FixtureVault::new("create");
     let root = fixture.root.clone();
     let (mut runner, ()) = TestingRunner::new(
@@ -185,38 +217,77 @@ fn create_drawing_action_persists_real_scene_format_and_reports_renderer_blocker
     runner.sync_and_update();
 
     assert_eq!(
-        labeled_nodes(&runner, "Native drawing renderer unavailable").len(),
+        labeled_nodes(&runner, "Drawing editor Untitled Drawing").len(),
         1,
-        "the source Drawing action must report the missing native renderer"
+        "the source Drawing action must enter the real native renderer"
     );
-    let created_scene = fixture
-        .root
-        .join(".assets")
-        .join("Untitled Drawing.excalidraw");
+    assert_eq!(drawing_canvas_nodes(&runner).len(), 1);
+
+    let created_scene = fixture.root.join("Untitled Drawing.excalidraw");
+    let created_preview = created_scene.with_extension("png");
     assert!(
         created_scene.is_file(),
-        "the native creation layer must persist the real scene format"
+        "new native drawings must be visible library entries, not hidden .assets orphans"
+    );
+    assert!(
+        !fixture
+            .root
+            .join(".assets/Untitled Drawing.excalidraw")
+            .exists(),
+        "standalone library creation must not strand the drawing under .assets"
     );
     let scene: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&created_scene).expect("read created scene"))
             .expect("created scene must be valid JSON");
     assert_eq!(scene["type"], "excalidraw");
-    assert_eq!(scene["version"], 1);
+    assert_eq!(scene["version"], 2);
+    assert_eq!(scene["title"], "Untitled Drawing");
     assert!(scene["elements"].is_array());
     assert!(scene["files"].is_object());
+    assert_png(&created_preview);
+
+    // Freya's auto-focused Input starts at index 0. Exercise an explicit user
+    // edit of the prefilled title, then verify that Enter commits both sidecars.
+    runner.press_key(Key::Named(NamedKey::End));
+    runner.write_text(" Renamed");
+    runner.press_key(Key::Named(NamedKey::Enter));
+    runner.sync_and_update();
+
+    let renamed_scene = fixture.root.join("Untitled Drawing Renamed.excalidraw");
+    let renamed_preview = renamed_scene.with_extension("png");
     assert!(
-        !created_scene.with_extension("png").exists(),
-        "the native layer must not invent a PNG without the real renderer"
+        renamed_scene.is_file(),
+        "Enter must commit the visible rename"
     );
-    let created_scenes = fs::read_dir(&fixture.root.join(".assets"))
-        .expect("read Excalidraw asset directory")
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.path().extension().and_then(|value| value.to_str()) == Some("excalidraw")
-        })
-        .count();
+    assert!(
+        !created_scene.exists(),
+        "the old canonical path must be gone"
+    );
+    assert!(
+        !created_preview.exists(),
+        "the old preview path must be gone"
+    );
+    assert_png(&renamed_preview);
+    let renamed_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&renamed_scene).expect("read renamed drawing"))
+            .expect("renamed drawing JSON");
+    assert_eq!(renamed_json["title"], "Untitled Drawing Renamed");
+
+    click_label(&mut runner, "Close drawing · Esc");
+    runner.sync_and_update();
+    assert!(drawing_canvas_nodes(&runner).is_empty());
     assert_eq!(
-        created_scenes, 1,
-        "the native layer must create one real scene"
+        labeled_nodes(&runner, "Untitled Drawing Renamed").len(),
+        1,
+        "after close, the renamed drawing must remain discoverable in the library"
+    );
+    assert_png(&renamed_preview);
+
+    click_label(&mut runner, "Untitled Drawing Renamed");
+    runner.sync_and_update();
+    assert_eq!(
+        labeled_nodes(&runner, "Drawing editor Untitled Drawing Renamed").len(),
+        1,
+        "the newly created and renamed canonical scene must reopen"
     );
 }

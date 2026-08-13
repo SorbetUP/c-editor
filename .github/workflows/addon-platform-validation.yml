@@ -29,8 +29,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Materialize official addons
-        run: node build/scripts/sync-elephant-addons.mjs
+      - uses: ./.github/actions/setup
 
       - name: Validate integrated official addon catalogue
         shell: bash
@@ -113,8 +112,6 @@ jobs:
           do
             unzip -t "$archive"
           done
-
-      - uses: ./.github/actions/setup
 
       - name: Install exact wasm-bindgen CLI
         shell: bash
@@ -228,6 +225,9 @@ jobs:
 
       - name: Materialize official addons
         run: node build/scripts/sync-elephant-addons.mjs
+
+      - name: Prepare Tauri official addon resources
+        run: node build/scripts/prepare-tauri-addon-resources.mjs
 
       - name: Compile and test Rust addon security modules
         shell: bash

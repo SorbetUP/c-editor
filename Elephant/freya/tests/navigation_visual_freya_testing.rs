@@ -1,10 +1,10 @@
 //! Source-derived geometry and state proof for the native navigation shell.
 //!
-//! The expected numbers below come from develop@62a606c1:
-//! `TopVaultBar.vue`, `NavigationBar.vue`, `IconRail.vue`, `SidebarNav.vue`,
-//! and `AppShell.vue` plus their scoped shell styles.  The assertions inspect
-//! the real Freya accessibility/layout tree and drive the same pointer path a
-//! user drives; no state is mutated directly by this test.
+//! The expected numbers below come from the current Tauri navigation sources at
+//! the migration base plus `app-shell.css` and the later-loaded
+//! `app-shell-runtime-fixes.css`. The assertions inspect the real Freya
+//! accessibility/layout tree and drive the same pointer path a user drives; no
+//! state is mutated directly by this test.
 
 use elephant_freya::app::app_with_vault;
 use freya::{
@@ -19,11 +19,11 @@ use std::{
 };
 
 const VIEWPORT: (f32, f32) = (1280., 840.);
-const TOPBAR_HEIGHT: f32 = 32.;
+const TOPBAR_HEIGHT: f32 = 28.;
 const NAV_BUTTON_SIZE: f32 = 24.;
 const NAV_BUTTON_TOP: f32 = 4.;
 const NAV_GAP: f32 = 2.;
-const RAIL_WIDTH: f32 = 56.;
+const RAIL_WIDTH: f32 = 48.;
 const RAIL_ACTION_SIZE: f32 = 34.;
 const RAIL_GAP: f32 = 2.;
 const SIDEBAR_WIDTH: f32 = 232.;
@@ -151,7 +151,7 @@ fn has_background(runner: &TestingRunner, label: &str, expected: Fill) -> bool {
 }
 
 fn evidence_path(name: &str) -> PathBuf {
-    let dir = PathBuf::from("/private/tmp/freya-navigation-visual");
+    let dir = std::env::temp_dir().join("freya-navigation-visual");
     fs::create_dir_all(&dir).expect("create navigation visual evidence directory");
     dir.join(name)
 }
@@ -244,9 +244,9 @@ fn source_navigation_geometry_labels_and_order_are_exact_at_shared_viewport() {
         has_background(
             &runner,
             "Alpha",
-            Fill::Color(Color::from_rgb(255, 255, 255)),
+            Fill::Color(Color::from_rgb(237, 242, 247)),
         ),
-        "the real Library card must use the light source surface token"
+        "an inactive root note must render as a SidebarTreeEntry row, not as a Library card"
     );
 
     let all_notes = require_label(&runner, "All notes");

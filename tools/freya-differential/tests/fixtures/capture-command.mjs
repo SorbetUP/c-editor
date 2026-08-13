@@ -99,7 +99,6 @@ for (const [index, action] of scenario.actions.entries()) {
     relativeDoneMs: 250
   })
   const frameTimes = Array.isArray(action.frames) ? action.frames : [0]
-  const checkpointDir = path.join(output, action.checkpoint)
   const frames = []
   for (let frameIndex = 0; frameIndex < frameTimes.length; frameIndex += 1) {
     const actualIndex = mutation === 'misaligned-frame' && runtime === 'tauri' && frameIndex === 1

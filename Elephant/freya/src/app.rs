@@ -33,6 +33,12 @@ use crate::{
 use shell_gestures::{RailDragState, SidebarResizeState};
 use shell_history::NavigationTarget;
 
+const SHELL_DIVIDER_WIDTH: f32 = 1.;
+const TOPBAR_DRAG_HIDDEN_LEFT: f32 = 180.;
+const TOPBAR_NAV_LEFT_DESKTOP: f32 = 56.;
+const TOPBAR_NAV_LEFT_MACOS: f32 = 84.;
+const TOPBAR_NAV_WIDTH: f32 = 76.;
+
 #[derive(Clone, Debug)]
 struct ShellState {
     view: WorkspaceView,
@@ -111,16 +117,9 @@ impl ShellState {
     }
 
     fn open_vault(&mut self, root: PathBuf) {
-        eprintln!(
-            "[freya][vault] action:open-start path={}",
-            root.display()
-        );
+        eprintln!("[freya][vault] action:open-start path={}", root.display());
         let mut next = shell_runtime::select_root(root);
-        if let Some(canonical_root) = next
-            .vault
-            .as_ref()
-            .map(|vault| vault.root().to_path_buf())
-        {
+        if let Some(canonical_root) = next.vault.as_ref().map(|vault| vault.root().to_path_buf()) {
             if let Err(error) = vault_picker::remember_vault(&canonical_root) {
                 eprintln!("[freya][vault] action:remember-failure error={error}");
                 next.error = Some(format!(
@@ -182,9 +181,15 @@ impl ShellState {
                     None,
                 )
                 .map(|_| ()),
-            crate::library_contract::CreateAction::Folder => vault
-                .create_folder(Some(self.library.current_path.as_str().to_string()))
-                .map(|_| ()),
+            crate::library_contract::CreateAction::Folder => {
+                let parent = self.library.current_path.as_str().trim_matches('/');
+                let relative_path = if parent.is_empty() {
+                    "New Folder".to_string()
+                } else {
+                    format!("{parent}/New Folder")
+                };
+                vault.create_folder(Some(relative_path)).map(|_| ())
+            }
             crate::library_contract::CreateAction::Drawing => {
                 Err(crate::vault_adapter::AdapterError::from(
                     "Drawing requires the Excalidraw web island; no fake native fallback is used."
@@ -261,8 +266,127 @@ struct SidebarNavHost {
 
 impl Component for SidebarNavHost {
     fn render(&self) -> impl IntoElement {
-        navigation::sidebar_nav(self.state, self.palette)
+        let snapshot = self.state.read().clone();
+        // Keep `sidebar_nav` unconditionally invoked inside this component: it
+        // owns `use_a11y()`, so hiding the sidebar must never change hook order.
+        let sidebar = navigation::sidebar_nav(self.state, self.palette);
+        let width = if snapshot.sidebar_visible {
+            f32::from(snapshot.sidebar_width.get())
+        } else {
+            0.
+        };
+        rect()
+            .width(Size::px(width))
+            .height(Size::fill())
+            .child(sidebar)
+            .maybe_child(
+                snapshot
+                    .sidebar_visible
+                    .then(|| vertical_shell_divider(self.palette)),
+            )
     }
+}
+
+fn vertical_shell_divider(palette: theme::ThemePalette) -> Element {
+    rect()
+        .position(Position::new_absolute().right(0.).top(0.).bottom(0.))
+        .width(Size::px(SHELL_DIVIDER_WIDTH))
+        .background(theme::token_color(palette, theme::ThemeToken::Border))
+        .into_element()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TopBarDragLayout {
+    leading_width: f32,
+    trailing_left: f32,
+}
+
+fn top_bar_drag_layout(sidebar_visible: bool, is_macos: bool) -> TopBarDragLayout {
+    if sidebar_visible {
+        let nav_left = if is_macos {
+            TOPBAR_NAV_LEFT_MACOS
+        } else {
+            TOPBAR_NAV_LEFT_DESKTOP
+        };
+        TopBarDragLayout {
+            leading_width: nav_left,
+            trailing_left: nav_left + TOPBAR_NAV_WIDTH,
+        }
+    } else {
+        TopBarDragLayout {
+            leading_width: 0.,
+            trailing_left: TOPBAR_DRAG_HIDDEN_LEFT,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TopBarDragGeometry {
+    Leading { width: f32 },
+    Trailing { left: f32 },
+}
+
+/// Owns Freya's `window_drag()` hooks in a stable child lifecycle.
+///
+/// `window_drag()` in Freya 0.4.1 uses hooks internally. Each mounted region
+/// therefore owns exactly one unconditional call in this child component,
+/// while the parent always mounts the same two region components. Toggling the
+/// sidebar changes only their geometry, never the shell's hook order.
+#[derive(PartialEq)]
+struct TopBarDragRegion {
+    geometry: TopBarDragGeometry,
+}
+
+impl Component for TopBarDragRegion {
+    fn render(&self) -> impl IntoElement {
+        let region = match self.geometry {
+            TopBarDragGeometry::Leading { width } => rect()
+                .position(Position::new_absolute().left(0.).top(0.))
+                .width(Size::px(width)),
+            TopBarDragGeometry::Trailing { left } => {
+                rect().position(Position::new_absolute().left(left).right(0.).top(0.))
+            }
+        };
+        region.height(Size::px(theme::TOPBAR_HEIGHT)).window_drag()
+    }
+}
+
+fn top_bar_host(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    let layout = top_bar_drag_layout(state.read().sidebar_visible, cfg!(target_os = "macos"));
+    rect()
+        .width(Size::fill())
+        .height(Size::px(theme::TOPBAR_HEIGHT))
+        .child(navigation::top_vault_bar(state, palette))
+        .child(
+            TopBarDragRegion {
+                geometry: TopBarDragGeometry::Leading {
+                    width: layout.leading_width,
+                },
+            }
+            .into_element(),
+        )
+        .child(
+            TopBarDragRegion {
+                geometry: TopBarDragGeometry::Trailing {
+                    left: layout.trailing_left,
+                },
+            }
+            .into_element(),
+        )
+        .into_element()
+}
+
+fn icon_rail_host(
+    state: State<ShellState>,
+    palette: theme::ThemePalette,
+    effects: &settings_effects::SettingsEffects,
+) -> Element {
+    rect()
+        .width(Size::px(theme::RAIL_WIDTH))
+        .height(Size::fill())
+        .child(navigation::icon_rail(state, palette, effects))
+        .child(vertical_shell_divider(palette))
+        .into_element()
 }
 
 fn app_shell(state: State<ShellState>) -> Element {
@@ -299,13 +423,13 @@ fn app_shell(state: State<ShellState>) -> Element {
         .height(Size::fill())
         .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .color(theme::token_color(palette, theme::ThemeToken::Text))
-        .child(navigation::top_vault_bar(state, palette))
+        .child(top_bar_host(state, palette))
         .child(
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
                 .horizontal()
-                .child(navigation::icon_rail(state, palette, &settings_effects))
+                .child(icon_rail_host(state, palette, &settings_effects))
                 .child(SidebarNavHost { state, palette }.into_element())
                 .child(content),
         )
@@ -372,4 +496,47 @@ pub(super) fn route_notice(title: &str, body: &str) -> Element {
                 .text(body.to_string()),
         )
         .into_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shell_chrome_overlays_preserve_active_tauri_geometry() {
+        assert_eq!(theme::TOPBAR_HEIGHT, 28.);
+        assert_eq!(theme::RAIL_WIDTH, 56.);
+        assert_eq!(theme::RAIL_ACTION_SIZE, 34.);
+        assert_eq!(theme::SIDEBAR_DEFAULT_WIDTH, 232.);
+        assert_eq!(SHELL_DIVIDER_WIDTH, 1.);
+        assert_eq!(TOPBAR_DRAG_HIDDEN_LEFT, 180.);
+        assert_eq!(TOPBAR_NAV_LEFT_DESKTOP, 56.);
+        assert_eq!(TOPBAR_NAV_LEFT_MACOS, 84.);
+        assert_eq!(TOPBAR_NAV_WIDTH, 76.);
+    }
+
+    #[test]
+    fn topbar_drag_layout_tracks_sidebar_and_platform_geometry() {
+        assert_eq!(
+            top_bar_drag_layout(true, false),
+            TopBarDragLayout {
+                leading_width: 56.,
+                trailing_left: 132.,
+            }
+        );
+        assert_eq!(
+            top_bar_drag_layout(true, true),
+            TopBarDragLayout {
+                leading_width: 84.,
+                trailing_left: 160.,
+            }
+        );
+        assert_eq!(
+            top_bar_drag_layout(false, false),
+            TopBarDragLayout {
+                leading_width: 0.,
+                trailing_left: 180.,
+            }
+        );
+    }
 }

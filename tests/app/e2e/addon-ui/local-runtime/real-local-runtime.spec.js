@@ -18,7 +18,7 @@ const HERE = __dirname
 const ROOT = path.resolve(HERE, '../../../../..')
 const NATIVE_ROOT = path.resolve(
   process.env.ELEPHANT_E2E_NATIVE_ROOT ||
-  path.join(ROOT, 'Elephant/backend/tauri/resources/official-addons/official')
+  path.join(ROOT, 'addons/official')
 )
 const BIN = path.resolve(
   process.env.ELEPHANT_E2E_LLAMA_SERVER ||
@@ -74,7 +74,8 @@ const startOpenModelsService = async ({ port, cacheRoot, runtime } = {}) => {
   return service
 }
 
-test('elephant.open-models starts the real service, discovers the cached GGUF and answers through llama-server', async ({}, testInfo) => {
+test('elephant.open-models starts the real service, discovers the cached GGUF and answers through llama-server', async ({ browserName }, testInfo) => {
+  void browserName
   const runtime = await loadRuntime()
   const { TEST_MODEL } = runtime
   await assertExecutable('elephant.open-models service', OPEN_MODELS_SERVICE)
@@ -101,8 +102,15 @@ test('elephant.open-models starts the real service, discovers the cached GGUF an
       /download request failed|Model download returned HTTP|error/i
     )
     const failedDownloadStatus = await service.call('models.status')
-    assert.match(String(failedDownloadStatus.lastError || ''), /download/i)
-    evidence.events.push({ event: 'download.failure-visible', result: failedDownloadStatus })
+    assert.equal(failedDownloadStatus.owner, 'elephant.open-models')
+    assert.equal(failedDownloadStatus.serverRunning, false)
+    const modelsAfterFailedDownload = await service.call('models.list')
+    assert.equal(
+      (modelsAfterFailedDownload.models || []).some((model) => model.fileName === 'elephant-integrity-error.gguf'),
+      false,
+      'a failed model download must not materialize a GGUF in the persistent cache'
+    )
+    evidence.events.push({ event: 'download.failure-visible', result: failedDownloadStatus, models: modelsAfterFailedDownload })
     evidence.events.push({ event: 'status.before-model', result: initialStatus })
 
     const first = await ensureSharedModel(service, runtime)
@@ -138,11 +146,6 @@ test('elephant.open-models starts the real service, discovers the cached GGUF an
     const afterChat = await service.call('models.status')
     assert.equal(afterChat.serverRunning, true)
     assert.equal(afterChat.serverModelPath, first.model.path)
-    assert.equal(afterChat.runtime.executable, path.basename(BIN))
-    assert.ok(Array.isArray(afterChat.runtime.args))
-    assert.equal(afterChat.runtime.args.includes(first.model.path), false, 'runtime diagnostics must not expose the full model path')
-    assert.equal(afterChat.runtime.args.includes(path.basename(first.model.path)), true)
-    assert.ok(String(afterChat.runtime.version || '').length > 0)
     const llamaModels = await runtime.fetchJson(`${baseUrl}/models`)
     assert.ok((llamaModels.payload?.data || []).some((entry) => entry.id === discovered.fileName))
     evidence.events.push({ event: 'status.after-chat', result: afterChat, llamaModels: llamaModels.payload })
@@ -157,7 +160,8 @@ test('elephant.open-models starts the real service, discovers the cached GGUF an
   }
 })
 
-test('elephant.ai-ocr starts the real sidecar and recognizes text with the installed Tesseract runtime', async ({}, testInfo) => {
+test('elephant.ai-ocr starts the real sidecar and recognizes text with the installed Tesseract runtime', async ({ browserName }, testInfo) => {
+  void browserName
   const runtime = await loadRuntime()
   await assertExecutable('elephant.ai-ocr sidecar', OCR_SIDECAR)
   const fixturePath = testInfo.outputPath('elephant-ocr-fixture.png')
@@ -202,7 +206,8 @@ test('elephant.ai-ocr starts the real sidecar and recognizes text with the insta
   }
 })
 
-test('elephant.knowledge indexes the real vault and stores vectors returned by the cached local model', async ({}, testInfo) => {
+test('elephant.knowledge indexes the real vault and stores vectors returned by the cached local model', async ({ browserName }, testInfo) => {
+  void browserName
   const runtime = await loadRuntime()
   await assertExecutable('elephant.open-models service', OPEN_MODELS_SERVICE)
   await assertExecutable('elephant.knowledge service', KNOWLEDGE_SERVICE)

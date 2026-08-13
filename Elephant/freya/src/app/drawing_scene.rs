@@ -1,15 +1,19 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn default_stroke_color() -> String {
-    "#000000".to_owned()
+    "#1b1b1f".to_owned()
 }
+
 fn default_background_color() -> String {
     "transparent".to_owned()
 }
+
 fn default_stroke_width() -> f32 {
-    1.
+    2.
 }
+
 fn default_opacity() -> f32 {
     100.
 }
@@ -52,7 +56,7 @@ pub struct DrawingElement {
     pub background_color: String,
     #[serde(rename = "strokeWidth", default = "default_stroke_width")]
     pub stroke_width: f32,
-    #[serde(default)]
+    #[serde(rename = "strokeStyle", default)]
     pub stroke_style: String,
     #[serde(rename = "fillStyle", default)]
     pub fill_style: String,
@@ -70,6 +74,41 @@ pub struct DrawingElement {
     pub is_deleted: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrawingTool {
+    Selection,
+    Rectangle,
+    Ellipse,
+    Line,
+    Arrow,
+    Freedraw,
+    Eraser,
+}
+
+impl DrawingTool {
+    pub const ALL: [Self; 7] = [
+        Self::Selection,
+        Self::Rectangle,
+        Self::Ellipse,
+        Self::Line,
+        Self::Arrow,
+        Self::Freedraw,
+        Self::Eraser,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Selection => "Select",
+            Self::Rectangle => "Rectangle",
+            Self::Ellipse => "Ellipse",
+            Self::Line => "Line",
+            Self::Arrow => "Arrow",
+            Self::Freedraw => "Draw",
+            Self::Eraser => "Eraser",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -102,6 +141,19 @@ enum Interaction {
     MoveElement {
         index: usize,
         offset: [f32; 2],
+        before: Box<DrawingScene>,
+    },
+    DrawElement {
+        index: usize,
+        start: [f32; 2],
+        before: Box<DrawingScene>,
+    },
+    Freedraw {
+        index: usize,
+        before: Box<DrawingScene>,
+    },
+    Erase {
+        before: Box<DrawingScene>,
     },
     Pan {
         start_pointer: [f32; 2],
@@ -113,8 +165,11 @@ enum Interaction {
 pub struct DrawingCanvasState {
     pub document: DrawingScene,
     pub viewport: Viewport,
+    active_tool: DrawingTool,
     selected: Option<usize>,
     interaction: Interaction,
+    undo: Vec<DrawingScene>,
+    redo: Vec<DrawingScene>,
     pub revision: u64,
 }
 
@@ -132,8 +187,11 @@ impl DrawingCanvasState {
         Self {
             document,
             viewport: Viewport::default(),
+            active_tool: DrawingTool::Selection,
             selected: None,
             interaction: Interaction::None,
+            undo: Vec::new(),
+            redo: Vec::new(),
             revision: 0,
         }
     }
@@ -142,10 +200,44 @@ impl DrawingCanvasState {
         serde_json::to_string_pretty(&self.document).map_err(|error| error.to_string())
     }
 
+    pub fn active_tool(&self) -> DrawingTool {
+        self.active_tool
+    }
+
+    pub fn set_tool(&mut self, tool: DrawingTool) {
+        self.cancel_interaction();
+        self.active_tool = tool;
+        if tool != DrawingTool::Selection {
+            self.selected = None;
+        }
+        self.bump_revision();
+    }
+
     pub fn selected_element_id(&self) -> Option<&str> {
         self.selected
             .and_then(|index| self.document.elements.get(index))
             .map(|element| element.id.as_str())
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    pub fn canvas_background(&self) -> &str {
+        self.document
+            .app_state
+            .get("viewBackgroundColor")
+            .and_then(Value::as_str)
+            .unwrap_or("#ffffff")
+    }
+
+    pub fn is_dark_canvas(&self) -> bool {
+        let [r, g, b, _] = rgba(self.canvas_background(), 100.);
+        (u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) < 128_000
     }
 
     pub fn renderable_elements(&self) -> Vec<RenderableElement> {
@@ -166,6 +258,18 @@ impl DrawingCanvasState {
 
     pub(crate) fn begin_pointer(&mut self, point: [f32; 2]) {
         let world = self.to_world(point);
+        match self.active_tool {
+            DrawingTool::Selection => self.begin_selection(point, world),
+            DrawingTool::Eraser => self.begin_erase(world),
+            DrawingTool::Rectangle
+            | DrawingTool::Ellipse
+            | DrawingTool::Line
+            | DrawingTool::Arrow => self.begin_shape(world),
+            DrawingTool::Freedraw => self.begin_freedraw(world),
+        }
+    }
+
+    fn begin_selection(&mut self, point: [f32; 2], world: [f32; 2]) {
         self.selected = self.hit_test(world);
         self.interaction = match self.selected {
             Some(index) => {
@@ -173,6 +277,7 @@ impl DrawingCanvasState {
                 Interaction::MoveElement {
                     index,
                     offset: [world[0] - element.x, world[1] - element.y],
+                    before: Box::new(self.document.clone()),
                 }
             }
             None => Interaction::Pan {
@@ -180,19 +285,117 @@ impl DrawingCanvasState {
                 start_pan: self.viewport.pan,
             },
         };
+        self.bump_revision();
+    }
+
+    fn begin_shape(&mut self, world: [f32; 2]) {
+        let before = Box::new(self.document.clone());
+        let kind = match self.active_tool {
+            DrawingTool::Rectangle => "rectangle",
+            DrawingTool::Ellipse => "ellipse",
+            DrawingTool::Line => "line",
+            DrawingTool::Arrow => "arrow",
+            _ => return,
+        };
+        self.document
+            .elements
+            .push(new_element(kind, world, self.document.elements.len()));
+        let index = self.document.elements.len() - 1;
+        self.selected = Some(index);
+        self.interaction = Interaction::DrawElement {
+            index,
+            start: world,
+            before,
+        };
+        self.bump_revision();
+    }
+
+    fn begin_freedraw(&mut self, world: [f32; 2]) {
+        let before = Box::new(self.document.clone());
+        let mut element = new_element("freedraw", world, self.document.elements.len());
+        element.points.push([0., 0.]);
+        self.document.elements.push(element);
+        let index = self.document.elements.len() - 1;
+        self.selected = Some(index);
+        self.interaction = Interaction::Freedraw { index, before };
+        self.bump_revision();
+    }
+
+    fn begin_erase(&mut self, world: [f32; 2]) {
+        self.interaction = Interaction::Erase {
+            before: Box::new(self.document.clone()),
+        };
+        self.selected = None;
+        self.erase_during_interaction(world);
+    }
+
+    fn erase_during_interaction(&mut self, world: [f32; 2]) {
+        if !matches!(self.interaction, Interaction::Erase { .. }) {
+            return;
+        }
+        let Some(index) = self.hit_test(world) else {
+            return;
+        };
+        if let Some(element) = self.document.elements.get_mut(index) {
+            if element.is_deleted {
+                return;
+            }
+            element.is_deleted = true;
+            touch_element(element);
+            self.bump_revision();
+        }
     }
 
     pub(crate) fn move_pointer(&mut self, point: [f32; 2]) {
-        let interaction = self.interaction.clone();
-        match interaction {
-            Interaction::MoveElement { index, offset } => {
-                let world = self.to_world(point);
+        let world = self.to_world(point);
+        match self.interaction.clone() {
+            Interaction::MoveElement { index, offset, .. } => {
                 if let Some(element) = self.document.elements.get_mut(index) {
                     element.x = world[0] - offset[0];
                     element.y = world[1] - offset[1];
-                    self.revision = self.revision.wrapping_add(1);
+                    self.bump_revision();
                 }
             }
+            Interaction::DrawElement { index, start, .. } => {
+                if let Some(element) = self.document.elements.get_mut(index) {
+                    match element.kind.as_str() {
+                        "rectangle" | "ellipse" => {
+                            element.x = start[0].min(world[0]);
+                            element.y = start[1].min(world[1]);
+                            element.width = (world[0] - start[0]).abs();
+                            element.height = (world[1] - start[1]).abs();
+                        }
+                        "line" | "arrow" => {
+                            element.x = start[0];
+                            element.y = start[1];
+                            element.width = (world[0] - start[0]).abs();
+                            element.height = (world[1] - start[1]).abs();
+                            element.points =
+                                vec![[0., 0.], [world[0] - start[0], world[1] - start[1]]];
+                        }
+                        _ => {}
+                    }
+                    self.bump_revision();
+                }
+            }
+            Interaction::Freedraw { index, .. } => {
+                if let Some(element) = self.document.elements.get_mut(index) {
+                    let relative = [world[0] - element.x, world[1] - element.y];
+                    let append = element
+                        .points
+                        .last()
+                        .map(|last| distance(*last, relative) >= 0.75)
+                        .unwrap_or(true);
+                    if append {
+                        element.points.push(relative);
+                        let (_, _, width, height) = element.bounds();
+                        element.width = width;
+                        element.height = height;
+                        self.bump_revision();
+                    }
+                }
+            }
+            Interaction::Erase { .. } => self.erase_during_interaction(world),
             Interaction::Pan {
                 start_pointer,
                 start_pan,
@@ -201,14 +404,107 @@ impl DrawingCanvasState {
                     start_pan[0] + point[0] - start_pointer[0],
                     start_pan[1] + point[1] - start_pointer[1],
                 ];
-                self.revision = self.revision.wrapping_add(1);
+                self.bump_revision();
             }
             Interaction::None => {}
         }
     }
 
     pub(crate) fn end_pointer(&mut self) {
+        let interaction = std::mem::replace(&mut self.interaction, Interaction::None);
+        match interaction {
+            Interaction::MoveElement { index, before, .. }
+            | Interaction::DrawElement { index, before, .. }
+            | Interaction::Freedraw { index, before } => {
+                if before.as_ref() != &self.document {
+                    if let Some(element) = self.document.elements.get_mut(index) {
+                        touch_element(element);
+                    }
+                    self.undo.push(*before);
+                    self.redo.clear();
+                }
+            }
+            Interaction::Erase { before } => {
+                if before.as_ref() != &self.document {
+                    self.undo.push(*before);
+                    self.redo.clear();
+                }
+            }
+            Interaction::Pan { .. } | Interaction::None => {}
+        }
+        self.bump_revision();
+    }
+
+    pub fn escape(&mut self) {
+        self.cancel_interaction();
+        self.selected = None;
+        self.active_tool = DrawingTool::Selection;
+        self.bump_revision();
+    }
+
+    fn cancel_interaction(&mut self) {
+        match std::mem::replace(&mut self.interaction, Interaction::None) {
+            Interaction::MoveElement { before, .. }
+            | Interaction::DrawElement { before, .. }
+            | Interaction::Freedraw { before, .. }
+            | Interaction::Erase { before } => self.document = *before,
+            Interaction::Pan { start_pan, .. } => self.viewport.pan = start_pan,
+            Interaction::None => {}
+        }
+    }
+
+    pub fn delete_selected(&mut self) -> bool {
+        let Some(index) = self.selected else {
+            return false;
+        };
+        if self
+            .document
+            .elements
+            .get(index)
+            .map(|element| element.is_deleted)
+            .unwrap_or(true)
+        {
+            return false;
+        }
+        let before = self.document.clone();
+        if let Some(element) = self.document.elements.get_mut(index) {
+            element.is_deleted = true;
+            touch_element(element);
+        }
+        self.selected = None;
+        self.commit_history(before);
+        true
+    }
+
+    pub fn undo(&mut self) -> bool {
         self.interaction = Interaction::None;
+        let Some(previous) = self.undo.pop() else {
+            return false;
+        };
+        self.redo
+            .push(std::mem::replace(&mut self.document, previous));
+        self.selected = None;
+        self.bump_revision();
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        self.interaction = Interaction::None;
+        let Some(next) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(std::mem::replace(&mut self.document, next));
+        self.selected = None;
+        self.bump_revision();
+        true
+    }
+
+    fn commit_history(&mut self, before: DrawingScene) {
+        if before != self.document {
+            self.undo.push(before);
+            self.redo.clear();
+            self.bump_revision();
+        }
     }
 
     pub(crate) fn zoom_at(&mut self, point: [f32; 2], delta_y: f64) {
@@ -219,7 +515,7 @@ impl DrawingCanvasState {
             point[0] - before[0] * self.viewport.zoom,
             point[1] - before[1] * self.viewport.zoom,
         ];
-        self.revision = self.revision.wrapping_add(1);
+        self.bump_revision();
     }
 
     pub(crate) fn to_world(&self, point: [f32; 2]) -> [f32; 2] {
@@ -237,6 +533,80 @@ impl DrawingCanvasState {
             .rev()
             .find(|(_, element)| !element.is_deleted && element.hit_test(point))
             .map(|(index, _)| index)
+    }
+
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+}
+
+fn timestamp_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn next_nonce(previous: u64) -> u32 {
+    (previous.wrapping_mul(1_664_525).wrapping_add(1_013_904_223) & 0x7fff_ffff) as u32
+}
+
+fn touch_element(element: &mut DrawingElement) {
+    let now = timestamp_millis();
+    let version = element
+        .extra
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .saturating_add(1);
+    let previous_nonce = element
+        .extra
+        .get("versionNonce")
+        .and_then(Value::as_u64)
+        .unwrap_or(now);
+    element.extra.insert("version".into(), json!(version));
+    element
+        .extra
+        .insert("versionNonce".into(), json!(next_nonce(previous_nonce)));
+    element.extra.insert("updated".into(), json!(now));
+}
+
+fn new_element(kind: &str, origin: [f32; 2], ordinal: usize) -> DrawingElement {
+    let now = timestamp_millis();
+    let nonce = ((now ^ ordinal as u64) & 0x7fff_ffff) as u32;
+    let mut extra = Map::new();
+    extra.insert("roughness".into(), json!(1));
+    extra.insert("seed".into(), json!(nonce));
+    extra.insert("version".into(), json!(1));
+    extra.insert("versionNonce".into(), json!(next_nonce(u64::from(nonce))));
+    extra.insert("groupIds".into(), json!([]));
+    extra.insert("frameId".into(), Value::Null);
+    extra.insert("boundElements".into(), Value::Null);
+    extra.insert("updated".into(), json!(now));
+    extra.insert("link".into(), Value::Null);
+    extra.insert("locked".into(), json!(false));
+
+    DrawingElement {
+        id: format!("freya-{now:x}-{ordinal:x}"),
+        kind: kind.to_owned(),
+        x: origin[0],
+        y: origin[1],
+        width: 0.,
+        height: 0.,
+        points: Vec::new(),
+        text: String::new(),
+        stroke_color: "#1b1b1f".to_owned(),
+        background_color: "transparent".to_owned(),
+        stroke_width: 2.,
+        stroke_style: "solid".to_owned(),
+        fill_style: "solid".to_owned(),
+        opacity: 100.,
+        angle: 0.,
+        font_size: 20.,
+        end_arrowhead: (kind == "arrow").then(|| "arrow".to_owned()),
+        start_arrowhead: None,
+        is_deleted: false,
+        extra,
     }
 }
 
@@ -265,11 +635,20 @@ impl DrawingElement {
                 .fold(f32::NEG_INFINITY, f32::max);
             return (self.x + min_x, self.y + min_y, max_x - min_x, max_y - min_y);
         }
-        (self.x, self.y, self.width, self.height)
+        let x2 = self.x + self.width;
+        let y2 = self.y + self.height;
+        (
+            self.x.min(x2),
+            self.y.min(y2),
+            (x2 - self.x).abs(),
+            (y2 - self.y).abs(),
+        )
     }
 
     fn hit_test(&self, point: [f32; 2]) -> bool {
         let (x, y, width, height) = self.bounds();
+        let center = [x + width / 2., y + height / 2.];
+        let point = rotate_point_around(point, center, -self.angle);
         let padding = self.stroke_width.max(6.);
         if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw") && self.points.len() >= 2 {
             return self.points.windows(2).any(|segment| {
@@ -280,6 +659,13 @@ impl DrawingElement {
                 ) <= padding
             });
         }
+        if self.kind == "ellipse" && width > f32::EPSILON && height > f32::EPSILON {
+            let radius_x = width / 2.;
+            let radius_y = height / 2.;
+            let dx = (point[0] - center[0]) / (radius_x + padding);
+            let dy = (point[1] - center[1]) / (radius_y + padding);
+            return dx * dx + dy * dy <= 1.;
+        }
         point[0] >= x - padding
             && point[0] <= x + width + padding
             && point[1] >= y - padding
@@ -287,17 +673,32 @@ impl DrawingElement {
     }
 }
 
+fn rotate_point_around(point: [f32; 2], center: [f32; 2], angle: f32) -> [f32; 2] {
+    if angle.abs() <= f32::EPSILON {
+        return point;
+    }
+    let sin = angle.sin();
+    let cos = angle.cos();
+    let x = point[0] - center[0];
+    let y = point[1] - center[1];
+    [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
+}
+
+fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
 fn distance_to_segment(point: [f32; 2], start: [f32; 2], end: [f32; 2]) -> f32 {
     let vector = [end[0] - start[0], end[1] - start[1]];
     let length_squared = vector[0] * vector[0] + vector[1] * vector[1];
     if length_squared <= f32::EPSILON {
-        return ((point[0] - start[0]).powi(2) + (point[1] - start[1]).powi(2)).sqrt();
+        return distance(point, start);
     }
     let t = (((point[0] - start[0]) * vector[0] + (point[1] - start[1]) * vector[1])
         / length_squared)
         .clamp(0., 1.);
     let projected = [start[0] + t * vector[0], start[1] + t * vector[1]];
-    ((point[0] - projected[0]).powi(2) + (point[1] - projected[1]).powi(2)).sqrt()
+    distance(point, projected)
 }
 
 pub(crate) fn rgba(value: &str, opacity: f32) -> [u8; 4] {
@@ -324,4 +725,205 @@ pub(crate) fn rgba(value: &str, opacity: f32) -> [u8; 4] {
         u8::from_str_radix(&hex[4..6], 16).unwrap_or(0),
         ((f32::from(alpha) * (opacity.clamp(0., 100.) / 100.)).round()) as u8,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn empty_state() -> DrawingCanvasState {
+        DrawingCanvasState::from_json(
+            r##"{
+              "type":"excalidraw",
+              "version":2,
+              "source":"https://excalidraw.com",
+              "elements":[],
+              "appState":{"viewBackgroundColor":"#121212"},
+              "files":{},
+              "futureField":{"keep":true}
+            }"##,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn scene_serialization_preserves_unknown_excalidraw_fields() {
+        let mut state = empty_state();
+        state.set_tool(DrawingTool::Rectangle);
+        state.begin_pointer([20., 30.]);
+        state.move_pointer([80., 90.]);
+        state.end_pointer();
+        let value: Value = serde_json::from_str(&state.serialize_json().unwrap()).unwrap();
+        assert_eq!(value["type"], "excalidraw");
+        assert_eq!(value["version"], 2);
+        assert_eq!(value["futureField"]["keep"], true);
+        assert_eq!(value["elements"][0]["type"], "rectangle");
+        assert_eq!(value["elements"][0]["strokeStyle"], "solid");
+        assert_eq!(value["elements"][0]["version"], 2);
+        assert!(value["elements"][0]["updated"].as_u64().is_some());
+    }
+
+    #[test]
+    fn reverse_drag_rectangle_normalizes_geometry() {
+        let mut state = empty_state();
+        state.set_tool(DrawingTool::Rectangle);
+        state.begin_pointer([100., 90.]);
+        state.move_pointer([20., 10.]);
+        state.end_pointer();
+        assert_eq!(state.document.elements[0].bounds(), (20., 10., 80., 80.));
+    }
+
+    #[test]
+    fn selection_move_delete_undo_redo_roundtrip() {
+        let mut state = empty_state();
+        state.set_tool(DrawingTool::Rectangle);
+        state.begin_pointer([10., 10.]);
+        state.move_pointer([60., 50.]);
+        state.end_pointer();
+        let id = state.document.elements[0].id.clone();
+        state.set_tool(DrawingTool::Selection);
+        state.begin_pointer([20., 20.]);
+        assert_eq!(state.selected_element_id(), Some(id.as_str()));
+        state.move_pointer([40., 35.]);
+        state.end_pointer();
+        assert_eq!(state.document.elements[0].x, 30.);
+        assert_eq!(state.document.elements[0].y, 25.);
+        assert_eq!(state.document.elements[0].extra["version"], 3);
+        assert!(state.delete_selected());
+        assert!(state.document.elements[0].is_deleted);
+        assert_eq!(state.document.elements[0].extra["version"], 4);
+        assert!(state.undo());
+        assert!(!state.document.elements[0].is_deleted);
+        assert!(state.redo());
+        assert!(state.document.elements[0].is_deleted);
+    }
+
+    #[test]
+    fn tool_state_creates_line_arrow_freedraw_and_eraser() {
+        let mut state = empty_state();
+        for tool in [DrawingTool::Line, DrawingTool::Arrow, DrawingTool::Freedraw] {
+            state.set_tool(tool);
+            state.begin_pointer([0., 0.]);
+            state.move_pointer([25., 15.]);
+            state.move_pointer([40., 35.]);
+            state.end_pointer();
+        }
+        assert_eq!(state.document.elements[0].kind, "line");
+        assert_eq!(state.document.elements[1].kind, "arrow");
+        assert_eq!(state.document.elements[2].kind, "freedraw");
+        assert!(state.document.elements[2].points.len() >= 3);
+        state.set_tool(DrawingTool::Eraser);
+        state.begin_pointer([20., 17.]);
+        state.end_pointer();
+        assert!(state.document.elements[2].is_deleted);
+        assert!(!state.document.elements[0].is_deleted);
+    }
+
+    #[test]
+    fn eraser_drag_is_bounded_by_pointer_lifecycle_and_undoes_as_one_gesture() {
+        let mut state = empty_state();
+        for x in [0., 80.] {
+            state.set_tool(DrawingTool::Rectangle);
+            state.begin_pointer([x, 0.]);
+            state.move_pointer([x + 40., 40.]);
+            state.end_pointer();
+        }
+        state.set_tool(DrawingTool::Eraser);
+        state.move_pointer([20., 20.]);
+        assert!(!state.document.elements[0].is_deleted);
+        state.begin_pointer([20., 20.]);
+        state.move_pointer([100., 20.]);
+        state.end_pointer();
+        assert!(state.document.elements[0].is_deleted);
+        assert!(state.document.elements[1].is_deleted);
+        assert!(state.undo());
+        assert!(!state.document.elements[0].is_deleted);
+        assert!(!state.document.elements[1].is_deleted);
+    }
+
+    #[test]
+    fn geometry_handles_negative_coordinates_and_zoom_is_bounded() {
+        let mut state = empty_state();
+        state.set_tool(DrawingTool::Ellipse);
+        state.begin_pointer([-120., -80.]);
+        state.move_pointer([-20., -10.]);
+        state.end_pointer();
+        assert_eq!(
+            state.document.elements[0].bounds(),
+            (-120., -80., 100., 70.)
+        );
+        for _ in 0..200 {
+            state.zoom_at([0., 0.], -1.);
+        }
+        assert_eq!(state.viewport.zoom, 5.);
+        for _ in 0..400 {
+            state.zoom_at([0., 0.], 1.);
+        }
+        assert_eq!(state.viewport.zoom, 0.2);
+    }
+
+    #[test]
+    fn escape_cancels_in_progress_shape_without_corrupting_scene() {
+        let mut state = empty_state();
+        state.set_tool(DrawingTool::Rectangle);
+        state.begin_pointer([10., 10.]);
+        state.move_pointer([100., 100.]);
+        state.escape();
+        assert!(state.document.elements.is_empty());
+        assert_eq!(state.active_tool(), DrawingTool::Selection);
+    }
+
+    #[test]
+    fn hit_test_follows_rotated_rectangle_instead_of_stale_axis_bounds() {
+        let mut state = empty_state();
+        state.document.elements.push(
+            serde_json::from_value(json!({
+                "id":"rotated-rect",
+                "type":"rectangle",
+                "x":0,
+                "y":0,
+                "width":100,
+                "height":20,
+                "angle":std::f32::consts::FRAC_PI_2,
+                "strokeColor":"#000000",
+                "backgroundColor":"transparent",
+                "strokeWidth":2,
+                "opacity":100
+            }))
+            .unwrap(),
+        );
+        state.set_tool(DrawingTool::Selection);
+        state.begin_pointer([50., 50.]);
+        assert_eq!(state.selected_element_id(), Some("rotated-rect"));
+        state.escape();
+        state.begin_pointer([90., 10.]);
+        assert_eq!(state.selected_element_id(), None);
+    }
+
+    #[test]
+    fn hit_test_follows_rotated_line_segments() {
+        let mut state = empty_state();
+        state.document.elements.push(
+            serde_json::from_value(json!({
+                "id":"rotated-line",
+                "type":"line",
+                "x":0,
+                "y":0,
+                "width":100,
+                "height":0,
+                "points":[[0,0],[100,0]],
+                "angle":std::f32::consts::FRAC_PI_2,
+                "strokeColor":"#000000",
+                "strokeWidth":2,
+                "opacity":100
+            }))
+            .unwrap(),
+        );
+        state.set_tool(DrawingTool::Selection);
+        state.begin_pointer([50., 40.]);
+        assert_eq!(state.selected_element_id(), Some("rotated-line"));
+        state.escape();
+        state.begin_pointer([90., 0.]);
+        assert_eq!(state.selected_element_id(), None);
+    }
 }

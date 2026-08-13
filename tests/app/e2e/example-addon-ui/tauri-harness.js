@@ -231,12 +231,6 @@ const openInstalledAddon = async (app, addonId) => {
   }
 }
 
-const runVisibleCommand = async (app, title) => {
-  await app.command('click', `.en-addon-detail-commands button`)
-  await waitForText(app, '.en-addons-feedback', 'completed', 60000)
-  return title
-}
-
 const setCommunityEnabled = (app, enabled) => app.command('invokeTauri', 'tauri_prefs_set', {
   key: 'addons.communityEnabled',
   value: enabled === true

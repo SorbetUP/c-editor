@@ -1,7 +1,6 @@
 'use strict'
 
 const fs = require('node:fs')
-const path = require('node:path')
 const { test, expect } = require('playwright/test')
 const harness = require('./example-addon-ui/tauri-harness')
 const finance = require('./example-addon-ui/finance-notes')
@@ -13,7 +12,8 @@ test.setTimeout(300000)
 test.describe.configure({ mode: 'serial' })
 
 for (const scenario of scenarios) {
-  test(`[example-addon-ui:${scenario.addonId}] install, activate, use, reload and clean up`, async ({}, testInfo) => {
+  test(`[example-addon-ui:${scenario.addonId}] install, activate, use, reload and clean up`, async ({ browserName }, testInfo) => {
+    void browserName
     testInfo.setTimeout(300000)
     const fixture = harness.createFixture()
     let phase = 'package'
@@ -37,6 +37,7 @@ for (const scenario of scenarios) {
       }
       phase = 'run-visible-scenario'
       const result = await scenario.run({ app, fixture, harness, expect, installed })
+      expect(result, `${scenario.addonId} must return scenario evidence`).toEqual(expect.any(Object))
       phase = 'cleanup'
       await harness.cleanup(app, scenario.addonId, scenario.hidden)
       harness.writeEvidence(testInfo, `${scenario.addonId}-ui-usage`, {

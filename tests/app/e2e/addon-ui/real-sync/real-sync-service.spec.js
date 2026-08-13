@@ -5,7 +5,8 @@ const { test, expect } = require('playwright/test')
 const { runRealSyncScenario } = require('./real-sync-service')
 
 test.describe('elephant.sync real native Iroh integration', () => {
-  test('pairs two real service processes and transfers vault files in both directions', async ({}, testInfo) => {
+  test('pairs two real service processes and transfers vault files in both directions', async ({ browserName }, testInfo) => {
+    void browserName
     test.setTimeout(180_000)
     const artifactPath = path.join(os.tmpdir(), 'elephant-real-sync-service.json')
     try {

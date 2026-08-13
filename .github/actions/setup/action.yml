@@ -28,6 +28,34 @@ runs:
           echo 'Frozen pnpm install failed; retrying without frozen lockfile so CI can reach tests.' >&2
           pnpm install --no-frozen-lockfile --ignore-scripts
         }
+
+        # pnpm is intentionally configured with modules-dir=Elephant/node_modules.
+        # Repository-level CommonJS and ESM scripts still resolve packages through
+        # <repo>/node_modules, so expose the exact same installation there. The
+        # bridge is recreated on every clean CI setup to avoid broken/stale links.
+        node <<'NODE'
+        const fs = require('node:fs')
+        const path = require('node:path')
+        const target = path.resolve('Elephant/node_modules')
+        const link = path.resolve('node_modules')
+        if (!fs.existsSync(target)) throw new Error(`pnpm modules directory is missing: ${target}`)
+        try {
+          fs.lstatSync(link)
+          fs.rmSync(link, { recursive: true, force: true })
+        } catch (error) {
+          if (error?.code !== 'ENOENT') throw error
+        }
+        fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir')
+        const targetReal = fs.realpathSync(target)
+        const linkReal = fs.realpathSync(link)
+        if (linkReal !== targetReal) {
+          throw new Error(`root node_modules does not resolve to Elephant/node_modules: ${linkReal} != ${targetReal}`)
+        }
+        for (const packageName of ['fs-extra', 'jsdom']) {
+          const entrypoint = require.resolve(packageName, { paths: [process.cwd()] })
+          console.log(`[setup] root package resolution ${packageName} -> ${entrypoint}`)
+        }
+        NODE
       env:
         GITHUB_TOKEN: ${{ github.token }}
 

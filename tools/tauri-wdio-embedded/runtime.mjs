@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const browserFor = () => globalThis.browser
@@ -73,7 +73,6 @@ export const stateSnapshot = async (vaultRoot, action = {}) => {
     ...(await texts('.en-rail button[aria-label]')),
     ...(await texts('.en-create-menu-popover [role="menuitem"]'))
   ]
-  const editor = await optional('.en-editor-host .editor-component, .en-note-editor-shell')
   const editorHost = await optional('.en-editor-host')
   const editorText = editorOpen && editorHost ? await editorHost.getText().catch(() => '') : ''
   const query = await value('[placeholder="Search notes, paths, tags, or ideas…"]')

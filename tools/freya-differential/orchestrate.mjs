@@ -7,7 +7,7 @@ import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { compareMetadata, detectCopiedEvidence, validateManifest } from './lib/evidence.mjs'
 import { sha256, writeJson } from './lib/common.mjs'
-import { expectedActions, loadScenario, materializeFixture, validateScenario } from './lib/scenario.mjs'
+import { loadScenario, materializeFixture, validateScenario } from './lib/scenario.mjs'
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const DEFAULT_SCENARIO = path.join(PROJECT_ROOT, 'migration/freya/differential-scenarios.json')

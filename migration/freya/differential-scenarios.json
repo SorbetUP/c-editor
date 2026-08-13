@@ -486,7 +486,7 @@
             "label": "Hide sidebar"
           },
           "strategy": "accessibility-label",
-          "source": "Elephant/freya/src/app/navigation.rs#rail_action",
+          "implementationSource": "Elephant/freya/src/app/navigation.rs#rail_action",
           "test": "Elephant/freya/tests/shell_navigation_freya_testing.rs#rail_search_dragged_before_sidebar_toggle_persists_and_restores",
           "provenMapping": true
         }
