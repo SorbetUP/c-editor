@@ -21,7 +21,7 @@ jobs:
       - name: Make fixer runnable
         shell: bash
         run: |
-          sed -i '/^[[:space:]]*if: \${{ !contains(github.event.head_commit.message,/d' .github/workflows/wave1-ci-fixer.yml
+          sed -i '/^[[:space:]]*if:/d' .github/workflows/wave1-ci-fixer.yml
           rm .github/workflows/bootstrap-wave1-fixer.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
