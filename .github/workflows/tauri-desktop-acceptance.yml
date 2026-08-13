@@ -58,6 +58,13 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      - name: Install Tauri CLI
+        shell: bash
+        run: |
+          if ! cargo tauri --version >/dev/null 2>&1; then
+            cargo install tauri-cli --version '^2.10.0' --locked
+          fi
+
       - name: Validate platform contracts
         shell: bash
         run: pnpm tauri:platform:check
