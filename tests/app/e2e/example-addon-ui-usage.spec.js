@@ -37,6 +37,7 @@ for (const scenario of scenarios) {
       }
       phase = 'run-visible-scenario'
       const result = await scenario.run({ app, fixture, harness, expect, installed })
+      expect(result, `${scenario.addonId} must return scenario evidence`).toEqual(expect.any(Object))
       phase = 'cleanup'
       await harness.cleanup(app, scenario.addonId, scenario.hidden)
       harness.writeEvidence(testInfo, `${scenario.addonId}-ui-usage`, {
