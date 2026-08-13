@@ -12,8 +12,8 @@ test.setTimeout(300000)
 test.describe.configure({ mode: 'serial' })
 
 for (const scenario of scenarios) {
-  test(`[example-addon-ui:${scenario.addonId}] install, activate, use, reload and clean up`, async (fixtures, testInfo) => {
-  void fixtures
+  test(`[example-addon-ui:${scenario.addonId}] install, activate, use, reload and clean up`, async ({ browserName }, testInfo) => {
+    void browserName
     testInfo.setTimeout(300000)
     const fixture = harness.createFixture()
     let phase = 'package'
