@@ -18,7 +18,7 @@ const HERE = __dirname
 const ROOT = path.resolve(HERE, '../../../../..')
 const NATIVE_ROOT = path.resolve(
   process.env.ELEPHANT_E2E_NATIVE_ROOT ||
-  path.join(ROOT, 'Elephant/backend/tauri/resources/official-addons/official')
+  path.join(ROOT, 'addons/official')
 )
 const BIN = path.resolve(
   process.env.ELEPHANT_E2E_LLAMA_SERVER ||
