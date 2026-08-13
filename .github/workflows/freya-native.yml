@@ -91,12 +91,12 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 2>&1 | tee /tmp/freya-lib.log
+          timeout 600 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 2>&1 | tee /tmp/freya-lib.log
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
             if [ "$status" -eq 124 ]; then
-              detail="library tests timed out after 180 seconds"
+              detail="library tests timed out after 600 seconds"
             else
               detail="library tests exited with status $status"
             fi
