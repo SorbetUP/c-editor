@@ -1,6 +1,6 @@
 use elephant_freya::app::app_with_vault;
 use freya::prelude::*;
-use freya_clipboard::copypasta::{ClipboardProvider, Result as ClipboardResult};
+use freya_clipboard::copypasta::ClipboardProvider;
 use freya_testing::{
     prelude::{ImeEventName, KeyboardEventName, PlatformEvent},
     TestingNode, TestingRunner,
@@ -11,6 +11,8 @@ use std::{
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+type ClipboardResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[derive(Clone)]
 struct MemoryClipboard(Arc<Mutex<String>>);
@@ -33,13 +35,6 @@ impl ClipboardProvider for MemoryClipboard {
 
 fn boxed_clipboard_error(message: &str) -> Box<dyn std::error::Error + Send + Sync> {
     Box::new(std::io::Error::other(message))
-}
-
-fn install_memory_clipboard(runner: &mut freya::prelude::Runner) {
-    // The provider is scoped to this headless runner and starts empty: only UI Copy may write it.
-    let provider: Box<dyn ClipboardProvider> =
-        Box::new(MemoryClipboard(Arc::new(Mutex::new(String::new()))));
-    runner.provide_root_context(|| State::create(Some(provider)));
 }
 
 struct FixtureVault {
@@ -206,7 +201,11 @@ fn clipboard_paste_uses_freya_clipboard_and_preserves_muya_rich_markup() {
     let (mut runner, ()) = TestingRunner::new(
         move || app_with_vault(root.clone()),
         (1280., 840.).into(),
-        install_memory_clipboard,
+        |runner| {
+            let provider: Box<dyn ClipboardProvider> =
+                Box::new(MemoryClipboard(Arc::new(Mutex::new(String::new()))));
+            runner.provide_root_context(move || State::create(Some(provider)));
+        },
         1.,
     );
 
