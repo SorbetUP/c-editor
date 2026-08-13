@@ -226,6 +226,9 @@ jobs:
       - name: Materialize official addons
         run: node build/scripts/sync-elephant-addons.mjs
 
+      - name: Prepare Tauri official addon resources
+        run: node build/scripts/prepare-tauri-addon-resources.mjs
+
       - name: Compile and test Rust addon security modules
         shell: bash
         run: |
