@@ -23,6 +23,9 @@ jobs:
     name: Freya check and tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: "1"
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -36,6 +39,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang \
+            lld \
             libfontconfig1-dev \
             libfreetype6-dev \
             pkg-config
