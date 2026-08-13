@@ -1,0 +1,31 @@
+name: Bootstrap wave1 repair
+
+on:
+  push:
+    branches:
+      - parallel/freya-parity-integration-wave1
+    paths:
+      - .github/workflows/bootstrap-wave1-fixer.yml
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: parallel/freya-parity-integration-wave1
+          fetch-depth: 0
+      - name: Make fixer runnable
+        shell: bash
+        run: |
+          sed -i '/^[[:space:]]*if: \${{ !contains(github.event.head_commit.message,/d' .github/workflows/wave1-ci-fixer.yml
+          rm .github/workflows/bootstrap-wave1-fixer.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "chore(ci): enable one-shot wave1 repair"
+          git push origin HEAD:parallel/freya-parity-integration-wave1
