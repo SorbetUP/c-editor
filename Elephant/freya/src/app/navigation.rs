@@ -457,7 +457,6 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     let mut resize_enter_state = state;
     let mut resize_leave_state = state;
     let resizer = rect()
-        .position(Position::new_absolute().right(-12.).top(0.))
         .width(Size::px(theme::SIDEBAR_RESIZER_WIDTH))
         .height(Size::fill())
         .center()
@@ -559,6 +558,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     rect()
         .width(Size::px(f32::from(snapshot.sidebar_width.get())))
         .height(Size::fill())
+        .horizontal()
         .child(sidebar)
         .child(resizer)
         .into_element()

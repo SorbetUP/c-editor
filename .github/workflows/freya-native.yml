@@ -152,6 +152,10 @@ jobs:
           failures=0
           for file in Elephant/freya/tests/*.rs; do
             suite="$(basename "$file" .rs)"
+            if [ "$suite" = "differential_freya_capture" ]; then
+              echo "::notice title=Freya differential capture::${suite} is executed below with the shared seeded differential fixture and runtime contract."
+              continue
+            fi
             echo "::group::Freya suite: $suite"
             set +e
             timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test "$suite" -- --test-threads=1 2>&1 | tee "/tmp/freya-${suite}.log"
@@ -199,6 +203,36 @@ jobs:
             echo "Freya integration failures: $failures"
             exit 1
           fi
+
+      - name: Run seeded Freya differential capture journey
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/freya-differential-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          fixture="$root/fixture"
+          output="$root/output"
+          rm -rf "$root"
+          mkdir -p "$fixture" "$output"
+          viewport_json="$(node --input-type=module - "$fixture" <<'NODE'
+          import path from 'node:path'
+          import { loadScenario, materializeFixture } from './tools/freya-differential/lib/scenario.mjs'
+          const fixtureRoot = process.argv[2]
+          const scenarioPath = path.resolve('migration/freya/differential-scenarios.json')
+          const scenario = await loadScenario(scenarioPath)
+          await materializeFixture(scenario, fixtureRoot)
+          process.stdout.write(JSON.stringify(scenario.viewport))
+          NODE
+          )"
+          export DIFFERENTIAL_RUNTIME=freya
+          export DIFFERENTIAL_SCENARIO_PATH="$GITHUB_WORKSPACE/migration/freya/differential-scenarios.json"
+          export DIFFERENTIAL_OUTPUT_DIR="$output"
+          export DIFFERENTIAL_FIXTURE_ROOT="$fixture"
+          export DIFFERENTIAL_EXPECTED_VIEWPORT_JSON="$viewport_json"
+          export DIFFERENTIAL_RUN_ID="freya-native-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export DIFFERENTIAL_COMMAND_SHA256="$(printf '%s' 'cargo test --manifest-path Elephant/freya/Cargo.toml --test differential_freya_capture -- --test-threads=1 --nocapture' | sha256sum | cut -d' ' -f1)"
+          export DIFFERENTIAL_CAPTURE_NONCE="freya-native-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
+          timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test differential_freya_capture -- --test-threads=1 --nocapture
+          test -s "$output/manifest.json"
 
   macos-check:
     name: Freya macOS compile
