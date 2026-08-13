@@ -74,8 +74,8 @@ const startOpenModelsService = async ({ port, cacheRoot, runtime } = {}) => {
   return service
 }
 
-test('elephant.open-models starts the real service, discovers the cached GGUF and answers through llama-server', async (fixtures, testInfo) => {
-  void fixtures
+test('elephant.open-models starts the real service, discovers the cached GGUF and answers through llama-server', async ({ browserName }, testInfo) => {
+  void browserName
   const runtime = await loadRuntime()
   const { TEST_MODEL } = runtime
   await assertExecutable('elephant.open-models service', OPEN_MODELS_SERVICE)
@@ -158,8 +158,8 @@ test('elephant.open-models starts the real service, discovers the cached GGUF an
   }
 })
 
-test('elephant.ai-ocr starts the real sidecar and recognizes text with the installed Tesseract runtime', async (fixtures, testInfo) => {
-  void fixtures
+test('elephant.ai-ocr starts the real sidecar and recognizes text with the installed Tesseract runtime', async ({ browserName }, testInfo) => {
+  void browserName
   const runtime = await loadRuntime()
   await assertExecutable('elephant.ai-ocr sidecar', OCR_SIDECAR)
   const fixturePath = testInfo.outputPath('elephant-ocr-fixture.png')
@@ -204,8 +204,8 @@ test('elephant.ai-ocr starts the real sidecar and recognizes text with the insta
   }
 })
 
-test('elephant.knowledge indexes the real vault and stores vectors returned by the cached local model', async (fixtures, testInfo) => {
-  void fixtures
+test('elephant.knowledge indexes the real vault and stores vectors returned by the cached local model', async ({ browserName }, testInfo) => {
+  void browserName
   const runtime = await loadRuntime()
   await assertExecutable('elephant.open-models service', OPEN_MODELS_SERVICE)
   await assertExecutable('elephant.knowledge service', KNOWLEDGE_SERVICE)
