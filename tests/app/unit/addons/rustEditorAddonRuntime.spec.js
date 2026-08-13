@@ -9,13 +9,18 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8')
 
 describe('Rust editor addon runtime', () => {
   it('publishes semantic blocks and document change events', () => {
-    const container = document.createElement('section')
-    const code = document.createElement('pre')
-    code.dataset.elephantEditorNode = '7'
-    code.dataset.elephantEditorLayer = 'block'
-    code.dataset.elephantEditorKind = 'code_block'
-    code.dataset.language = 'python'
-    container.append(code)
+    const attributes = new Map([
+      ['data-elephant-editor-node', '7'],
+      ['data-elephant-editor-layer', 'block'],
+      ['data-elephant-editor-kind', 'code_block'],
+      ['data-language', 'python']
+    ])
+    const code = {
+      getAttribute: (name) => attributes.get(name) ?? null
+    }
+    const container = {
+      querySelectorAll: vi.fn(() => [code])
+    }
 
     const bridge = {
       revision: 3,
@@ -60,7 +65,8 @@ describe('Rust editor addon runtime', () => {
     expect(trusted).not.toContain("host?.get('muya')")
     expect(trusted).toContain("host?.get('editor.runtime')")
     expect(renderer).toContain("data-elephant-editor-kind")
-    expect(runtime).toContain("host.provide('editor.runtime'")
+    expect(runtime).toContain('createAddonRuntimeContext({')
+    expect(runtime).toContain("'editor.runtime': editorRuntimeBinding.resource")
     expect(runtime).not.toContain('ag-fence-code')
     expect(codeExecution).toContain("runtime?.engine === 'rust'")
   })
