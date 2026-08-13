@@ -55,7 +55,6 @@
           <template v-else>
             <div class="en-settings-page-title">
               <h1>{{ activeSectionMeta.label }}</h1>
-              <span v-if="activeSection === 'addons'" id="en-addons-title-actions" class="en-settings-title-actions" />
             </div>
 
             <template v-if="activeSection === 'appearance'">

@@ -14,7 +14,7 @@ export async function launchSourceRenderer (run) {
       ELECTRON_ENABLE_LOGGING: '0'
     }
   })
-  const { app, page } = launched
+  const { page } = launched
   await page.setViewportSize({ width: run.viewport.width, height: run.viewport.height })
   if (page.viewportSize()?.width !== run.viewport.width || page.viewportSize()?.height !== run.viewport.height) {
     throw new Error('Electron Playwright page viewport did not match the shared scenario')

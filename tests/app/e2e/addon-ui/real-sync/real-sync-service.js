@@ -279,6 +279,7 @@ async function runRealSyncScenario({ artifactPath }) {
   let scenarioError = null
   let cleanup = {}
   let pairing = null
+  let artifact = null
   const transfers = []
   try {
     record('processes.spawned', {
@@ -368,7 +369,7 @@ async function runRealSyncScenario({ artifactPath }) {
     fs.rmSync(fixture.root, { recursive: true, force: true })
     cleanup.vaultsRemoved = !fs.existsSync(fixture.root)
     record('cleanup.vaults', { rootRemoved: cleanup.vaultsRemoved })
-    const artifact = {
+    artifact = {
       success: !scenarioError && cleanup.a.clean && cleanup.b.clean && cleanup.vaultsRemoved,
       binary: { path: binary.path, source: binary.source, sha256: sha256(binary.path) },
       pairing,
@@ -379,13 +380,13 @@ async function runRealSyncScenario({ artifactPath }) {
     }
     fs.mkdirSync(path.dirname(artifactPath), { recursive: true })
     fs.writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8')
-    if (scenarioError) throw new Error(`${scenarioError.message} (artifact: ${artifactPath})`)
-    assert.equal(cleanup.a.clean, true, 'device A service must exit cleanly after service.stop')
-    assert.equal(cleanup.b.clean, true, 'device B service must exit cleanly after service.stop')
-    assert.equal(cleanup.processesExited, true, 'both real service processes must exit')
-    assert.equal(cleanup.vaultsRemoved, true, 'temporary vaults must be removed')
-    return artifact
   }
+  if (scenarioError) throw new Error(`${scenarioError.message} (artifact: ${artifactPath})`)
+  assert.equal(cleanup.a.clean, true, 'device A service must exit cleanly after service.stop')
+  assert.equal(cleanup.b.clean, true, 'device B service must exit cleanly after service.stop')
+  assert.equal(cleanup.processesExited, true, 'both real service processes must exit')
+  assert.equal(cleanup.vaultsRemoved, true, 'temporary vaults must be removed')
+  return artifact
 }
 
 module.exports = { runRealSyncScenario }

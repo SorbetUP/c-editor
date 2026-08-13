@@ -1,6 +1,6 @@
 import path from 'node:path'
 import os from 'node:os'
-import { mkdir, mkdtemp, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp } from 'node:fs/promises'
 
 import { loadScenario, materializeFixture } from '../../tools/freya-differential/lib/scenario.mjs'
 

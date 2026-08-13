@@ -3,8 +3,8 @@ import path from 'node:path'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { browser } from '@wdio/globals'
 
-import { expectedActions, expectedCheckpoints, loadScenario } from '../../../tools/freya-differential/lib/scenario.mjs'
-import { byText, captureFrame, displayed, railOrder, requireElement, sleep, snapshotVault, stateSnapshot, visibleByText, writeJson } from '../runtime.mjs'
+import { expectedActions, loadScenario } from '../../../tools/freya-differential/lib/scenario.mjs'
+import { captureFrame, railOrder, requireElement, sleep, snapshotVault, stateSnapshot, visibleByText, writeJson } from '../runtime.mjs'
 
 const projectRoot = path.resolve(import.meta.dirname, '../../..')
 const scenarioPath = path.resolve(process.env.DIFFERENTIAL_SCENARIO_PATH ?? path.join(projectRoot, 'migration/freya/differential-scenarios.json'))
@@ -13,7 +13,6 @@ const fixtureRoot = path.resolve(process.env.DIFFERENTIAL_FIXTURE_ROOT ?? path.j
 const vaultRoot = path.join(fixtureRoot, 'vault')
 const scenario = await loadScenario(scenarioPath)
 const actions = expectedActions(scenario)
-const checkpoints = expectedCheckpoints(scenario)
 const manifest = {
   schemaVersion: 1,
   scenarioId: scenario.id,

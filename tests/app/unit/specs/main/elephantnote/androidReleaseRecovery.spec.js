@@ -71,8 +71,10 @@ describe('Android release recovery', () => {
     expect(mainContent).toContain('v-if="hasOpenNote"')
     expect(noteEditor).toContain('<note-editor-top-bar')
     expect(noteEditor).toContain('<editor-with-tabs')
-    expect(runtimeEditor).toContain("import Muya from 'muya/lib'")
-    expect(runtimeEditor).toContain('editor.value = new Muya(ele, options)')
+    expect(runtimeEditor).toContain("import { RustMuyaRuntimeEditor } from '@/muya'")
+    expect(runtimeEditor).toContain("import { createRustEditorRuntimeBinding } from '@/muya/editorRuntimeResource'")
+    expect(runtimeEditor).not.toContain("import Muya from 'muya/lib'")
+    expect(runtimeEditor).not.toContain('new Muya(')
   })
 
   it('registers every vault binary command used by the Android file facade', () => {

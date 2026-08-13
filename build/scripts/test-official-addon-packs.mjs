@@ -519,7 +519,7 @@ const findCommand = (state, addonId, suffix) => state.registrations.commands.fin
 
 const exercise = async (entry, runtime, instance) => {
   const { id } = entry
-  const { state, api, browserWindow } = runtime
+  const { state, browserWindow } = runtime
   if (id === 'elephant.dashboard') {
     const command = findCommand(state, id, '.open')
     assert.ok(command, `${id}: Dashboard command was not registered`)

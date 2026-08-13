@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { rmSync } from 'node:fs'
 import path from 'node:path'
 
 import { createAcceptanceClient, stopProcessTree, waitForAcceptanceEndpoint } from './acceptance-client.mjs'
@@ -12,7 +12,7 @@ import { validateSharedCaptureManifest } from './manifest.mjs'
 import { createFrameCapture, measureContent, refreshWindow, waitForTauriWindow } from './native-capture.mjs'
 import { probePlaywrightTauriAttach } from './playwright-probe.mjs'
 import { loadSharedScenario } from './scenario.mjs'
-import { listNativeWindows, setWindowGeometry } from './native-window.mjs'
+import { setWindowGeometry } from './native-window.mjs'
 
 const { log, appendProcessOutput, write: writeLogs } = createRunLogger()
 
