@@ -36,7 +36,33 @@ jobs:
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
       - name: Test Freya library
-        run: timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+          CARGO_TERM_COLOR: never
+        run: |
+          set -uo pipefail
+          log=/tmp/freya-lib.log
+          set +e
+          timeout 180 cargo test --verbose --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 --nocapture 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Freya library diagnostic extract"
+            grep -nE -B4 -A12 'error\[E[0-9]+\]|error:|panicked at|FAILED|failures:|Caused by:|thread .* panicked|signal:|SIG[A-Z]+|not found|No such file|undefined reference' "$log" | tail -n 300 || true
+            echo "::endgroup::"
+            {
+              echo "## Freya library tests failed"
+              echo
+              echo "Exit status: $status"
+              echo
+              echo '```text'
+              tail -n 300 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Freya library tests failed::cargo test --lib exited with status $status. Full uncaptured output and backtraces are in this step; the final 300 lines are also in the job summary."
+            exit "$status"
+          fi
 
       - name: Test Freya integration suites independently
         shell: bash
