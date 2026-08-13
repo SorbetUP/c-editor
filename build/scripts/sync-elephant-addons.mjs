@@ -56,6 +56,7 @@ const ensureLink = (linkName, target) => {
   if (pointsToTarget()) return
   try {
     fs.rmSync(linkPath, { recursive: true, force: true })
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true })
     fs.symlinkSync(target, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
   } catch (error) {
     // Another concurrent addons:sync may have created the correct link between
@@ -116,5 +117,6 @@ const materializeNativeServices = () => {
 
 ensureLink('addons', cacheRoot)
 ensureLink('packs', path.join(cacheRoot, 'packs'))
+ensureLink('Elephant/backend/tauri/resources/official-addons', path.join(cacheRoot, 'official'))
 materializeNativeServices()
 console.log(`[addons] materialized Elephant-Addons ${pinnedRef}`)
