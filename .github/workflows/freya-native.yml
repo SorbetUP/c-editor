@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
@@ -48,19 +48,37 @@ jobs:
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
+            diagnostic=/tmp/freya-lib-compile-diagnostic.log
+            grep -nE -B5 -A15 'error\[E[0-9]+\]|error:|could not compile|linking with|undefined reference|collect2:|ld:|signal:|SIG[A-Z]+|killed|No such file|not found|fatal error|cc:|clang:' "$log" | tail -n 400 > "$diagnostic" || true
+            if [ ! -s "$diagnostic" ]; then
+              tail -n 120 "$log" > "$diagnostic"
+            fi
             echo "::group::Freya library compile/link diagnostic"
-            grep -nE -B5 -A15 'error\[E[0-9]+\]|error:|could not compile|linking with|undefined reference|collect2:|ld:|signal:|SIG[A-Z]+|killed|No such file|not found' "$log" | tail -n 400 || true
+            cat "$diagnostic"
             echo "::endgroup::"
+            count=0
+            while IFS= read -r line && [ "$count" -lt 80 ]; do
+              [ -z "$line" ] && continue
+              escaped="${line//%/%25}"
+              escaped="${escaped//$'\r'/%0D}"
+              echo "::error title=Freya compile detail $((count + 1))::$escaped"
+              count=$((count + 1))
+            done < "$diagnostic"
             {
               echo "## Freya library test compilation failed"
               echo
               echo "Exit status: $status"
               echo
               echo '```text'
-              tail -n 400 "$log"
+              cat "$diagnostic"
+              echo '```'
+              echo
+              echo "### Tail of complete Cargo output"
+              echo '```text'
+              tail -n 250 "$log"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error title=Freya library test compilation failed::cargo test --lib --no-run exited with status $status. See the diagnostic group and job summary."
+            echo "::error title=Freya library test compilation failed::cargo test --lib --no-run exited with status $status. Compiler/linker diagnostics are exposed as annotations above."
             exit "$status"
           fi
 
@@ -183,7 +201,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
