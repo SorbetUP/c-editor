@@ -94,7 +94,7 @@ fn graph_canvas_captures_real_drag_pan_zoom_and_recenter_motion() {
     click_label(&mut runner, "Refresh graph");
     runner.sync_and_update();
 
-    let output = PathBuf::from("/private/tmp/elephant-freya-graph-canvas-motion");
+    let output = std::env::temp_dir().join("elephant-freya-graph-canvas-motion");
     fs::create_dir_all(&output).expect("create motion evidence directory");
     let start_path = output.join("start.png");
     let drag_path = output.join("during-node-drag.png");
