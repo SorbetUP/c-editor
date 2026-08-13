@@ -37,13 +37,6 @@ fn boxed_clipboard_error(message: &str) -> Box<dyn std::error::Error + Send + Sy
     Box::new(std::io::Error::other(message))
 }
 
-fn install_memory_clipboard(runner: &mut TestingRunner) {
-    // The provider is scoped to this headless runner and starts empty: only UI Copy may write it.
-    let provider: Box<dyn ClipboardProvider> =
-        Box::new(MemoryClipboard(Arc::new(Mutex::new(String::new()))));
-    runner.provide_root_context(|| State::create(Some(provider)));
-}
-
 struct FixtureVault {
     root: PathBuf,
 }
@@ -208,7 +201,12 @@ fn clipboard_paste_uses_freya_clipboard_and_preserves_muya_rich_markup() {
     let (mut runner, ()) = TestingRunner::new(
         move || app_with_vault(root.clone()),
         (1280., 840.).into(),
-        install_memory_clipboard,
+        |runner| {
+            // The provider is scoped to this headless runner and starts empty: only UI Copy may write it.
+            let provider: Box<dyn ClipboardProvider> =
+                Box::new(MemoryClipboard(Arc::new(Mutex::new(String::new()))));
+            runner.provide_root_context(|| State::create(Some(provider)));
+        },
         1.,
     );
 
