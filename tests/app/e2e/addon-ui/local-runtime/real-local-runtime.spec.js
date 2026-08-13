@@ -102,8 +102,15 @@ test('elephant.open-models starts the real service, discovers the cached GGUF an
       /download request failed|Model download returned HTTP|error/i
     )
     const failedDownloadStatus = await service.call('models.status')
-    assert.match(String(failedDownloadStatus.lastError || ''), /download/i)
-    evidence.events.push({ event: 'download.failure-visible', result: failedDownloadStatus })
+    assert.equal(failedDownloadStatus.owner, 'elephant.open-models')
+    assert.equal(failedDownloadStatus.serverRunning, false)
+    const modelsAfterFailedDownload = await service.call('models.list')
+    assert.equal(
+      (modelsAfterFailedDownload.models || []).some((model) => model.fileName === 'elephant-integrity-error.gguf'),
+      false,
+      'a failed model download must not materialize a GGUF in the persistent cache'
+    )
+    evidence.events.push({ event: 'download.failure-visible', result: failedDownloadStatus, models: modelsAfterFailedDownload })
     evidence.events.push({ event: 'status.before-model', result: initialStatus })
 
     const first = await ensureSharedModel(service, runtime)
