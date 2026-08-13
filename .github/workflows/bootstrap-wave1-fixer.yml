@@ -41,3 +41,4 @@ jobs:
           git diff --cached --check
           git commit -m "fix(ci): apply deterministic wave1 repairs"
           git push origin HEAD:parallel/freya-parity-integration-wave1
+# retry: structural-sync-fix
