@@ -35,32 +35,90 @@ jobs:
       - name: Check Freya shell
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
-      - name: Test Freya library
+      - name: Compile Freya library tests
         shell: bash
         env:
           RUST_BACKTRACE: full
           CARGO_TERM_COLOR: never
         run: |
           set -uo pipefail
-          log=/tmp/freya-lib.log
+          log=/tmp/freya-lib-compile.log
           set +e
-          timeout 180 cargo test --verbose --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 --nocapture 2>&1 | tee "$log"
+          timeout 180 cargo test --verbose --manifest-path Elephant/freya/Cargo.toml --lib --no-run 2>&1 | tee "$log"
           status=${PIPESTATUS[0]}
           set -e
           if [ "$status" -ne 0 ]; then
-            echo "::group::Freya library diagnostic extract"
-            grep -nE -B4 -A12 'error\[E[0-9]+\]|error:|panicked at|FAILED|failures:|Caused by:|thread .* panicked|signal:|SIG[A-Z]+|not found|No such file|undefined reference' "$log" | tail -n 300 || true
+            echo "::group::Freya library compile/link diagnostic"
+            grep -nE -B5 -A15 'error\[E[0-9]+\]|error:|could not compile|linking with|undefined reference|collect2:|ld:|signal:|SIG[A-Z]+|killed|No such file|not found' "$log" | tail -n 400 || true
             echo "::endgroup::"
             {
-              echo "## Freya library tests failed"
+              echo "## Freya library test compilation failed"
               echo
               echo "Exit status: $status"
               echo
               echo '```text'
-              tail -n 300 "$log"
+              tail -n 400 "$log"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error title=Freya library tests failed::cargo test --lib exited with status $status. Full uncaptured output and backtraces are in this step; the final 300 lines are also in the job summary."
+            echo "::error title=Freya library test compilation failed::cargo test --lib --no-run exited with status $status. See the diagnostic group and job summary."
+            exit "$status"
+          fi
+
+      - name: List Freya library tests
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+          CARGO_TERM_COLOR: never
+        run: |
+          set -uo pipefail
+          log=/tmp/freya-lib-list.log
+          set +e
+          timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --list 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Freya library test harness/list diagnostic"
+            grep -nE -B5 -A15 'error\[E[0-9]+\]|error:|panicked at|FAILED|failures:|thread .* panicked|signal:|SIG[A-Z]+|killed|No such file|not found' "$log" | tail -n 400 || true
+            echo "::endgroup::"
+            {
+              echo "## Freya library test listing failed"
+              echo
+              echo "Exit status: $status"
+              echo
+              echo '```text'
+              tail -n 400 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Freya library test listing failed::cargo test --lib -- --list exited with status $status. See the diagnostic group and job summary."
+            exit "$status"
+          fi
+
+      - name: Run Freya library tests
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+          CARGO_TERM_COLOR: never
+        run: |
+          set -uo pipefail
+          log=/tmp/freya-lib-run.log
+          set +e
+          timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --lib -- --test-threads=1 --nocapture 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Freya library runtime diagnostic"
+            grep -nE -B6 -A18 'test .* \.\.\. FAILED|panicked at|thread .* panicked|failures:|test result: FAILED|assertion|Error:|error:|signal:|SIG[A-Z]+|killed|timeout' "$log" | tail -n 500 || true
+            echo "::endgroup::"
+            {
+              echo "## Freya library test execution failed"
+              echo
+              echo "Exit status: $status"
+              echo
+              echo '```text'
+              tail -n 500 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Freya library test execution failed::cargo test --lib exited with status $status. See the diagnostic group and job summary."
             exit "$status"
           fi
 
