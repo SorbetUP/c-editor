@@ -33,7 +33,7 @@ concurrency:
 jobs:
   native-runtimes:
     name: macOS native addon runtime and cached model proof
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       ELEPHANT_E2E_LOCAL_RUNTIME_CACHE: ${{ github.workspace }}/.cache/elephant-e2e/local-runtime
