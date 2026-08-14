@@ -51,11 +51,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["/Users/sorbet/Desktop/Dev/c-editor/Elephant/backend/tauri/resources/official-addons"],
+    "resources": ["resources/official-addons"],
     "icon": [
-      "/Users/sorbet/Desktop/Dev/c-editor/Elephant/assets/static/icon.png",
-      "/Users/sorbet/Desktop/Dev/c-editor/Elephant/assets/static/icon.icns",
-      "/Users/sorbet/Desktop/Dev/c-editor/Elephant/assets/static/icon.ico"
+      "../../assets/static/icon.png",
+      "../../assets/static/icon.icns",
+      "../../assets/static/icon.ico"
     ]
   },
   "plugins": {
