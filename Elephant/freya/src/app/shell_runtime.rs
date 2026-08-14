@@ -70,6 +70,11 @@ fn load_from_vault(vault: VaultAdapter) -> ShellState {
     ));
     state.sidebar_visible = preferences.sidebar_visible;
     state.sidebar_width = preferences.sidebar_width;
+    state.library.pinned_paths = preferences
+        .pinned_paths
+        .into_iter()
+        .map(|path| crate::library_contract::RelativePath::from(path.as_str()))
+        .collect();
     state.rail_order = if preferences.rail_order_persisted {
         preferences.rail_order.clone()
     } else {

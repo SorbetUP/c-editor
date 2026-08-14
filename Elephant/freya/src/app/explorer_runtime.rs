@@ -6,8 +6,8 @@
 
 use crate::{
     search_graph_contract::{
-        SearchMatchType, SearchRequest, SearchResult, SearchSnippet, SearchStatus,
-        SearchStatusKind, SurfaceError,
+        ConceptCandidate, EvidenceChunk, SearchMatchType, SearchRequest, SearchResult,
+        SearchSnippet, SearchStatus, SearchStatusKind, SurfaceError,
     },
     vault_adapter::VaultAdapter,
 };
@@ -64,7 +64,7 @@ fn dispatch_search_command(
                         request_id,
                         &request.query,
                         execution.results,
-                        Vec::new(),
+                        execution.concepts,
                     );
                     if !accepted {
                         eprintln!(
@@ -256,6 +256,7 @@ fn dispatch_graph_command(
 
 pub(super) struct SearchExecution {
     pub results: Vec<SearchResult>,
+    pub concepts: Vec<ConceptCandidate>,
     pub status: SearchStatus,
 }
 
@@ -316,7 +317,6 @@ pub(super) fn search(
             );
             SurfaceError::Unknown(format!("Search failed: {error}"))
         })?;
-    let result_count = hits.len();
     let results = hits
         .into_iter()
         .map(|hit| SearchResult {
@@ -327,7 +327,7 @@ pub(super) fn search(
             excerpt: hit.excerpt.clone(),
             tags: hit.tags,
             score: hit.score as f32,
-            match_type: SearchMatchType::Keyword,
+            match_type: SearchMatchType::Unknown,
             snippets: vec![SearchSnippet {
                 text: hit.excerpt,
                 score: hit.score as f32,
@@ -335,12 +335,15 @@ pub(super) fn search(
             updated_at: String::new(),
         })
         .collect::<Vec<_>>();
+    let result_count = results.len();
+    let concepts = concept_candidates(&results);
     eprintln!(
         "[freya][search] action=complete request_id={} results={}",
         request_id, result_count
     );
     Ok(SearchExecution {
         results,
+        concepts,
         status: SearchStatus {
             status: SearchStatusKind::Ready,
             vault_path: vault.descriptor().path.clone(),
@@ -350,4 +353,56 @@ pub(super) fn search(
             error: String::new(),
         },
     })
+}
+
+fn concept_candidates(results: &[SearchResult]) -> Vec<ConceptCandidate> {
+    let mut candidates = Vec::new();
+    for result in results {
+        let path = result.relative_path.replace('\\', "/");
+        let parts = path.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+        let id = if parts.len() > 1 {
+            parts[0].to_owned()
+        } else {
+            parts
+                .last()
+                .copied()
+                .unwrap_or(result.title.as_str())
+                .trim_end_matches(".md")
+                .to_owned()
+        };
+        let index = candidates
+            .iter()
+            .position(|candidate: &ConceptCandidate| candidate.id == id)
+            .unwrap_or_else(|| {
+                candidates.push(ConceptCandidate {
+                    id: id.clone(),
+                    title: id,
+                    aliases: Vec::new(),
+                    score: 0.,
+                    confidence: 0.,
+                    match_type: SearchMatchType::Concept,
+                    evidence_chunks: Vec::new(),
+                });
+                candidates.len() - 1
+            });
+        let candidate = &mut candidates[index];
+        candidate.score += result.score.max(1.0);
+        candidate.confidence = candidate.score.min(1.);
+        if candidate.evidence_chunks.len() < 4 {
+            candidate.evidence_chunks.push(EvidenceChunk {
+                id: format!("{}:0", result.relative_path),
+                document_path: result.relative_path.clone(),
+                relative_path: result.relative_path.clone(),
+                chunk_index: 0,
+                heading_path: Vec::new(),
+                score: result.score,
+                preview: result.excerpt.clone(),
+            });
+        }
+    }
+    for candidate in &mut candidates {
+        candidate.score = candidate.score.min(1.);
+        candidate.confidence = candidate.score;
+    }
+    candidates
 }

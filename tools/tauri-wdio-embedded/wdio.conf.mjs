@@ -1,6 +1,7 @@
 import path from 'node:path'
 import os from 'node:os'
-import { mkdir, mkdtemp, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { browser } from '@wdio/globals'
 
 import { loadScenario, materializeFixture } from '../../tools/freya-differential/lib/scenario.mjs'
 
@@ -21,6 +22,32 @@ const fixtureRoot = path.resolve(
 await mkdir(outputRoot, { recursive: true })
 await mkdir(fixtureRoot, { recursive: true })
 if (!process.env.DIFFERENTIAL_FIXTURE_ROOT) await materializeFixture(scenario, fixtureRoot)
+const fixtureRoots = scenario.fixture?.roots ?? { vault: 'vault', config: 'config', userData: 'user-data' }
+const vaultRoot = path.join(fixtureRoot, fixtureRoots.vault)
+const configRoot = path.join(fixtureRoot, fixtureRoots.config)
+await writeFile(
+  path.join(configRoot, 'tauri-vaults.json'),
+  `${JSON.stringify({
+    schemaVersion: 1,
+    vaults: [{
+      id: 'e2e-vault',
+      name: 'E2E Vault',
+      path: vaultRoot,
+      icon: 'vault',
+      lastOpenedAt: '2026-06-22T10:00:00.000Z',
+      enabled: true
+    }],
+    activeVaultId: 'e2e-vault'
+  }, null, 2)}\n`,
+  'utf8'
+)
+await writeFile(
+  path.join(configRoot, 'preferences.json'),
+  `${JSON.stringify({
+    iconRailOrder: ['vault', 'sidebar-toggle', 'search']
+  }, null, 2)}\n`,
+  'utf8'
+)
 const appBinaryPath = path.resolve(
   process.env.ELEPHANT_TAURI_ACCEPTANCE_BINARY ??
     path.join(projectRoot, 'Elephant/backend/tauri/target/debug/Elephant')
@@ -52,6 +79,18 @@ export const config = {
   reporters: ['spec'],
   mochaOpts: {
     timeout: 300000
+  },
+  before: async function () {
+    // The embedded service's automatic focus recovery relies on the optional
+    // Tauri core.invoke bridge. Selecting the current WebDriver window once
+    // marks it as explicit and keeps the service from probing that bridge on
+    // every DOM command. The app remains the real Tauri window/session.
+    await browser.switchToWindow(await browser.getWindowHandle())
+    const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1)
+    await browser.setWindowSize(
+      Math.round(scenario.viewport.width * devicePixelRatio),
+      Math.round(scenario.viewport.height * devicePixelRatio)
+    )
   },
   capabilities: [{
     browserName: 'tauri',

@@ -558,9 +558,14 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     rect()
         .width(Size::px(f32::from(snapshot.sidebar_width.get())))
         .height(Size::fill())
-        .horizontal()
         .child(sidebar)
-        .child(resizer)
+        .child(
+            rect()
+                .position(Position::new_absolute().top(0.).right(0.))
+                .width(Size::px(theme::SIDEBAR_RESIZER_WIDTH))
+                .height(Size::fill())
+                .child(resizer),
+        )
         .into_element()
 }
 

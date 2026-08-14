@@ -10,6 +10,7 @@ mod graph_canvas;
 mod library;
 mod navigation;
 mod navigation_icons;
+mod search_overlay_view;
 mod settings;
 mod settings_effects;
 mod shell_gestures;
@@ -47,6 +48,7 @@ struct ShellState {
     search_open: bool,
     settings_open: bool,
     editor: Option<EditorDocument>,
+    editor_tag_draft: Option<String>,
     error: Option<String>,
     navigation_history: Vec<NavigationTarget>,
     navigation_index: usize,
@@ -71,6 +73,7 @@ impl ShellState {
             search_open: false,
             settings_open: false,
             editor: None,
+            editor_tag_draft: None,
             error: None,
             navigation_history: Vec::new(),
             navigation_index: 0,
@@ -157,6 +160,17 @@ impl ShellState {
             }
             Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    fn toggle_pinned(&mut self, path: crate::library_contract::RelativePath) {
+        let path_for_log = path.clone();
+        self.library.toggle_pinned(path);
+        self.persist_shell_preferences();
+        eprintln!(
+            "[freya][library] action:pin-toggle path={} pinned={}",
+            path_for_log.as_str(),
+            self.library.pinned_paths.iter().any(|pinned| pinned == &path_for_log)
+        );
     }
 
     fn create(&mut self, action: crate::library_contract::CreateAction) {
@@ -284,7 +298,7 @@ fn app_shell(state: State<ShellState>) -> Element {
         .expect("AppShell source contract must remain registered");
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state)
-    } else if snapshot.search_open || snapshot.view == WorkspaceView::Graph {
+    } else if snapshot.view == WorkspaceView::Graph {
         explorer::explorer_view(
             explorer_state,
             explorer_query,
@@ -318,6 +332,10 @@ fn app_shell(state: State<ShellState>) -> Element {
                 )
                 .child(content),
         )
+        .maybe_child((snapshot.editor.is_none()).then(|| library::create_fab(state)))
+        .maybe_child(snapshot.search_open.then(|| {
+            explorer::search_overlay(explorer_state, explorer_query)
+        }))
         .a11y_alt(contract.provenance.component.source_name());
 
     if snapshot.menu_open {

@@ -8,7 +8,16 @@ on:
     paths:
       - "Elephant/freya/**"
       - "Elephant/crates/muya-core/**"
+      - "Elephant/frontend/**"
       - "Elephant/backend/knowledge-core/**"
+      - "Elephant/backend/tauri/**"
+      - "migration/freya/**"
+      - "tools/freya-differential/**"
+      - "tools/tauri-visual-capture/**"
+      - "tools/tauri-wdio-embedded/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/actions/setup/**"
       - ".github/workflows/freya-native.yml"
 
 permissions:
@@ -213,6 +222,7 @@ jobs:
           output="$root/output"
           rm -rf "$root"
           mkdir -p "$fixture" "$output"
+          viewport_json=
           viewport_json="$(node --input-type=module - "$fixture" <<'NODE'
           import path from 'node:path'
           import { loadScenario, materializeFixture } from './tools/freya-differential/lib/scenario.mjs'
@@ -229,7 +239,8 @@ jobs:
           export DIFFERENTIAL_FIXTURE_ROOT="$fixture"
           export DIFFERENTIAL_EXPECTED_VIEWPORT_JSON="$viewport_json"
           export DIFFERENTIAL_RUN_ID="freya-native-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          export DIFFERENTIAL_COMMAND_SHA256="$(printf '%s' 'cargo test --manifest-path Elephant/freya/Cargo.toml --test differential_freya_capture -- --test-threads=1 --nocapture' | sha256sum | cut -d' ' -f1)"
+          differential_command_sha256="$(printf '%s' 'cargo test --manifest-path Elephant/freya/Cargo.toml --test differential_freya_capture -- --test-threads=1 --nocapture' | sha256sum | cut -d' ' -f1)"
+          export DIFFERENTIAL_COMMAND_SHA256="$differential_command_sha256"
           export DIFFERENTIAL_CAPTURE_NONCE="freya-native-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
           timeout 180 cargo test --manifest-path Elephant/freya/Cargo.toml --test differential_freya_capture -- --test-threads=1 --nocapture
           test -s "$output/manifest.json"
@@ -253,3 +264,90 @@ jobs:
 
       - name: Check Freya shell and native vault dialog on macOS
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
+
+  differential-comparison:
+    name: Default Tauri / Freya differential
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install workspace dependencies
+        uses: ./.github/actions/setup
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/backend/tauri -> target
+            Elephant/freya -> target
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version '^2.10.0' --locked
+
+      - name: Install Tauri WebDriver runner
+        run: pnpm --dir tools/tauri-wdio-embedded --ignore-workspace install --frozen-lockfile
+
+      - name: Build Default Tauri acceptance binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd Elephant/backend/tauri
+          cargo tauri build --debug --no-bundle --features acceptance-wdio --config tauri.wdio.conf.json 2>&1 | tee ../../../tauri-wdio-build.log
+          test -x target/debug/Elephant
+
+      - name: Compare Default Tauri and Freya journeys
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/test-results/freya-differential-orchestrated"
+          rm -rf "$root"
+          mkdir -p "$root"
+          tauri_command='pnpm --dir tools/tauri-wdio-embedded --ignore-workspace exec wdio run wdio.conf.mjs'
+          freya_command='cargo test --manifest-path Elephant/freya/Cargo.toml --test differential_freya_capture -- --test-threads=1 --nocapture'
+          node tools/freya-differential/orchestrate.mjs \
+            --tauri-command "$tauri_command" \
+            --freya-command "$freya_command" \
+            --scenario migration/freya/differential-scenarios.json \
+            --output "$root" \
+            --timeout-ms 600000
+          node --input-type=module - "$root" <<'NODE'
+          import fs from 'node:fs'
+          import path from 'node:path'
+
+          const root = process.argv[2]
+          const report = JSON.parse(fs.readFileSync(path.join(root, 'orchestration-report.json'), 'utf8'))
+          const comparison = report.comparison ?? {}
+          const comparisons = Array.isArray(comparison.comparisons) ? comparison.comparisons : []
+          const maxChangedPixelRatio = comparisons.reduce((max, item) => Math.max(max, Number(item.pixels?.differentRatio ?? 0)), 0)
+          const differentFrames = comparisons.filter((item) => item.status !== 'passed' && item.status !== 'passed-byte-identical').length
+          const summary = [
+            '## Default Tauri / Freya differential',
+            '',
+            `- Status: **${report.status}**`,
+            `- Actions: ${report.summary?.actions?.compared ?? 0}/${report.summary?.actions?.expected ?? 0}`,
+            `- Compared frames: ${report.summary?.frames?.compared ?? comparison.summary?.files?.compared ?? 0}`,
+            `- Different frames: ${differentFrames}`,
+            `- Max changed-pixel ratio: ${maxChangedPixelRatio}`,
+            `- Evidence: uploaded in the workflow artifact under \`${root}\``,
+          ]
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\\n')}\\n`)
+          if (report.status !== 'ok') {
+            throw new Error(`Differential orchestration status was ${report.status}`)
+          }
+          NODE
+
+      - name: Upload Default Tauri / Freya evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freya-default-differential-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/freya-differential-orchestrated/**
+            tauri-wdio-build.log
+          if-no-files-found: warn
+          retention-days: 30

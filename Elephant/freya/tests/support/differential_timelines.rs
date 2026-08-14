@@ -6,7 +6,7 @@ use crate::{
 use freya::prelude::*;
 use freya_testing::{
     prelude::{KeyboardEventName, PlatformEvent},
-    TestingRunner,
+    TestingNode, TestingRunner,
 };
 use std::{path::Path, time::Duration};
 
@@ -57,8 +57,16 @@ fn interpolate(points: &[(f64, f64)], progress: f64) -> (f64, f64) {
     )
 }
 
+fn pointer_target(runner: &TestingRunner, label: &str) -> TestingNode {
+    if label == "Alpha note" {
+        crate::differential_ui::require_note_card(runner, label)
+    } else {
+        require_label(runner, label)
+    }
+}
+
 fn target_path(runner: &TestingRunner, label: &str, names: &[String]) -> Vec<(f64, f64)> {
-    let area = require_label(runner, label).layout().area;
+    let area = pointer_target(runner, label).layout().area;
     let middle_point = area.center().to_f64();
     let middle = (middle_point.x, middle_point.y);
     names
@@ -87,7 +95,10 @@ pub fn pointer_timeline(
     label: &str,
     path_names: &[String],
 ) -> Vec<FrameEvidence> {
-    let before_background = background_for_label(runner, label);
+    let before_background = Rect::try_downcast(pointer_target(runner, label).element().as_ref())
+        .expect("pointer target must be a rendered Rect")
+        .style
+        .background;
     let points = target_path(runner, label, path_names);
     let mut frames = vec![capture_frame(runner, output, action, 0)];
     let mut previous_ms = action.frames[0];
@@ -104,7 +115,10 @@ pub fn pointer_timeline(
     );
     assert_ne!(
         before_background,
-        background_for_label(runner, label),
+        Rect::try_downcast(pointer_target(runner, label).element().as_ref())
+            .expect("pointer target must be a rendered Rect")
+            .style
+            .background,
         "HARD_ISSUE {}: visible target {label:?} did not expose a rendered hover/drop style transition",
         action.id
     );

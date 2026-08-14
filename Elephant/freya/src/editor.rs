@@ -344,6 +344,20 @@ impl EditorDocument {
         self.session.markdown()
     }
 
+    /// Replaces the document through the same revisioned adapter used by
+    /// keyboard edits. Metadata controls (title/tags) use this path so they
+    /// remain real dirty, autosaveable editor mutations instead of display
+    /// state that disappears on the next render.
+    pub fn replace_markdown(&mut self, markdown: String) {
+        let before = self.serialize();
+        if before == markdown {
+            return;
+        }
+        self.session = EditorSession::from_markdown(&markdown);
+        let update = self.session.snapshot();
+        self.record_mutation(before, update);
+    }
+
     pub fn dispatch(&mut self, action: EditorAction) -> Result<EditorUpdate, EditorError> {
         let moves_table_focus = matches!(&action, EditorAction::TableNavigation(_));
         let begins_composition = matches!(&action, EditorAction::BeginComposition);
@@ -415,6 +429,24 @@ impl EditorDocument {
         self.session.set_selection(revision, selection)
     }
 
+    /// Moves the caret to the end of the currently editable block. Muya's
+    /// native editor treats Control/Command+End as an end-of-block command;
+    /// the browser surface keeps the same scroll position while doing so.
+    pub fn move_caret_to_end_of_block(
+        &mut self,
+        block_id: muya_core::NodeId,
+    ) -> Result<EditorUpdate, EditorError> {
+        let mut nodes = Vec::new();
+        collect_text_nodes(self.session.document(), block_id, &mut nodes);
+        let (node, value) = nodes
+            .last()
+            .ok_or(EditorError::Edit(EditError::UnsupportedStructure(block_id)))?;
+        self.set_selection(Selection::collapsed(SelectionPoint {
+            node: *node,
+            offset_utf16: value.encode_utf16().count() as u32,
+        }))
+    }
+
     pub fn insert_paragraph(&mut self) -> Result<EditorUpdate, EditorError> {
         let before = self.serialize();
         let revision = self.session.revision();
@@ -430,7 +462,10 @@ impl EditorDocument {
             }
             result => result,
         }
-        .map(|update| self.record_mutation(before, update))
+        .map(|update| {
+            self.focus_target = Some(update.selection.focus.node);
+            self.record_mutation(before, update)
+        })
     }
 
     pub fn delete_backward(&mut self) -> Result<EditorUpdate, EditorError> {
@@ -597,6 +632,23 @@ fn text_value(document: &muya_core::Document, node_id: muya_core::NodeId) -> Opt
     }
 }
 
+fn collect_text_nodes(
+    document: &muya_core::Document,
+    parent: muya_core::NodeId,
+    nodes: &mut Vec<(muya_core::NodeId, String)>,
+) {
+    for child in document.children(parent) {
+        match &child.kind {
+            NodeKind::Inline(InlineKind::Text { value }) => {
+                nodes.push((child.id, value.clone()));
+            }
+            NodeKind::Document | NodeKind::Block(_) | NodeKind::Inline(_) => {
+                collect_text_nodes(document, child.id, nodes);
+            }
+        }
+    }
+}
+
 fn next_utf16_boundary(value: &str, offset: u32) -> Option<u32> {
     let mut cursor = 0u32;
     for character in value.chars() {
@@ -754,6 +806,27 @@ mod tests {
         let redone = document.redo().expect("redo must succeed");
         assert_eq!(redone.markdown, "Xalpha");
         assert_eq!(document.serialize(), "Xalpha");
+    }
+
+    #[test]
+    fn moves_control_end_to_the_end_of_the_current_block() {
+        let mut document = EditorDocument::from_markdown("first paragraph\n\nsecond paragraph");
+        let block = document
+            .session()
+            .document()
+            .children(document.session().document().root)
+            .next()
+            .expect("first block must exist")
+            .id;
+
+        let update = document
+            .move_caret_to_end_of_block(block)
+            .expect("end-of-block movement must succeed");
+
+        let caret = update.selection.caret().expect("selection must collapse");
+        assert_eq!(text_value(document.session().document(), caret.node), Some("first paragraph"));
+        assert_eq!(caret.offset_utf16, "first paragraph".encode_utf16().count() as u32);
+        assert_eq!(document.serialize(), "first paragraph\n\nsecond paragraph");
     }
 
     #[test]

@@ -57,6 +57,16 @@ fn require_labeled_node(runner: &TestingRunner, label: &str) -> TestingNode {
         .unwrap_or_else(|| panic!("no Freya node has accessible label {label:?}"))
 }
 
+fn require_library_card(runner: &TestingRunner, label: &str) -> TestingNode {
+    runner
+        .find(|node, element| {
+            (element.accessibility().builder.label() == Some(label)
+                && node.layout().area.min_x() >= 290.)
+                .then_some(node)
+        })
+        .unwrap_or_else(|| panic!("no library card has accessible label {label:?}"))
+}
+
 fn click_label(runner: &mut TestingRunner, label: &str) {
     let node = require_labeled_node(runner, label);
     let area = node.layout().area;
@@ -220,4 +230,106 @@ fn shell_hover_changes_the_real_surface_and_escape_closes_the_create_menu() {
     assert_eq!(accessible_nodes(&runner, "Note").len(), 1);
     runner.press_key(freya::prelude::Key::Named(freya::prelude::NamedKey::Escape));
     assert_eq!(accessible_nodes(&runner, "Note").len(), 0);
+}
+
+#[test]
+fn create_trigger_toggles_the_menu_without_creating_an_entry() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Create");
+    assert_eq!(accessible_nodes(&runner, "Note").len(), 1);
+
+    click_label(&mut runner, "Create");
+    assert_eq!(
+        accessible_nodes(&runner, "Note").len(),
+        0,
+        "the second trigger click must close the existing menu"
+    );
+}
+
+#[test]
+fn creating_a_note_opens_it_and_close_returns_to_the_library() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Create");
+    click_label(&mut runner, "Note");
+    runner.sync_and_update();
+
+    assert_eq!(accessible_nodes(&runner, "Close note").len(), 1);
+    click_label(&mut runner, "Close note");
+    runner.sync_and_update();
+    assert!(accessible_nodes(&runner, "Untitled").len() >= 1);
+}
+
+#[test]
+fn card_actions_toggle_and_pin_closes_the_open_card_menu() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Note actions");
+    assert_eq!(accessible_nodes(&runner, "Rename").len(), 1);
+    click_label(&mut runner, "Note actions");
+    assert_eq!(accessible_nodes(&runner, "Rename").len(), 0);
+
+    let card = require_library_card(&runner, "Alpha");
+    let area = card.layout().area;
+    runner.move_cursor(
+        (
+            ((area.min_x() + area.max_x()) / 2.) as f64,
+            ((area.min_y() + area.max_y()) / 2.) as f64,
+        ),
+    );
+    runner.sync_and_update();
+    click_label(&mut runner, "Note actions");
+    click_label(&mut runner, "Pin entry");
+    assert_eq!(accessible_nodes(&runner, "Rename").len(), 0);
+    assert_eq!(accessible_nodes(&runner, "Unpin entry").len(), 1);
+}
+
+#[test]
+fn opening_a_nested_note_records_history_before_returning_to_its_folder() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Projects");
+    runner.sync_and_update();
+    click_label(&mut runner, "Plan");
+    runner.sync_and_update();
+    assert_eq!(accessible_nodes(&runner, "Close note").len(), 1);
+
+    click_label(&mut runner, "Close note");
+    runner.sync_and_update();
+    click_label(&mut runner, "Retour");
+    runner.sync_and_update();
+
+    assert!(
+        accessible_nodes(&runner, "Plan").len() >= 1,
+        "back after closing the note must return to the folder, not skip to the root"
+    );
 }

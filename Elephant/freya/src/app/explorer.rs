@@ -12,6 +12,7 @@ use freya::sdk::use_timeout;
 use std::time::Duration;
 
 use crate::{
+    app::navigation_icons::{svg_icon, Icon},
     search_graph_contract::{
         ConceptCandidate, GraphCommand, GraphEdge, GraphFilterState, GraphLoadState, GraphNode,
         GraphSnapshot, SearchCommand, SearchMatchType, SearchMode, SearchRequest, SearchResult,
@@ -202,7 +203,7 @@ impl ExplorerState {
         let query = query.into();
         self.search.query = query.clone();
         self.search.error = None;
-        self.search.selected_index = None;
+        self.search.selected_index = (!self.search.results.is_empty()).then_some(0);
         let Some(request) = SearchRequest::new(query, self.search.mode, SEARCH_QUERY_LIMIT_DEFAULT)
         else {
             self.search.clear();
@@ -535,6 +536,150 @@ impl ExplorerSearchState {
 
 /// Render the native surface.  Callers should drain `ExplorerState::take_pending`
 /// and execute those commands through the existing host bridge.
+///
+/// Search is opened by the rail while the library remains mounted underneath,
+/// matching the Vue `SearchModal` overlay contract.  The full Explorer
+/// workspace remains available for the explicit Graph route below.
+pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Element {
+    let input_value = query.read().clone();
+    let snapshot = state.read().clone();
+    let search_placeholder = if snapshot.search.query.is_empty() {
+        "Search notes, paths, tags, or ideas…".to_owned()
+    } else {
+        snapshot.search.query.clone()
+    };
+    let input = Input::new(query)
+        .flat()
+        .auto_focus(true)
+        .width(Size::fill())
+        .theme_colors(
+            InputColorsThemePartial::new()
+                .color(theme::color(theme::TEXT))
+                .placeholder_color(theme::color(theme::MUTED))
+                .background(Color::TRANSPARENT)
+                .focus_background(Color::TRANSPARENT)
+                .border_fill(Color::TRANSPARENT)
+                .focus_border_fill(Color::TRANSPARENT),
+        )
+        .placeholder(search_placeholder)
+        .on_submit({
+            let mut submit_state = state;
+            move |value: String| submit_state.write().submit_or_open_search(value)
+        });
+    let search_input = rect()
+        .key(("search-input-host", snapshot.search.query.clone()))
+        .width(Size::fill())
+        .a11y_alt("Search input")
+        .a11y_builder({
+            let accessibility_value = input_value.clone();
+            move |node| node.set_value(accessibility_value)
+        })
+        .child(input);
+    let mut key_state = state;
+    let mut key_query = query;
+    let clear = if !input_value.trim().is_empty() {
+        let mut clear_query = query;
+        let mut clear_state = state;
+        Some(
+            rect()
+                .width(Size::px(30.))
+                .height(Size::px(30.))
+                .center()
+                .background(Color::from_argb(36, 71, 84, 103))
+                .with_corner_radius(999.)
+                .on_mouse_up(move |_| {
+                    clear_query.set(String::new());
+                    clear_state.write().clear_search();
+                })
+                .a11y_alt("Clear search")
+                .child(
+                    label()
+                        .font_size(18.)
+                        .color(theme::color(theme::MUTED))
+                        .text("×"),
+                ),
+        )
+    } else {
+        None
+    };
+    let search_bar = rect()
+        .width(Size::fill())
+        .height(Size::px(72.))
+        .padding(Gaps::new(0., 18., 0., 24.))
+        .horizontal()
+        .spacing(14.)
+        .center()
+        .font_size(22.)
+        .font_weight(FontWeight::BOLD)
+        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
+        .background(Color::from_rgb(246, 248, 252))
+        .with_corner_radius(22.)
+        .child(svg_icon(Icon::Search, Color::from_rgb(26, 35, 53), 22.))
+        .child(search_input)
+        .maybe_child(clear);
+    let modal = rect()
+        .vertical()
+        .position(
+            Position::new_global()
+                .left(298.)
+                .top(142.),
+        )
+        .width(Size::px(686.))
+        .height(if snapshot.search.phase == ExplorerPhase::Idle {
+            Size::px(72.)
+        } else {
+            Size::px(282.)
+        })
+        // Freya composites child text through the modal background; keeping
+        // the shell opaque preserves the same readable foreground that the
+        // Vue glass shell gets from its backdrop-filter.
+        .background(Color::from_rgb(246, 248, 252))
+        .color(theme::color(theme::TEXT))
+        .with_corner_radius(28.)
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .shadow(Shadow::new().y(30.).blur(90.).color(Color::from_argb(61, 15, 23, 42)))
+        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_MODAL_LAYER))
+        .on_global_key_down(move |event: Event<KeyboardEventData>| {
+            if event.key != Key::Named(NamedKey::Escape) {
+                return;
+            }
+            let had_query = !key_query.read().trim().is_empty();
+            key_query.set(String::new());
+            if had_query {
+                key_state.write().clear_search();
+            } else {
+                key_state.write().close_search();
+            }
+        })
+        .child(search_bar);
+    let panel = if snapshot.search.phase == ExplorerPhase::Idle {
+        None
+    } else {
+        let content = if snapshot.search.phase == ExplorerPhase::Results {
+            super::search_overlay_view::render(state, &snapshot)
+        } else {
+            search_state_content(state, &snapshot)
+        };
+        Some(
+            rect()
+                .position(Position::new_global().left(298.).top(214.))
+                .width(Size::px(686.))
+                .height(Size::px(210.))
+                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
+                .child(content),
+        )
+    };
+    rect()
+        .position(Position::new_global().left(0.).top(0.))
+        .width(Size::fill())
+        .height(Size::fill())
+        .background(Color::from_argb(110, 230, 236, 245))
+        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_BACKDROP_LAYER))
+        .child(modal)
+        .maybe_child(panel)
+        .into_element()
+}
+
 pub fn explorer_view(
     state: State<ExplorerState>,
     query: State<String>,
@@ -665,7 +810,7 @@ fn search_surface(
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .padding(Gaps::new(0., 12., 12., 12.))
+        .padding(Gaps::new(0., 12., 12., 2.))
         .spacing(8.)
         .on_global_key_down(move |event: Event<KeyboardEventData>| match event.key {
             Key::Named(NamedKey::Escape) => {
@@ -687,14 +832,6 @@ fn search_surface(
 }
 
 fn search_state_content(state: State<ExplorerState>, snapshot: &ExplorerState) -> Element {
-    let status = snapshot.search.status.as_ref().map(|status| {
-        label().color(theme::color(theme::MUTED)).text(format!(
-            "Index: {} · {}/{} documents",
-            status.status.as_str(),
-            status.indexed_documents,
-            status.total_documents
-        ))
-    });
     let body = match snapshot.search.phase {
         ExplorerPhase::Idle => state_message("Search notes, paths, tags, or ideas…", false),
         ExplorerPhase::Loading => state_message("Searching locally…", true),
@@ -713,58 +850,24 @@ fn search_state_content(state: State<ExplorerState>, snapshot: &ExplorerState) -
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .background(theme::color(theme::SURFACE))
+        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_CONTENT_LAYER))
+        .color(theme::color(theme::TEXT))
         .with_corner_radius(12.)
         .padding(Gaps::new_all(12.))
         .spacing(8.)
-        .maybe_child(status)
         .child(body)
         .into_element()
 }
 
 fn search_results(state: State<ExplorerState>, snapshot: &ExplorerState) -> Element {
     let mut sections = Vec::new();
-    if !snapshot.search.concepts.is_empty() {
-        sections.push(
-            rect()
-                .spacing(4.)
-                .child(section_title("Wikis & concepts"))
-                .children(snapshot.search.concepts.iter().map(|concept| {
-                    let concept = concept.clone();
-                    let concept_for_action = concept.clone();
-                    rect()
-                        .width(Size::fill())
-                        .padding(Gaps::new_all(10.))
-                        .background(theme::color(theme::SOFT))
-                        .with_corner_radius(10.)
-                        .on_mouse_up({
-                            let mut state = state;
-                            move |_| state.write().open_concept(&concept_for_action)
-                        })
-                        .a11y_alt(format!("Open concept {}", concept.title))
-                        .child(
-                            label()
-                                .font_weight(FontWeight::BOLD)
-                                .text(concept.title.clone()),
-                        )
-                        .child(
-                            label()
-                                .font_size(12.)
-                                .color(theme::color(theme::MUTED))
-                                .text(format!(
-                                    "{}% · {} evidence chunks",
-                                    (concept.score * 100.) as i32,
-                                    concept.evidence_chunks.len()
-                                )),
-                        )
-                        .into_element()
-                }))
-                .into_element(),
-        );
+    if let Some(concept) = snapshot.search.concepts.first() {
+        sections.push(search_concept_section(state, concept));
     }
     if !snapshot.search.results.is_empty() {
         sections.push(
             rect()
+                .width(Size::fill())
                 .spacing(4.)
                 .child(section_title("Notes & passages"))
                 .children(
@@ -778,7 +881,7 @@ fn search_results(state: State<ExplorerState>, snapshot: &ExplorerState) -> Elem
                                 state,
                                 index,
                                 result,
-                                snapshot.search.selected_index == Some(index),
+                                snapshot.search.selected_index == Some(index) || index == 0,
                             )
                         }),
                 )
@@ -789,9 +892,63 @@ fn search_results(state: State<ExplorerState>, snapshot: &ExplorerState) -> Elem
     // results container. The production adapter is synchronous in the native
     // host, so the concrete result is already rendered in this same frame.
     rect()
+        .width(Size::fill())
         .spacing(10.)
         .a11y_alt("Searching locally…")
         .children(sections)
+        .into_element()
+}
+
+fn search_concept_section(state: State<ExplorerState>, concept: &ConceptCandidate) -> Element {
+    let concept = concept.clone();
+    let mut concept_state = state;
+    let title = concept.title.clone();
+    let evidence_count = concept.evidence_chunks.len();
+    let source = concept
+        .evidence_chunks
+        .first()
+        .map(|chunk| {
+            if chunk.heading_path.is_empty() {
+                if chunk.relative_path.is_empty() {
+                    chunk.document_path.clone()
+                } else {
+                    chunk.relative_path.clone()
+                }
+            } else {
+                chunk.heading_path.join(" › ")
+            }
+        })
+        .unwrap_or_else(|| "source chunk".to_owned());
+    let score = format!("{}%", (concept.score.clamp(0., 1.) * 100.).round() as u8);
+    let meta = format!(
+        "Wikis & concepts · {title} · {} source chunk{} · {source} · {score}",
+        evidence_count,
+        if evidence_count == 1 { "" } else { "s" }
+    );
+    rect()
+        .width(Size::fill())
+        .spacing(4.)
+        .child(section_title("WIKIS & CONCEPTS"))
+        .child(
+            rect()
+                .width(Size::fill())
+                .height(Size::px(58.))
+                .padding(Gaps::new(10., 12., 10., 12.))
+                .horizontal()
+                .background(Color::from_rgb(235, 241, 252))
+                .border(Border::new().fill(Color::from_rgb(190, 205, 235)).width(1.))
+                .with_corner_radius(14.)
+                .on_mouse_up(move |_| concept_state.write().open_concept(&concept))
+                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_CONTENT_LAYER))
+                .child(
+                    rect()
+                        .width(Size::px(520.))
+                        .height(Size::fill())
+                        .spacing(2.)
+                        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
+                        .child(label().font_size(12.).color(theme::color(theme::TEXT)).text(meta)),
+                ),
+        )
         .into_element()
 }
 
@@ -802,36 +959,91 @@ fn search_result_row(
     selected: bool,
 ) -> Element {
     let result = result.clone();
-    rect()
-        .width(Size::fill())
-        .padding(Gaps::new_all(10.))
-        .background(if selected {
-            theme::color(theme::SOFT)
-        } else {
-            theme::color(theme::BG)
-        })
-        .with_corner_radius(10.)
-        .on_mouse_up(move |_| state.write().open_search_result(index))
-        .a11y_alt(format!("Open note {}", result.title))
-        .child(label().font_weight(FontWeight::BOLD).text(format!(
-            "{}  [{}]",
-            result.title,
-            match_label(result.match_type)
-        )))
+    let badge = rect()
+        .height(Size::px(22.))
+        .padding(Gaps::new(0., 9., 0., 9.))
+        .center()
+        .background(Color::from_argb(61, 37, 99, 235))
+        .with_corner_radius(999.)
+        .child(
+            label()
+                .font_size(11.)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(theme::PRIMARY))
+                .text(match_label(result.match_type)),
+        );
+    let body = rect()
+        .width(Size::flex(1.))
+        .height(Size::fill())
+        .spacing(4.)
+        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
+        .child(
+            rect()
+                .width(Size::fill())
+                .horizontal()
+                .main_align(Alignment::SpaceBetween)
+                .spacing(8.)
+                .child(
+                    label()
+                        .font_size(15.)
+                        .font_weight(FontWeight::BOLD)
+                        .color(Color::from_argb(255, 16, 24, 40))
+                        .text(result.title.clone()),
+                )
+                .child(badge),
+        )
         .child(
             label()
                 .font_size(12.)
-                .color(theme::color(theme::MUTED))
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(theme::PRIMARY))
                 .text(result.relative_path.clone()),
         )
+        ;
+    rect()
+        .width(Size::fill())
+        .height(Size::px(70.))
+        .padding(Gaps::new(12., 14., 12., 14.))
+        .horizontal()
+        .spacing(12.)
+        .background(if selected {
+            Color::from_rgb(215, 225, 249)
+        } else {
+            Color::from_rgb(246, 248, 252)
+        })
+        .color(theme::color(theme::TEXT))
+        .with_corner_radius(16.)
+        .on_mouse_up(move |_| state.write().open_search_result(index))
+        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_CONTENT_LAYER))
+        .a11y_alt(format!("Open note {}", result.title))
         .child(
-            label().font_size(13.).text(
-                result
-                    .snippets
-                    .first()
-                    .map(|s| s.text.clone())
-                    .unwrap_or_else(|| result.excerpt.clone()),
-            ),
+            rect()
+                .width(Size::px(38.))
+                .height(Size::px(38.))
+                .center()
+                .background(Color::from_argb(87, 255, 255, 255))
+                .with_corner_radius(14.)
+                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
+                .child(
+                    label()
+                        .font_size(18.)
+                        .color(theme::color(theme::PRIMARY))
+                        .text("▤"),
+                ),
+        )
+        .child(body)
+        .child(
+            rect()
+                .width(Size::px(30.))
+                .height(Size::px(30.))
+                .center()
+                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
+                .child(
+                    label()
+                        .font_size(18.)
+                        .color(theme::color(theme::MUTED))
+                        .text("↗"),
+                ),
         )
         .into_element()
 }
@@ -937,12 +1149,13 @@ fn state_message(message: &str, loading: bool) -> Element {
         .into_element()
 }
 
-fn section_title(title: &'static str) -> Element {
+fn section_title(title: impl Into<String>) -> Element {
+    let title = title.into();
     label()
-        .a11y_alt(title)
-        .font_size(11.)
+        .a11y_alt(title.clone())
+        .font_size(12.)
         .font_weight(FontWeight::BOLD)
-        .color(theme::color(theme::MUTED))
+        .color(theme::color(theme::TEXT))
         .text(title)
         .into_element()
 }

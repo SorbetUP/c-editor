@@ -17,6 +17,7 @@ pub(super) struct ShellPreferences {
     pub(super) sidebar_visible: bool,
     pub(super) sidebar_width: SidebarWidth,
     pub(super) rail_order: Vec<String>,
+    pub(super) pinned_paths: Vec<String>,
     pub(super) rail_order_persisted: bool,
 }
 
@@ -26,6 +27,7 @@ impl Default for ShellPreferences {
             sidebar_visible: true,
             sidebar_width: SidebarWidth::default(),
             rail_order: default_rail_order(),
+            pinned_paths: Vec::new(),
             rail_order_persisted: false,
         }
     }
@@ -85,6 +87,14 @@ pub(super) fn read_shell_preferences(root: &Path) -> Result<ShellPreferences, St
         }
         preferences.rail_order = normalized;
     }
+    if let Some(paths) = shell.get("pinnedPaths").and_then(Value::as_array) {
+        preferences.pinned_paths = paths
+            .iter()
+            .filter_map(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned)
+            .collect();
+    }
     Ok(preferences)
 }
 
@@ -98,6 +108,7 @@ impl ShellState {
             self.sidebar_visible,
             self.sidebar_width,
             &self.rail_order,
+            &self.library.pinned_paths,
         ) {
             eprintln!("[freya][shell] action:persist-failure error={error}");
             self.error = Some(format!("Unable to persist shell preferences: {error}"));
@@ -118,6 +129,7 @@ fn write_shell_preferences(
     sidebar_visible: bool,
     sidebar_width: SidebarWidth,
     rail_order: &[String],
+    pinned_paths: &[crate::library_contract::RelativePath],
 ) -> Result<(), String> {
     let path = shell_preferences_path(root);
     let parent = path
@@ -146,6 +158,7 @@ fn write_shell_preferences(
             "sidebarVisible": sidebar_visible,
             "sidebarWidth": sidebar_width.get(),
             "railOrder": rail_order,
+            "pinnedPaths": pinned_paths.iter().map(|path| path.as_str()).collect::<Vec<_>>(),
         }),
     );
     let temporary = path.with_extension("json.tmp");
@@ -157,11 +170,36 @@ fn write_shell_preferences(
     fs::rename(&temporary, &path)
         .map_err(|error| format!("replace {}: {error}", path.display()))?;
     eprintln!(
-        "[freya][shell] action:persist-complete path={} width={} visible={} railOrder={:?}",
+        "[freya][shell] action:persist-complete path={} width={} visible={} railOrder={:?} pinnedPaths={:?}",
         path.display(),
         sidebar_width.get(),
         sidebar_visible,
-        rail_order
+        rail_order,
+        pinned_paths
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library_contract::RelativePath;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn pinned_paths_round_trip_with_shell_preferences() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock must be after unix epoch")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("freya-shell-preferences-{stamp}"));
+        let pinned = [RelativePath::from("Alpha.md")];
+
+        write_shell_preferences(&root, true, SidebarWidth::default(), &default_rail_order(), &pinned)
+            .expect("write shell preferences");
+        let loaded = read_shell_preferences(&root).expect("read shell preferences");
+
+        assert_eq!(loaded.pinned_paths, vec!["Alpha.md"]);
+        let _ = fs::remove_dir_all(root);
+    }
 }

@@ -3,7 +3,9 @@ import path from 'node:path'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { browser } from '@wdio/globals'
 
-import { expectedActions, expectedCheckpoints, loadScenario } from '../../../tools/freya-differential/lib/scenario.mjs'
+import { expectedCheckpoints, loadScenario } from '../../../tools/freya-differential/lib/scenario.mjs'
+import { dispatchNativeAction, listMatchingProcessIds, listNativeWindows, selectNativeWindow } from '../../../tools/tauri-visual-capture/native-window.mjs'
+import { translateObservedRect } from '../../../tools/tauri-visual-capture/physical-actions.mjs'
 import { byText, captureFrame, displayed, railOrder, requireElement, sleep, snapshotVault, stateSnapshot, visibleByText, writeJson } from '../runtime.mjs'
 
 const projectRoot = path.resolve(import.meta.dirname, '../../..')
@@ -12,7 +14,11 @@ const outputRoot = path.resolve(process.env.DIFFERENTIAL_OUTPUT_DIR ?? path.join
 const fixtureRoot = path.resolve(process.env.DIFFERENTIAL_FIXTURE_ROOT ?? path.join(outputRoot, 'fixture'))
 const vaultRoot = path.join(fixtureRoot, 'vault')
 const scenario = await loadScenario(scenarioPath)
-const actions = expectedActions(scenario)
+const actions = scenario.actions.map((action, index) => ({
+  ...action,
+  index,
+  frameTimes: Array.isArray(action.frames) ? action.frames : [0]
+}))
 const checkpoints = expectedCheckpoints(scenario)
 const manifest = {
   schemaVersion: 1,
@@ -55,11 +61,85 @@ const manifest = {
 }
 const runLog = []
 const frameHashes = (frames) => new Set(frames.map((frame) => frame.sha256)).size
+let nativePointerContext = null
+
+const nativeWindowContext = () => {
+  if (nativePointerContext) return nativePointerContext
+  const appPath = path.resolve(process.env.ELEPHANT_TAURI_ACCEPTANCE_BINARY ?? path.join(projectRoot, 'Elephant/backend/tauri/target/debug/Elephant'))
+  const pids = listMatchingProcessIds({ appPath })
+  const windows = listNativeWindows(pids)
+  const candidate = windows.find((window) => /elephant/i.test(window.ownerName)) ?? windows[0]
+  if (!candidate) throw new Error(`No visible native Tauri window found for ${appPath}`)
+  const window = selectNativeWindow({ windows, pid: candidate.ownerPid })
+  nativePointerContext = { pid: window.ownerPid, bounds: window.bounds }
+  return nativePointerContext
+}
+
+const nativeElementPoint = async (element, offsetX = 0) => {
+  const [size, location, viewportSize, viewportLocation] = await Promise.all([
+    element.getSize(),
+    element.getLocation(),
+    (await browser.$('.en-shell')).getSize(),
+    (await browser.$('.en-shell')).getLocation()
+  ])
+  const context = nativeWindowContext()
+  const viewportRect = { ...viewportLocation, ...viewportSize }
+  const translated = translateObservedRect({
+    rect: { ...location, ...size },
+    windowBounds: context.bounds,
+    viewportRect
+  })
+  const point = {
+    x: translated.rect.x + translated.rect.width / 2 + offsetX * translated.scale.x,
+    y: translated.rect.y + translated.rect.height / 2
+  }
+  return { context, point }
+}
+
+const nativePointerMove = async (action, element, offsetX, outputRoot) => {
+  const { context, point } = await nativeElementPoint(element, offsetX)
+  const requestFile = path.join(outputRoot, `native-pointer-${action.id}.json`)
+  await writeFile(requestFile, `${JSON.stringify({ operation: 'move-pointer', processId: context.pid, points: [[point.x, point.y]] }, null, 2)}\n`, 'utf8')
+  dispatchNativeAction({ requestFile })
+}
+
+const nativeScroll = async (action, element, outputRoot) => {
+  const { context, point } = await nativeElementPoint(element)
+  const requestFile = path.join(outputRoot, `native-scroll-${action.id}.json`)
+  await writeFile(requestFile, `${JSON.stringify({ operation: 'scroll', processId: context.pid, points: [[point.x, point.y]], deltaY: action.delta?.y ?? 560 }, null, 2)}\n`, 'utf8')
+  dispatchNativeAction({ requestFile })
+}
+
+const nativeDrag = async (action, source, target, outputRoot) => {
+  const [sourcePoint, targetPoint] = await Promise.all([
+    nativeElementPoint(source),
+    nativeElementPoint(target)
+  ])
+  const points = Array.from({ length: 12 }, (_, index) => {
+    const progress = index / 11
+    return [
+      sourcePoint.point.x + (targetPoint.point.x - sourcePoint.point.x) * progress,
+      sourcePoint.point.y + (targetPoint.point.y - sourcePoint.point.y) * progress
+    ]
+  })
+  points.push(...Array.from({ length: 4 }, () => [targetPoint.point.x, targetPoint.point.y]))
+  const requestFile = path.join(outputRoot, `native-drag-${action.id}.json`)
+  await writeFile(requestFile, `${JSON.stringify({
+    operation: 'drag',
+    processId: sourcePoint.context.pid,
+    points
+  }, null, 2)}\n`, 'utf8')
+  dispatchNativeAction({ requestFile })
+}
 
 const selectorFor = (target) => {
   if (target?.strategy === 'placeholder') return `[placeholder="${target.value}"]`
   if (target?.strategy === 'testid') return `[data-testid="${target.value}"]`
-  if (target?.strategy === 'role') return `[role="${target.role}"][aria-label="${target.name}"]`
+  if (target?.strategy === 'role') {
+    if (target.role === 'button' && target.name === 'All notes') return 'button.en-all-notes'
+    const roleSelector = target.role === 'button' ? `button[aria-label="${target.name}"]` : `[role="${target.role}"][aria-label="${target.name}"]`
+    return `${roleSelector}, [role="${target.role}"][aria-label="${target.name}"]`
+  }
   return target?.selector
 }
 
@@ -101,7 +181,7 @@ const keyboardTimeline = async (action, keys) => {
   for (const [index, relativeMs] of action.frameTimes.entries()) {
     if (index) await sleep(relativeMs - action.frameTimes[index - 1])
     if (index === 1 && !pressed) {
-      await browser.keys(keys)
+      for (let repeat = 0; repeat < (action.repeat ?? 1); repeat += 1) await browser.keys(keys)
       pressed = true
     }
     frames.push(await captureFrame({ outputRoot, checkpoint: action.checkpoint, index, relativeMs, kind: index === 0 ? 'before' : index === action.frameTimes.length - 1 ? 'after' : 'during' }))
@@ -112,13 +192,16 @@ const keyboardTimeline = async (action, keys) => {
 const editorInputTimeline = async (action, editor) => {
   let edited = false
   const frames = []
+  const paragraph = await browser.$('.editor-component .ag-paragraph')
+  const typingTarget = await paragraph.isExisting().catch(() => false) ? paragraph : editor
   for (const [index, relativeMs] of action.frameTimes.entries()) {
     if (index) await sleep(relativeMs - action.frameTimes[index - 1])
     if (index === 1 && !edited) {
-      await editor.click()
-      await browser.keys(['Meta', 'End'])
-      await browser.keys('Enter')
-      await browser.keys('Differential edit marker 2026-06-22.')
+      await typingTarget.click()
+      for (const chord of action.keysBeforeText ?? []) {
+        await browser.keys(chord.split('+'))
+      }
+      await editor.addValue(action.text)
       edited = true
     }
     frames.push(await captureFrame({ outputRoot, checkpoint: action.checkpoint, index, relativeMs, kind: index === 0 ? 'before' : index === action.frameTimes.length - 1 ? 'after' : 'during' }))
@@ -127,14 +210,35 @@ const editorInputTimeline = async (action, editor) => {
 }
 
 const pointerTimeline = async (action, element) => {
+  const size = await element.getSize()
+  const pathOffsets = action.id === 'move-through-create-menu'
+    ? [-Math.max(1, Math.floor(size.width / 3)), 0, Math.max(1, Math.floor(size.width / 3)), 0]
+    : [0, 24, 0]
   const frames = []
   for (const [index, relativeMs] of action.frameTimes.entries()) {
     if (index) await sleep(relativeMs - action.frameTimes[index - 1])
-    if (index) await element.moveTo({ xOffset: index % 2 ? 20 : 0, yOffset: 0, duration: 25 })
+    if (index) {
+      if (process.platform === 'darwin') {
+        await nativePointerMove(action, element, pathOffsets[index] ?? 0, outputRoot)
+      } else {
+        await element.moveTo({ xOffset: pathOffsets[index] ?? 0, yOffset: 0 })
+      }
+    }
     frames.push(await captureFrame({ outputRoot, checkpoint: action.checkpoint, index, relativeMs, kind: index === 0 ? 'before' : 'during' }))
   }
-  await element.moveTo()
   return frames
+}
+
+const requireScrollableEditor = async () => {
+  const candidates = await browser.$$('.en-editor-host .editor-component, .en-note-editor-shell')
+  for (const candidate of candidates) {
+    const [scrollHeight, clientHeight] = await Promise.all([
+      candidate.getProperty('scrollHeight'),
+      candidate.getProperty('clientHeight')
+    ])
+    if (Number(scrollHeight) > Number(clientHeight)) return candidate
+  }
+  throw new Error('Missing real WebDriver scrollable editor container')
 }
 
 const scrollTimeline = async (action, element) => {
@@ -144,10 +248,18 @@ const scrollTimeline = async (action, element) => {
   for (const [index, relativeMs] of action.frameTimes.entries()) {
     if (index) await sleep(relativeMs - action.frameTimes[index - 1])
     if (index === 1 && !scrolled) {
+      const [location, size] = await Promise.all([element.getLocation(), element.getSize()])
       await browser.performActions([{
         type: 'wheel',
         id: 'differential-wheel',
-        actions: [{ type: 'scroll', x: 0, y: 0, deltaX: 0, deltaY: action.delta?.y ?? 560, duration: action.durationMs ?? 400 }]
+        actions: [{
+          type: 'scroll',
+          x: Math.round(location.x + size.width / 2),
+          y: Math.round(location.y + size.height / 2),
+          deltaX: 0,
+          deltaY: action.delta?.y ?? 560,
+          duration: action.durationMs ?? 400
+        }]
       }])
       await browser.releaseActions()
       scrolled = true
@@ -164,7 +276,13 @@ const dragTimeline = async (action, source, target, beforeOrder) => {
   const frames = []
   for (const [index, relativeMs] of action.frameTimes.entries()) {
     if (index) await sleep(relativeMs - action.frameTimes[index - 1])
-    if (index === 1) await source.dragAndDrop(target, { duration: action.durationMs ?? 400 })
+    if (index === 1) {
+      if (process.platform === 'darwin') {
+        await nativeDrag(action, source, target, outputRoot)
+      } else {
+        await source.dragAndDrop(target, { duration: action.durationMs ?? 400 })
+      }
+    }
     frames.push(await captureFrame({ outputRoot, checkpoint: action.checkpoint, index, relativeMs, kind: index === 0 ? 'before' : 'during' }))
   }
   const afterOrder = await railOrder()
@@ -194,7 +312,7 @@ const runAction = async (action) => {
     const editor = await requireElement(selectorFor(target), 'Muya runtime editor')
     return editorInputTimeline(action, editor)
   }
-  if (action.id === 'scroll-alpha-note') return scrollTimeline(action, await requireElement('.en-editor-host .editor-component, .en-note-editor-shell', 'real note scroll container'))
+  if (action.id === 'scroll-alpha-note') return scrollTimeline(action, await requireScrollableEditor())
   if (action.id === 'close-alpha-note') return clickTimeline(action, await requireElement(selectorFor(target), 'Close note button'))
   if (action.id === 'open-create-menu') return clickTimeline(action, await requireElement(selectorFor(target), 'Create button'))
   if (action.id === 'move-through-create-menu') return pointerTimeline(action, await visibleByText('[role="menuitem"]', 'Note', 'Note menu item'))
@@ -214,14 +332,14 @@ const validatePostcondition = async (action, frames, previousState) => {
     assert.equal(current.searchVisible, true)
     assert.equal(current.query, '')
   } else if (action.id === 'search-alpha') {
-    await browser.waitUntil(async () => (await stateSnapshot(vaultRoot, action)).resultTitles.includes('Alpha note'), { timeout: 20000, timeoutMsg: 'real search result did not appear' })
+    await browser.waitUntil(async () => (await stateSnapshot(vaultRoot, action)).resultTitles.includes('Alpha'), { timeout: 20000, timeoutMsg: 'real search result did not appear' })
     const afterSearch = await stateSnapshot(vaultRoot, action)
     assert.equal(afterSearch.query, 'Alpha note')
-    assert.deepEqual(afterSearch.resultTitles, ['Alpha note'])
+    assert.deepEqual(afterSearch.resultTitles, ['Alpha'])
   } else if (action.id === 'edit-alpha-note') {
-    await browser.waitUntil(async () => (await snapshotVault(vaultRoot)).some((file) => file.path === 'Alpha.md'), { timeout: 20000 })
+    await browser.waitUntil(async () => (await readFile(path.join(vaultRoot, 'Alpha.md'), 'utf8').catch(() => '')).includes('Differential edit marker 2026-06-22.'), { timeout: 20000, timeoutMsg: 'real editor did not persist marker before timeout' })
     const source = await stateSnapshot(vaultRoot, action)
-    assert.equal(source.persistedFile.contains, true)
+    assert.equal(source.persistedFile.contains, true, `real editor did not persist marker; editorText=${JSON.stringify(source.editorText)}`)
   } else if (action.id === 'scroll-alpha-note') {
     assert.equal(action.scrollChanged, true)
     assert.ok(frameHashes(frames) > 1, 'scroll movement must produce distinct rendered frames')

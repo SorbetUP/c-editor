@@ -24,13 +24,21 @@ function pngChunk (type, data) {
   return chunk
 }
 
-function pixelPng (red, green, blue) {
+function pixelPng (red, green, blue, width = 1, height = 1) {
   const header = Buffer.alloc(13)
-  header.writeUInt32BE(1, 0)
-  header.writeUInt32BE(1, 4)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
   header[8] = 8
   header[9] = 6
-  const raw = Buffer.from([0, red, green, blue, 255])
+  const row = Buffer.alloc(width * 4 + 1)
+  for (let offset = 1; offset < row.length; offset += 4) {
+    row[offset] = red
+    row[offset + 1] = green
+    row[offset + 2] = blue
+    row[offset + 3] = 255
+  }
+  const raw = Buffer.alloc(row.length * height)
+  for (let rowIndex = 0; rowIndex < height; rowIndex += 1) row.copy(raw, rowIndex * row.length)
   return Buffer.concat([
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     pngChunk('IHDR', header),
@@ -38,9 +46,6 @@ function pixelPng (red, green, blue) {
     pngChunk('IEND', Buffer.alloc(0))
   ])
 }
-
-const PNG_WHITE = pixelPng(255, 255, 255)
-const PNG_BLACK = pixelPng(0, 0, 0)
 
 function argument (name) {
   const index = process.argv.indexOf(name)
@@ -80,6 +85,9 @@ if (!runtime || !output || !scenarioPath || !fixtureRoot || !runId || !commandSh
 }
 
 const scenario = JSON.parse(await readFile(scenarioPath, 'utf8'))
+const scenarioViewport = scenario.viewport
+const PNG_WHITE = pixelPng(255, 255, 255, scenarioViewport.width, scenarioViewport.height)
+const PNG_BLACK = pixelPng(0, 0, 0, scenarioViewport.width, scenarioViewport.height)
 const fixture = {
   id: scenario.fixture.id,
   files: await vaultFiles(path.join(fixtureRoot, 'vault'))
@@ -120,12 +128,15 @@ for (const [index, action] of scenario.actions.entries()) {
         : absolutePath
     })
   }
+  const checkpointState = scenario.checkpoints.find((checkpoint) => checkpoint.id === action.checkpoint)?.state ?? {}
   checkpoints.push({
     id: action.checkpoint,
     afterAction: action.id,
     state: mutation === 'state-mismatch' && runtime === 'freya'
-      ? { ...scenario.checkpoints.find((checkpoint) => checkpoint.id === action.checkpoint)?.state, orchestratorMutation: true }
-      : scenario.checkpoints.find((checkpoint) => checkpoint.id === action.checkpoint)?.state ?? {},
+      ? { ...checkpointState, orchestratorMutation: true }
+      : mutation === 'editor-text-mismatch' && runtime === 'freya'
+        ? { ...checkpointState, editorText: 'Divergent editor text' }
+        : checkpointState,
     vault: fixture.files,
     frames
   })

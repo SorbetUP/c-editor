@@ -12,7 +12,7 @@ pub struct Preferences {
 
 impl Preferences {
   fn path_of(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|dir| dir.join("preferences.json"))
+    crate::acceptance_profile::app_config_dir(app).ok().map(|dir| dir.join("preferences.json"))
   }
 
   pub fn load(app: &AppHandle) -> Option<Self> {
@@ -71,11 +71,11 @@ fn bundled_defaults() -> Map<String, Value> {
 }
 
 pub fn prefs_path_for(app: &AppHandle) -> Option<PathBuf> {
-  app.path().app_config_dir().ok().map(|d| d.join("preferences.json"))
+  crate::acceptance_profile::app_config_dir(app).ok().map(|d| d.join("preferences.json"))
 }
 
 pub fn ensure_config_dir(app: &AppHandle) -> Option<PathBuf> {
-  let dir = app.path().app_config_dir().ok()?;
+  let dir = crate::acceptance_profile::app_config_dir(app).ok()?;
   fs::create_dir_all(&dir).ok()?;
   Some(dir)
 }

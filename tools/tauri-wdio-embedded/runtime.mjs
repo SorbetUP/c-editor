@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -67,22 +68,33 @@ export const railOrder = async () => {
 export const stateSnapshot = async (vaultRoot, action = {}) => {
   const editorOpen = await displayed('.en-note-editor-shell')
   const searchVisible = await displayed('.en-search-overlay')
-  const menuVisible = await displayed('.en-create-menu-popover')
+  const menuLabels = await texts('.en-create-menu-popover .en-create-menu-option')
+  const menuVisible = menuLabels.length > 0
   const visibleEntries = await texts('.en-note-card h3, .en-folder-card h3')
-  const labels = [
-    ...(await texts('.en-rail button[aria-label]')),
-    ...(await texts('.en-create-menu-popover [role="menuitem"]'))
-  ]
+  const railLabels = []
+  for (const element of await browserFor().$$('.en-rail button[aria-label]')) {
+    if (await element.isDisplayed().catch(() => false)) {
+      const label = await attribute(element, 'aria-label')
+      if (label) railLabels.push(label)
+    }
+  }
+  const labels = [...railLabels, ...menuLabels]
   const editor = await optional('.en-editor-host .editor-component, .en-note-editor-shell')
-  const editorHost = await optional('.en-editor-host')
-  const editorText = editorOpen && editorHost ? await editorHost.getText().catch(() => '') : ''
+  const editorParagraphs = editorOpen ? await browserFor().$$('.editor-component .ag-paragraph') : []
+  const editorText = editorOpen
+    ? editorParagraphs.length
+      ? (await Promise.all(editorParagraphs.map((paragraph) => paragraph.getText().catch(() => '')))).join('\n')
+      : editor ? await editor.getText().catch(() => '') : ''
+    : ''
   const query = await value('[placeholder="Search notes, paths, tags, or ideas…"]')
   const resultTitles = await texts('.en-search-result-title')
   const body = await readFile(path.join(vaultRoot, 'Alpha.md'), 'utf8').catch(() => '')
   return {
     route: editorOpen ? 'note-editor' : 'library',
     vaultName: path.basename(vaultRoot),
-    visibleEntries: visibleEntries.filter((entry) => ['Alpha note', 'Projects'].includes(entry)),
+    visibleEntries: visibleEntries
+      .filter((entry) => ['Alpha note', 'Projects'].includes(entry))
+      .sort((left, right) => ['Alpha note', 'Projects'].indexOf(left) - ['Alpha note', 'Projects'].indexOf(right)),
     sidebarVisible: await displayed('.en-sidebar'),
     errors: await texts('[role="alert"], .en-error, .en-settings-feedback.is-error'),
     searchVisible,
@@ -105,7 +117,9 @@ export const stateSnapshot = async (vaultRoot, action = {}) => {
       mustChange: Boolean(action.scrollChanged)
     } : null,
     createMenuVisible: menuVisible,
-    menuItems: menuVisible ? ['Note', 'Drawing', 'Folder'].filter((item) => labels.includes(item)) : [],
+    menuItems: menuVisible
+      ? ['Note', 'Drawing', 'Folder'].filter((item) => menuLabels.some((label) => label.startsWith(item)))
+      : [],
     railOrder: await railOrder(),
     accessibilityLabels: labels,
     geometry: {}
@@ -118,7 +132,20 @@ export const captureFrame = async ({ outputRoot, checkpoint, index, relativeMs, 
   const relativePath = path.join('frames', checkpoint, `frame-${String(index).padStart(3, '0')}-${relativeMs}ms.png`)
   const filename = path.join(outputRoot, relativePath)
   await mkdir(path.dirname(filename), { recursive: true })
-  await browserFor().saveScreenshot(filename)
+  const rawFilename = filename.replace(/\.png$/i, '.retina.png')
+  await browserFor().saveScreenshot(rawFilename)
+  const viewport = await browserFor().getWindowSize()
+  const devicePixelRatio = Number(await browserFor().execute(() => window.devicePixelRatio || 1)) || 1
+  const logicalWidth = Math.round(viewport.width / devicePixelRatio)
+  const logicalHeight = Math.round(viewport.height / devicePixelRatio)
+  if (process.platform === 'darwin' && logicalWidth > 0 && logicalHeight > 0) {
+    const resized = spawnSync('/usr/bin/sips', [
+      '-z', String(logicalHeight), String(logicalWidth), rawFilename, '--out', filename
+    ], { encoding: 'utf8' })
+    if (resized.status !== 0) throw new Error(`Unable to normalize Retina screenshot: ${resized.stderr || resized.stdout}`)
+  } else {
+    await writeFile(filename, await readFile(rawFilename))
+  }
   const bytes = await readFile(filename)
   return {
     index,

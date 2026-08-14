@@ -21,6 +21,13 @@ pub(crate) fn key_down_handler(
     mut autosave_generation: State<u64>,
 ) -> impl FnMut(Event<KeyboardEventData>) {
     move |event: Event<KeyboardEventData>| {
+        if event.key == Key::Named(NamedKey::End)
+            && event.modifiers.contains(Modifiers::ctrl_or_meta())
+        {
+            // Keep the shared Tauri shortcut from being reinterpreted by the
+            // parent ScrollView as a jump-to-end command.
+            event.stop_propagation();
+        }
         let stale_focus = state.read().editor.as_ref().is_some_and(|editor| {
             editor
                 .focus_target()

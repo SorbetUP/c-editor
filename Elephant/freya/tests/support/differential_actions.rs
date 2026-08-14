@@ -52,7 +52,6 @@ pub fn run_action(
                 .or(action.text.clone())
                 .expect("search input");
             let frames = action_frames_after(runner, output, action, |runner| {
-                click_label(runner, "Search input");
                 runner.write_text(&query);
                 runner.sync_and_update();
             });

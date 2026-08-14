@@ -21,6 +21,7 @@ impl ShellState {
     fn open_directory_with_history(&mut self, path: String, record: bool) {
         self.view = WorkspaceView::Notes;
         self.editor = None;
+        self.editor_tag_draft = None;
         self.library.current_path = RelativePath::from(path.as_str());
         self.reload_directory(&path);
         if record {
@@ -46,6 +47,7 @@ impl ShellState {
         match EditorDocument::load(&path) {
             Ok(document) => {
                 self.editor = Some(document);
+                self.editor_tag_draft = None;
                 self.error = None;
                 if record {
                     self.record_navigation(NavigationTarget::Note(entry.path.clone()));

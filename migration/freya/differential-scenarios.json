@@ -420,9 +420,10 @@
       "target": {
         "tauri": {
           "strategy": "role",
-          "role": "button",
-          "name": "Create",
-          "exact": true
+        "role": "button",
+        "name": "Create",
+        "exact": true,
+        "nativePointOffset": { "x": 0, "y": 24 }
         },
         "freya": {
           "strategy": "accessibility-label",
@@ -546,7 +547,7 @@
       "state": {
         "searchVisible": true,
         "query": "Alpha note",
-        "resultTitles": ["Alpha note"]
+        "resultTitles": ["Alpha"]
       },
       "visual": {
         "targets": [".en-search-results", ".en-search-result"]

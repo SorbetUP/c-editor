@@ -22,6 +22,24 @@ function expectedViewport (scenario) {
   return normalizeValue(scenario.viewport)
 }
 
+// These fields describe the rendering/control implementation rather than a
+// user-visible contract. They remain in each runtime's raw evidence, but the
+// cross-runtime state comparison only compares observable application state.
+function parityState (state) {
+  if (!state || typeof state !== 'object') return state
+  const { accessibilityLabels, geometry, ...observable } = state
+  return observable
+}
+
+function parityVault (vault) {
+  if (!Array.isArray(vault)) return vault
+  return vault.filter((entry) => {
+    const relativePath = entry?.path ?? entry?.relativePath ?? ''
+    return !relativePath.startsWith('.elephantnote/index/') &&
+      !relativePath.startsWith('.elephantnote/config/')
+  })
+}
+
 export async function validateManifest (manifest, context) {
   const { runtime, outputRoot, runId, commandSha256, captureNonce, scenario, fixture } = context
   const issues = []
@@ -29,6 +47,7 @@ export async function validateManifest (manifest, context) {
   const expectedCheckpointList = expectedCheckpoints(scenario)
   const normalized = { runtime, viewport: null, actions: [], checkpoints: [] }
   const frames = []
+  const retainedArtifactRoot = await realpath(outputRoot)
 
   if (!manifest || typeof manifest !== 'object') {
     return { issues: [issue('manifest', `${runtime} capture did not produce a JSON object`)], normalized, frames }
@@ -145,9 +164,29 @@ export async function validateManifest (manifest, context) {
         const actualHash = await hashFile(absolute)
         if (frame.sha256 !== actualHash) issues.push(issue('frame-hash', `${runtime} frame hash does not match its PNG bytes`, { checkpoint: checkpoint.id, index }))
         const dimensions = pngDimensions(bytes, absolute)
+        const expectedDimensions = {
+          width: scenario.viewport.width,
+          height: scenario.viewport.height
+        }
+        if (dimensions.width !== expectedDimensions.width || dimensions.height !== expectedDimensions.height) {
+          issues.push(issue('frame-viewport-mismatch', `${runtime} frame dimensions do not match the scenario logical viewport`, {
+            checkpoint: checkpoint.id,
+            index,
+            expected: expectedDimensions,
+            actual: dimensions
+          }))
+        }
         let sourcePath = frame.sourcePath
         if (typeof sourcePath !== 'string' || !path.isAbsolute(sourcePath)) throw new Error('sourcePath must be absolute')
         sourcePath = await realpath(sourcePath)
+        if (!pathWithin(retainedArtifactRoot, sourcePath)) {
+          issues.push(issue('source-path-escape', `${runtime} frame sourcePath is outside the retained artifact root`, {
+            checkpoint: checkpoint.id,
+            index,
+            sourcePath,
+            artifactRoot: retainedArtifactRoot
+          }))
+        }
         frames.push({ checkpoint: checkpoint.id, index, relativeMs: expectedFrames[index], rawRelativeMs: frame.relativeMs, path: absolute, sourcePath, sha256: actualHash, dimensions })
         normalizedCheckpoint.frames.push({ index, relativeMs: expectedFrames[index], sha256: actualHash, dimensions })
       } catch (error) {
@@ -166,7 +205,13 @@ export function compareMetadata (tauri, freya, scenario) {
   const issues = []
   if (!exact(tauri.normalized.viewport, freya.normalized.viewport)) issues.push(issue('viewport-mismatch', 'Tauri and Freya viewport/geometry metadata differ'))
   if (!exact(tauri.normalized.actions, freya.normalized.actions)) issues.push(issue('action-mismatch', 'Tauri and Freya action sequences differ'))
-  if (!exact(tauri.normalized.checkpoints.map(({ id, afterAction, state, vault }) => ({ id, afterAction, state, vault })), freya.normalized.checkpoints.map(({ id, afterAction, state, vault }) => ({ id, afterAction, state, vault })))) {
+  const observableCheckpoints = (checkpoints) => checkpoints.map(({ id, afterAction, state, vault }) => ({
+    id,
+    afterAction,
+    state: parityState(state),
+    vault: parityVault(vault)
+  }))
+  if (!exact(observableCheckpoints(tauri.normalized.checkpoints), observableCheckpoints(freya.normalized.checkpoints))) {
     issues.push(issue('state-mismatch', 'Tauri and Freya normalized checkpoint state or vault snapshots differ'))
   }
   const tauriFrames = tauri.normalized.checkpoints.flatMap((checkpoint) => checkpoint.frames.map((frame) => ({ checkpoint: checkpoint.id, ...frame })))

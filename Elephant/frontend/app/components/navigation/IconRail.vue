@@ -20,9 +20,13 @@
           class="en-rail-icon"
           :class="{ active: item.active, 'en-rail-sidebar-toggle': item.id === 'sidebar-toggle' }"
           type="button"
-          :draggable="item.id !== 'sidebar-toggle'"
+          :draggable="false"
           :title="item.title"
           :aria-label="item.title"
+          @pointerdown="startRailPointerDrag(item, $event)"
+          @pointerenter="allowRailPointerDrop(item)"
+          @pointerup="dropRailPointerItem(item, $event)"
+          @pointercancel="finishRailDrag"
           @dragstart="startRailDrag(item, $event)"
           @dragover.prevent="allowRailDrop(item)"
           @drop.prevent="dropRailItem(item)"
@@ -443,9 +447,20 @@ const startRailDrag = (item, event) => {
   pushIconRailLog('drag:start', { id: item.id })
 }
 
+const startRailPointerDrag = (item, event) => {
+  if (event?.button !== undefined && event.button !== 0) return
+  if (!item?.id || item.id === 'sidebar-toggle') return
+  draggingRailId.value = item.id
+  pushIconRailLog('drag:pointer-start', { id: item.id, pointerType: event?.pointerType || 'mouse' })
+}
+
 const allowRailDrop = (item) => {
   if (!draggingRailId.value || draggingRailId.value === item?.id) return
   pushIconRailLog('drag:over', { sourceId: draggingRailId.value, targetId: item?.id || '' })
+}
+
+const allowRailPointerDrop = (item) => {
+  if (draggingRailId.value && draggingRailId.value !== item?.id) allowRailDrop(item)
 }
 
 const dropRailItem = (item) => {
@@ -458,6 +473,12 @@ const dropRailItem = (item) => {
   runtimeRailOrder.value = next
   preferences.SET_SINGLE_PREFERENCE({ type: 'iconRailOrder', value: next })
   pushIconRailLog('drag:drop', { sourceId, targetId, targetIndex, next })
+}
+
+const dropRailPointerItem = (item, event) => {
+  if (!draggingRailId.value) return
+  event?.preventDefault?.()
+  dropRailItem(item)
 }
 
 const finishRailDrag = () => {

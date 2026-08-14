@@ -108,23 +108,40 @@ export const installAcceptanceTestBridge = ({
       return { key, value: value === null || value === undefined ? null : String(value) }
     },
 
-    readDom(selector) {
+    readDom(selector, text = null) {
       if (!selector || typeof selector !== 'string') throw new TypeError('readDom requires a CSS selector')
-      const element = target.document?.querySelector?.(selector)
+      const candidates = [...(target.document?.querySelectorAll?.(selector) || [])]
+      const element = text === null || text === undefined
+        ? candidates[0]
+        : candidates.find((candidate) => (candidate.innerText || candidate.textContent || '').includes(String(text)))
       const attributes = {}
       if (element?.attributes) {
         for (const attribute of element.attributes) attributes[attribute.name] = attribute.value
       }
+      const bounds = element?.getBoundingClientRect?.()
       const result = {
         selector,
+        textFilter: text === null || text === undefined ? null : String(text),
         exists: Boolean(element),
         visible: isVisible(target, element),
         value: element && 'value' in element ? element.value : null,
         text: element?.innerText || element?.textContent || '',
         html: element?.innerHTML || '',
-        attributes
+        attributes,
+        rect: bounds
+          ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }
+          : null
       }
-      log(target, 'dom:read', { selector, exists: result.exists, textLength: result.text.length, htmlLength: result.html.length })
+      log(target, 'dom:read', {
+        selector,
+        textFilter: result.textFilter,
+        exists: result.exists,
+        visible: result.visible,
+        textLength: result.text.length,
+        htmlLength: result.html.length,
+        rect: result.rect,
+        hasRect: Boolean(result.rect)
+      })
       return result
     },
 

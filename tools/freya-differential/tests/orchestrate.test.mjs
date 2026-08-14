@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -81,6 +82,7 @@ test('rejects frames that point at the same source artifact', async () => {
   try {
     assert.notEqual(result.code, 0)
     assert.ok(result.report.issues.some((issue) => issue.type === 'copied-evidence'))
+    assert.ok(result.report.issues.some((issue) => issue.type === 'source-path-escape'))
   } finally {
     await rm(result.output, { recursive: true, force: true })
   }
@@ -113,6 +115,7 @@ test('rejects viewport, state, and vault mismatches before accepting raster equa
   for (const [runtime, mutation, expectedType] of [
     ['tauri', 'viewport-mismatch', 'viewport-mismatch'],
     ['freya', 'state-mismatch', 'state-mismatch'],
+    ['freya', 'editor-text-mismatch', 'state-mismatch'],
     ['freya', 'vault-mismatch', 'fixture-mismatch']
   ]) {
     const result = await runOrchestrator({
@@ -125,6 +128,57 @@ test('rejects viewport, state, and vault mismatches before accepting raster equa
     } finally {
       await rm(result.output, { recursive: true, force: true })
     }
+  }
+})
+
+test('rejects captures whose PNG dimensions do not match the declared logical viewport', async () => {
+  const output = await mkdtemp(path.join(tmpdir(), 'freya-differential-frame-viewport-'))
+  try {
+    const scenario = JSON.parse(await readFile(scenarioPath, 'utf8'))
+    const fixtureRoot = path.join(output, 'fixture')
+    const runtimeRoot = path.join(output, 'freya')
+    await mkdir(path.join(fixtureRoot, 'vault'), { recursive: true })
+    await mkdir(runtimeRoot, { recursive: true })
+    const child = spawn(process.execPath, [captureCommandPath, '--configured-runtime', 'freya', '--mutation', 'valid'], {
+      cwd: projectRoot,
+      env: {
+        ...process.env,
+        DIFFERENTIAL_RUNTIME: 'freya',
+        DIFFERENTIAL_OUTPUT_DIR: runtimeRoot,
+        DIFFERENTIAL_SCENARIO_PATH: scenarioPath,
+        DIFFERENTIAL_FIXTURE_ROOT: fixtureRoot,
+        DIFFERENTIAL_RUN_ID: 'frame-viewport-test',
+        DIFFERENTIAL_COMMAND_SHA256: 'frame-viewport-command',
+        DIFFERENTIAL_CAPTURE_NONCE: 'frame-viewport-nonce'
+      }
+    })
+    await new Promise((resolve, reject) => {
+      child.once('error', reject)
+      child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`fixture command exited with ${code}`)))
+    })
+    const manifest = JSON.parse(await readFile(path.join(runtimeRoot, 'manifest.json'), 'utf8'))
+    const firstFrame = manifest.checkpoints[0].frames[0]
+    firstFrame.path = firstFrame.path.replace('.png', '-wrong.png')
+    const original = await readFile(path.join(runtimeRoot, firstFrame.path.replace('-wrong.png', '.png')))
+    const wrongPng = Buffer.from(original)
+    wrongPng.writeUInt32BE(scenario.viewport.width - 1, 16)
+    await writeFile(path.join(runtimeRoot, firstFrame.path), wrongPng)
+    firstFrame.sha256 = createHash('sha256').update(wrongPng).digest('hex')
+    await writeFile(path.join(runtimeRoot, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
+
+    const { validateManifest } = await import('../lib/evidence.mjs')
+    const evidence = await validateManifest(manifest, {
+      runtime: 'freya',
+      outputRoot: runtimeRoot,
+      runId: 'frame-viewport-test',
+      commandSha256: 'frame-viewport-command',
+      captureNonce: 'frame-viewport-nonce',
+      scenario,
+      fixture: { id: scenario.fixture.id, files: [] }
+    })
+    assert.ok(evidence.issues.some((issue) => issue.type === 'frame-viewport-mismatch'))
+  } finally {
+    await rm(output, { recursive: true, force: true })
   }
 })
 

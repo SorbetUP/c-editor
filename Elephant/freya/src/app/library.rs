@@ -3,7 +3,6 @@
 use freya::prelude::*;
 
 use crate::{
-    editor::EditorDocument,
     library_contract::{
         EntryKind as ContractKind, EntryTitle, EntryType, LibraryEntry, RelativePath, ViewMode,
     },
@@ -12,7 +11,12 @@ use crate::{
     vault_adapter::{EntryKind, VaultEntry},
 };
 
-use super::{editor_view, route_notice, ShellState};
+use super::{
+    editor_view,
+    navigation_icons::{svg_icon, Icon},
+    route_notice,
+    ShellState,
+};
 
 #[path = "drawing.rs"]
 mod drawing;
@@ -39,11 +43,13 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
     } else {
         route_notice(snapshot.view.source_id(), snapshot.view.source_id())
     };
+    let mut dismiss_menu_state = state;
     rect()
         .width(Size::fill())
         .height(Size::fill())
         .background(theme::color(theme::BG))
-        .padding(Gaps::new(8., 12., 12., 12.))
+        .padding(Gaps::new(0., 10., 12., 10.))
+        .on_mouse_up(move |_| dismiss_menu_state.write().menu_open = false)
         .maybe_child(
             snapshot
                 .error
@@ -73,37 +79,6 @@ fn library_error_notice(error: &str) -> Element {
 
 fn library_toolbar(mut state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
-    let create_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:create");
-    let mut create_enter_state = state;
-    let mut create_leave_state = state;
-    let create = rect()
-        .width(Size::px(56.))
-        .height(Size::px(56.))
-        .center()
-        .background(theme::color(if create_hovered {
-            theme::TEXT
-        } else {
-            theme::PRIMARY
-        }))
-        .with_corner_radius(11.)
-        .on_mouse_up(move |_| state.write().menu_open = true)
-        .on_pointer_enter(move |_| {
-            create_enter_state
-                .write()
-                .set_hovered_target("toolbar:create")
-        })
-        .on_pointer_leave(move |_| {
-            create_leave_state
-                .write()
-                .clear_hovered_target("toolbar:create")
-        })
-        .a11y_alt("Create")
-        .child(
-            label()
-                .font_size(28.)
-                .color(theme::color(theme::TEXT))
-                .text("+"),
-        );
     let sort_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:sort");
     let mut sort_enter_state = state;
     let mut sort_leave_state = state;
@@ -167,8 +142,40 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         .padding(Gaps::new(8., 12., 8., 12.))
         .horizontal()
         .main_align(Alignment::SpaceBetween)
-        .child(create)
+        .child(rect().width(Size::fill()))
         .child(rect().horizontal().spacing(10.).child(sort).child(view))
+        .into_element()
+}
+
+pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
+    let hovered = state.read().hovered_target.as_deref() == Some("create-fab");
+    let mut enter_state = state;
+    let mut leave_state = state;
+    rect()
+        .position(Position::new_absolute().right(20.).bottom(20.))
+        .width(Size::px(56.))
+        .height(Size::px(56.))
+        .center()
+        .background(theme::color(if hovered {
+            theme::BORDER_STRONG
+        } else {
+            theme::PRIMARY
+        }))
+        .with_corner_radius(11.)
+        .layer(Layer::OverlayLevel(10))
+        .on_mouse_up(move |_| {
+            let mut shell = state.write();
+            shell.menu_open = !shell.menu_open;
+        })
+        .on_pointer_enter(move |_| enter_state.write().set_hovered_target("create-fab"))
+        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target("create-fab"))
+        .a11y_alt("Create")
+        .child(
+            label()
+                .font_size(28.)
+                .color(theme::color(theme::TEXT))
+                .text("+"),
+        )
         .into_element()
 }
 
@@ -197,6 +204,8 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
                 state.write().menu_open = false;
                 if action == crate::library_contract::CreateAction::Drawing {
                     drawing::request_create(state);
+                } else if action == crate::library_contract::CreateAction::Note {
+                    create_note_from_library(state);
                 } else {
                     state.write().create(action);
                 }
@@ -217,8 +226,8 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
     rect()
         .position(
             Position::new_absolute()
-                .left(78.)
-                .top(theme::TOPBAR_HEIGHT + 68.),
+                .right(20.)
+                .bottom(88.),
         )
         .width(Size::px(280.))
         .height(Size::px(248.))
@@ -317,12 +326,14 @@ impl Component for LibraryCard {
     fn render(&self) -> impl IntoElement {
         let card_menu_state = use_state(CardMenuState::default);
         let rename_value = use_state(String::new);
+        let hover_state = use_state(|| false);
         render_library_card(
             &self.entry,
             self.mode,
             self.state,
             card_menu_state,
             rename_value,
+            hover_state,
         )
     }
 }
@@ -333,6 +344,7 @@ fn render_library_card(
     state: State<ShellState>,
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
+    mut hover_state: State<bool>,
 ) -> Element {
     let path = entry.path.as_str().to_string();
     let is_drawing =
@@ -345,11 +357,20 @@ fn render_library_card(
         theme::LIST_CARD_HEIGHT
     };
     let hover_key = format!("card:{path}");
-    let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let hovered = *hover_state.read()
+        || state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let is_pinned = state
+        .read()
+        .library
+        .pinned_paths
+        .iter()
+        .any(|pinned| pinned == &entry.path);
     let enter_key = hover_key.clone();
     let leave_key = hover_key.clone();
     let mut enter_state = state;
     let mut leave_state = state;
+    let mut enter_hover_state = hover_state;
+    let mut leave_hover_state = hover_state;
     let mut state_for_open = state;
     let path_for_open = path.clone();
     let menu_snapshot = card_menu_state.read().clone();
@@ -366,7 +387,7 @@ fn render_library_card(
     } else {
         None
     };
-    let menu_trigger = if hovered || menu_snapshot.open {
+    let menu_trigger = {
         let mut trigger_state = card_menu_state;
         Some(
             rect()
@@ -374,7 +395,7 @@ fn render_library_card(
                 .width(Size::px(30.))
                 .height(Size::px(30.))
                 .center()
-                .background(theme::color(theme::BG))
+                .background(Color::TRANSPARENT)
                 .with_corner_radius(6.)
                 .a11y_alt(if is_folder {
                     "Folder actions"
@@ -384,27 +405,131 @@ fn render_library_card(
                 .on_mouse_up(move |event: Event<MouseEventData>| {
                     event.stop_propagation();
                     let mut menu = trigger_state.write();
-                    menu.open = true;
+                    menu.open = !menu.open;
                     menu.renaming = false;
                 })
-                .child(label().text("⋯")),
+                .child(svg_icon(Icon::MoreHorizontal, theme::color(theme::MUTED), 18.)),
+        )
+    };
+    let pin_trigger = if hovered || is_pinned {
+        let mut pin_state = state;
+        let mut pin_menu_state = card_menu_state;
+        let path_for_pin = entry.path.clone();
+        Some(
+            rect()
+                .position(Position::new_absolute().top(8.).right(42.))
+                .width(Size::px(30.))
+                .height(Size::px(30.))
+                .center()
+                .background(Color::TRANSPARENT)
+                .with_corner_radius(6.)
+                .a11y_alt(if is_pinned { "Unpin entry" } else { "Pin entry" })
+                .on_mouse_up(move |event: Event<MouseEventData>| {
+                    event.stop_propagation();
+                    pin_state.write().toggle_pinned(path_for_pin.clone());
+                    let mut menu = pin_menu_state.write();
+                    menu.open = false;
+                    menu.renaming = false;
+                })
+                .child(svg_icon(Icon::Pin, theme::color(theme::MUTED), 18.)),
         )
     } else {
         None
     };
+    let title_icon = if is_folder {
+        Icon::Folder
+    } else {
+        Icon::FileText
+    };
+    let preview = if is_folder {
+        let children = entry
+            .children_preview
+            .iter()
+            .map(|child| {
+                rect()
+                    .width(Size::fill())
+                    .height(Size::px(40.))
+                    .padding(Gaps::new(7., 8., 7., 8.))
+                    .horizontal()
+                    .cross_align(Alignment::Center)
+                    .spacing(6.)
+                    .background(theme::color(theme::mix(
+                        theme::SURFACE,
+                        theme::BG,
+                        0.55,
+                    )))
+                    .border(
+                        Border::new()
+                            .fill(theme::color(theme::mix(
+                                theme::BORDER,
+                                theme::SURFACE,
+                                0.70,
+                            )))
+                            .width(1.),
+                    )
+                    .with_corner_radius(8.)
+                    .child(svg_icon(
+                        Icon::FileText,
+                        theme::color(theme::MUTED),
+                        15.,
+                    ))
+                    .child(
+                        label()
+                            .font_size(13.)
+                            .color(theme::color(theme::MUTED))
+                            .text(child.title.as_str().to_owned()),
+                    )
+                    .into_element()
+            })
+            .collect::<Vec<_>>();
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .main_align(Alignment::End)
+            .padding(Gaps::new(0., 0., 2., 0.))
+            .spacing(4.)
+            .children(children)
+    } else if is_drawing {
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .padding(Gaps::new(6., 0., 0., 0.))
+            .child(
+                label()
+                    .font_size(16.)
+                    .color(theme::color(theme::MUTED))
+                    .text("Excalidraw preview unavailable in native Freya"),
+            )
+    } else {
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .padding(Gaps::new(6., 0., 0., 0.))
+            .child(
+                label()
+                    .font_size(16.)
+                    .color(theme::color(theme::TEXT))
+                    .text(entry.excerpt.clone()),
+            )
+    };
     let mut menu_state_for_secondary = card_menu_state;
     rect()
         .width(if mode == ViewMode::Grid {
-            Size::px(240.)
+            Size::percent(32.6)
         } else {
             Size::fill()
+        })
+        .min_width(if mode == ViewMode::Grid {
+            Size::px(240.)
+        } else {
+            Size::px(0.)
         })
         .height(Size::px(height))
         .padding(Gaps::new_all(10.))
         .background(theme::color(if hovered {
             theme::SOFT
         } else {
-            theme::SURFACE
+            theme::mix(theme::SURFACE, theme::BG, 0.34)
         }))
         .border(
             Border::new()
@@ -416,8 +541,14 @@ fn render_library_card(
                 .width(1.),
         )
         .with_corner_radius(10.)
-        .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
-        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
+        .on_pointer_enter(move |_| {
+            *enter_hover_state.write() = true;
+            enter_state.write().set_hovered_target(enter_key.clone());
+        })
+        .on_pointer_leave(move |_| {
+            *leave_hover_state.write() = false;
+            leave_state.write().clear_hovered_target(&leave_key);
+        })
         .on_secondary_down(move |_| {
             let mut menu = menu_state_for_secondary.write();
             menu.open = true;
@@ -436,67 +567,84 @@ fn render_library_card(
             } else if is_folder {
                 state_for_open.write().open_directory(path_for_open.clone());
             } else {
-                let root = {
-                    let snapshot = state_for_open.read();
-                    snapshot
-                        .vault
-                        .as_ref()
-                        .map(|vault| vault.root().to_path_buf())
-                };
-                if let Some(root) = root {
-                    let full = root.join(&path_for_open);
-                    match EditorDocument::load(full) {
-                        Ok(document) => state_for_open.write().editor = Some(document),
-                        Err(error) => state_for_open.write().error = Some(error.to_string()),
-                    }
-                }
+                open_note_from_library(state_for_open, &path_for_open);
             }
         })
         .a11y_alt(title.clone())
+        .maybe_child(pin_trigger)
         .maybe_child(menu_trigger)
         .maybe_child(card_menu)
         .child(
-            label()
-                .font_size(14.)
-                .font_weight(FontWeight::BOLD)
-                .text(format!(
-                    "{}  {title}",
-                    if is_folder {
-                        "▱"
-                    } else if is_drawing {
-                        "✎"
-                    } else {
-                        "▤"
-                    }
-                )),
-        )
-        .child(if mode == ViewMode::Grid {
             rect()
-                .height(Size::fill())
-                .padding(Gaps::new_all(10.))
-                .background(theme::color(theme::BG))
-                .with_corner_radius(8.)
+                .height(Size::px(30.))
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .spacing(8.)
+                .child(svg_icon(
+                    title_icon,
+                    theme::color(theme::TEXT),
+                    22.,
+                ))
                 .child(
                     label()
-                        .color(theme::color(theme::MUTED))
-                        .text(if is_folder {
-                            entry
-                                .children_preview
-                                .iter()
-                                .map(|child| child.title.as_str())
-                                .collect::<Vec<_>>()
-                                .join("  ·  ")
-                        } else if is_drawing {
-                            "Excalidraw preview unavailable in native Freya".to_string()
-                        } else {
-                            entry.excerpt.clone()
-                        }),
-                )
-                .into_element()
+                        .font_size(20.)
+                        .font_weight(FontWeight::BOLD)
+                        .text(title.clone()),
+                ),
+        )
+        .child(if mode == ViewMode::Grid {
+            preview.into_element()
         } else {
             rect().height(Size::px(0.)).into_element()
         })
         .into_element()
+}
+
+fn create_note_from_library(mut state: State<ShellState>) {
+    let (vault, directory) = {
+        let snapshot = state.read();
+        (
+            snapshot.vault.clone(),
+            snapshot.library.current_path.as_str().to_string(),
+        )
+    };
+    let Some(vault) = vault else {
+        state.write().error = Some("No vault selected.".to_string());
+        return;
+    };
+
+    eprintln!(
+        "[freya][library] action:start action=Note directory={directory}"
+    );
+    match vault.create_note(Some(directory.clone()), None, None) {
+        Ok(entry) => {
+            let mut next = state.write();
+            next.reload_directory(&directory);
+            next.open_note(&entry);
+            eprintln!(
+                "[freya][library] action:complete action=Note path={}",
+                entry.path
+            );
+        }
+        Err(error) => {
+            eprintln!(
+                "[freya][library] action:failure action=Note directory={directory} error={error}"
+            );
+            state.write().error = Some(error.to_string());
+        }
+    }
+}
+
+fn open_note_from_library(mut state: State<ShellState>, path: &str) {
+    let vault = state.read().vault.clone();
+    let Some(vault) = vault else {
+        state.write().error = Some("No vault selected.".to_string());
+        return;
+    };
+    match vault.find_entry(path) {
+        Ok(entry) => state.write().open_note(&entry),
+        Err(error) => state.write().error = Some(error.to_string()),
+    }
 }
 
 pub(super) fn to_library_entry(entry: &VaultEntry) -> LibraryEntry {

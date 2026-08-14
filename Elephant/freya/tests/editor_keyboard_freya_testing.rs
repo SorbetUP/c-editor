@@ -135,6 +135,30 @@ fn enter_splits_a_real_muya_paragraph_through_the_editable_node() {
 }
 
 #[test]
+fn control_end_moves_to_the_current_block_end_before_enter() {
+    let fixture = FixtureVault::new("alpha\n\nbeta");
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    open_note(&mut runner);
+    click_label(&mut runner, "Paragraph");
+    press_modified_key(
+        &mut runner,
+        Key::Named(NamedKey::End),
+        Modifiers::ctrl_or_meta(),
+    );
+    runner.press_key(Key::Named(NamedKey::Enter));
+    runner.write_text("marker");
+
+    assert_eq!(paragraph_texts(&runner), ["alpha", "marker", "beta"]);
+}
+
+#[test]
 fn backspace_and_delete_merge_real_muya_block_boundaries() {
     let fixture = FixtureVault::new("alpha\n\nbeta");
     let root = fixture.path().to_path_buf();

@@ -19,7 +19,7 @@ pub fn require_label(runner: &TestingRunner, label: &str) -> TestingNode {
 pub fn require_note_card(runner: &TestingRunner, label: &str) -> TestingNode {
     labeled_nodes(runner, label)
         .into_iter()
-        .find(|node| node.layout().area.origin.x >= 300.0)
+        .find(|node| node.layout().area.origin.x >= 290.0)
         .unwrap_or_else(|| {
             panic!(
                 "Freya action target is missing: visible library card with accessibility label {label:?}"

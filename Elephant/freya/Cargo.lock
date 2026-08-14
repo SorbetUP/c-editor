@@ -1121,6 +1121,7 @@ dependencies = [
  "freya-clipboard",
  "freya-testing",
  "muya-core",
+ "rfd",
  "rusqlite",
  "serde",
  "serde_json",

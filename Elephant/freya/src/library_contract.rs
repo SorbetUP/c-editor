@@ -468,6 +468,14 @@ impl LibraryState {
         self.view_mode = self.view_mode.next();
     }
 
+    pub fn toggle_pinned(&mut self, path: RelativePath) {
+        if let Some(index) = self.pinned_paths.iter().position(|pinned| pinned == &path) {
+            self.pinned_paths.remove(index);
+        } else {
+            self.pinned_paths.insert(0, path);
+        }
+    }
+
     pub fn replace_entries(&mut self, entries: Vec<LibraryEntry>) {
         self.entries = entries;
         self.reset_visible_window();
@@ -860,6 +868,63 @@ mod contract_tests {
         assert_eq!(state.active_entries()[1].title.as_str(), "alpha");
         state.sort = SortMode::TitleZa;
         assert_eq!(state.active_entries()[1].title.as_str(), "Beta");
+    }
+
+    #[test]
+    fn toggling_pinned_entry_updates_order_and_is_reversible() {
+        let mut state = LibraryState::default();
+        state.entries = vec![
+            entry("note", None, "Alpha", "Alpha.md", "2026-01-01T00:00:00.000Z"),
+            entry("note", None, "Beta", "Beta.md", "2026-01-02T00:00:00.000Z"),
+        ];
+        state.toggle_pinned(RelativePath::from("Alpha.md"));
+        assert_eq!(state.active_entries()[0].path.as_str(), "Alpha.md");
+        assert_eq!(state.pinned_paths, vec![RelativePath::from("Alpha.md")]);
+        state.toggle_pinned(RelativePath::from("Alpha.md"));
+        assert!(state.pinned_paths.is_empty());
+    }
+
+    #[test]
+    fn newly_pinned_entries_follow_the_same_most_recent_order_as_tauri() {
+        let mut state = LibraryState::default();
+        state.entries = vec![
+            entry("note", None, "Alpha", "Alpha.md", "2026-01-01T00:00:00.000Z"),
+            entry("note", None, "Beta", "Beta.md", "2026-01-02T00:00:00.000Z"),
+        ];
+
+        state.toggle_pinned(RelativePath::from("Beta.md"));
+        state.toggle_pinned(RelativePath::from("Alpha.md"));
+
+        assert_eq!(
+            state.pinned_paths,
+            vec![RelativePath::from("Alpha.md"), RelativePath::from("Beta.md")]
+        );
+    }
+
+    #[test]
+    fn toggling_pinned_entry_preserves_the_loaded_window_and_request_generation() {
+        let mut state = LibraryState::default();
+        state.entries = (0..120)
+            .map(|index| {
+                entry(
+                    "note",
+                    None,
+                    &format!("N{index}"),
+                    &format!("N{index}.md"),
+                    "1700000000",
+                )
+            })
+            .collect();
+        state.visible_entry_limit = 120;
+        state.generation = 17;
+        state.page_availability = PageAvailability::MayHaveMore;
+
+        state.toggle_pinned(RelativePath::from("N119.md"));
+
+        assert_eq!(state.visible_entry_limit, 120);
+        assert_eq!(state.generation, 17);
+        assert_eq!(state.page_availability, PageAvailability::MayHaveMore);
+        assert_eq!(state.pinned_paths, vec![RelativePath::from("N119.md")]);
     }
 
     #[test]

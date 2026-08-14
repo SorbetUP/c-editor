@@ -116,6 +116,8 @@ func dispatch(_ request: ActionRequest) -> Int {
   case "scroll":
     guard let position = points.first else { fatalError("scroll requires a point") }
     postMouse(.mouseMoved, at: position)
+    // The shared scenario expresses positive Y as a downward wheel gesture;
+    // WebKit applies the same positive sign to its native wheel event.
     guard let event = CGEvent(scrollWheelEvent2Source: eventSource, units: .pixel, wheelCount: 1, wheel1: request.deltaY ?? 0, wheel2: 0, wheel3: 0) else {
       fatalError("CGEvent could not create a scroll event")
     }

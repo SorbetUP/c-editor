@@ -14,6 +14,11 @@ const roleMap = { button: 'AXButton', menuitem: 'AXMenuItem', textbox: 'AXTextFi
 const textOf = (element) => [element.title, element.description, element.value].filter(Boolean).join(' ')
 const area = (rect) => Math.max(0, Number(rect?.width) || 0) * Math.max(0, Number(rect?.height) || 0)
 const center = (rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 })
+const nativePoint = (rect, target) => {
+  const point = center(rect)
+  const offset = target?.tauri?.nativePointOffset || target?.nativePointOffset || {}
+  return { x: point.x + Number(offset.x || 0), y: point.y + Number(offset.y || 0) }
+}
 
 const elementsFor = (report, target, actionId) => {
   const tauri = target?.tauri || {}
@@ -44,6 +49,7 @@ const cssTarget = (target) => {
   if (tauri.strategy === 'testid') return { selector: `[data-testid="${tauri.value}"]` }
   if (tauri.strategy === 'role') {
     if (tauri.role === 'button' && tauri.name === 'All notes') return { selector: 'button.en-all-notes' }
+    if (tauri.role === 'menuitem') return { selector: '[role="menuitem"]', text: tauri.name }
     return { selector: `${tauri.role === 'button' ? 'button' : `[role="${tauri.role}"]`}[aria-label="${tauri.name}"]` }
   }
   if (tauri.strategy === 'locator-filter') return { selector: tauri.selector, text: tauri.hasText }
@@ -132,14 +138,15 @@ export const executePhysicalAction = async ({ action, pid, requestDir, client, w
     dispatch({ operation: 'press-key', key: action.key, repeatCount: action.repeat || 1 }, requestDir, events)
   } else if (event === 'write-text' || event === 'focus-write-text') {
     const element = await resolveElement({ report, client, target, actionId: action.id, windowBounds })
-    dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
+    dispatch({ operation: 'click', points: [nativePoint(element.rect, target)] }, requestDir, events)
     for (const key of action.keysBeforeText || []) {
       dispatch({ operation: 'press-key', key, control: key.startsWith('Control+') }, requestDir, events)
     }
     dispatch({ operation: 'write-text', text: action.input || action.text || '' }, requestDir, events)
   } else if (event === 'drag') {
-    const source = await resolveElement({ report, client, target: target?.source, actionId: action.id, windowBounds })
-    const dropTarget = await resolveElement({ report, client, target: target?.dropTarget, actionId: action.id, windowBounds })
+    const dragTarget = target?.tauri || target || {}
+    const source = await resolveElement({ report, client, target: dragTarget.source, actionId: action.id, windowBounds })
+    const dropTarget = await resolveElement({ report, client, target: dragTarget.dropTarget, actionId: action.id, windowBounds })
     dispatch({ operation: 'drag', points: dragPoints(source.rect, dropTarget.rect) }, requestDir, events)
   } else if (event === 'scroll') {
     const element = await resolveElement({ report, client, target, actionId: action.id, windowBounds })
@@ -151,7 +158,7 @@ export const executePhysicalAction = async ({ action, pid, requestDir, client, w
     dispatch({ operation: 'move-pointer', points: pointPath(element.rect, action.pointerPath || ['center']) }, requestDir, events)
   } else if (event === 'click') {
     const element = await resolveElement({ report, client, target, actionId: action.id, windowBounds })
-    dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
+    dispatch({ operation: 'click', points: [nativePoint(element.rect, target)] }, requestDir, events)
   } else if (event) {
     throw new MissingPhysicalTargetError(action.id, `unsupported shared physical event ${event}`)
   }

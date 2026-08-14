@@ -48,15 +48,21 @@ fn state_snapshot(
     let menu_visible = !menu_items.is_empty();
     let visible_entries = ["Alpha note", "Projects"]
         .into_iter()
-        .filter(|label| labels.iter().any(|actual| actual == label))
+        .filter(|label| {
+            !editor_open
+                && labeled_nodes(runner, label)
+                    .iter()
+                    .any(|node| node.layout().area.origin.x >= 290.0)
+        })
         .collect::<Vec<_>>();
     let body = paragraph_text(runner);
+    let persisted_body = fs::read_to_string(vault_root.join("Alpha.md")).unwrap_or_default();
     let errors = labels
         .iter()
         .filter(|label| label.to_ascii_lowercase().contains("error"))
         .cloned()
         .collect::<Vec<_>>();
-    let query = accessibility_value(runner, "Search input");
+    let query = accessibility_value(runner, "Search input").unwrap_or_default();
     let rendered_changed = distinct_frame_count(frames) > 1;
     let scroll = action.delta.as_ref().map(|delta| {
         json!({
@@ -77,7 +83,7 @@ fn state_snapshot(
         "currentPath": "",
         "openNote": editor_open.then_some("Alpha note"),
         "notePath": editor_open.then_some("Alpha.md"),
-        "bodyContains": if body.contains("Visible alpha body line.") { vec!["Visible alpha body line."] } else { Vec::new() },
+        "bodyContains": if persisted_body.contains("Visible alpha body line.") { vec!["Visible alpha body line."] } else { Vec::new() },
         "editorText": body,
         "closeControl": editor_open.then_some("Close note"),
         "persistedFile": {

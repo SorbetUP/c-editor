@@ -25,6 +25,8 @@ test('acceptance build exposes the official embedded WebDriver plugin without pr
   assert.match(wdioConfig, /@wdio\/tauri-service/)
   assert.match(packageJson, /"@wdio\/tauri-service":\s*"1\.3\.0"/)
   assert.match(runner, /assert\.equal\(actions\.length, 14/)
+  assert.match(runner, /for \(const chord of action\.keysBeforeText \?\? \[\]\)/)
+  assert.match(runner, /await editor\.addValue\(action\.text\)/)
   assert.doesNotMatch(runner, /browser\.(execute|executeAsync|$$eval|evaluate)\b/)
   assert.doesNotMatch(runner, /mock|fixture injection|injected success/i)
 })

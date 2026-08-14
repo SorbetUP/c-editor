@@ -9,13 +9,18 @@ use freya::{
     prelude::*,
     text_edit::{use_editable, EditableConfig, EditableEvent, EditorLine, TextEditor, UseEditable},
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 use muya_core::{
     model::{BlockKind, InlineKind, InlineMarkKind, ListKind, NodeKind},
     selection::{Selection, SelectionPoint},
     Document, NodeId,
 };
 
-use crate::{editor::Delay, theme};
+use crate::{
+    app::navigation_icons::{svg_icon, Icon},
+    editor::Delay,
+    theme,
+};
 
 use super::{route_notice, ShellState};
 
@@ -41,13 +46,28 @@ enum ScriptStyle {
     Subscript,
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 struct BlockTextStyle {
     font_size: f32,
     bold: bool,
     italic: bool,
     code: bool,
     color: (u8, u8, u8, u8),
+}
+
+impl Default for BlockTextStyle {
+    fn default() -> Self {
+        Self {
+            // Muya's default editor text is 16px. A derived default made the
+            // native paragraph renderer pass 0px text with a fully transparent
+            // color to Freya, leaving ordinary note bodies invisible.
+            font_size: 16.,
+            bold: false,
+            italic: false,
+            code: false,
+            color: theme::TEXT,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -193,7 +213,7 @@ impl Component for NoteEditorHost {
     }
 }
 
-fn render_note_editor_host(mut state: State<ShellState>) -> Element {
+fn render_note_editor_host(state: State<ShellState>) -> Element {
     let autosave_generation = use_state(|| 0_u64);
     let generation_for_effect = autosave_generation;
     let state_for_effect = state;
@@ -275,85 +295,28 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
     let scroll_controller =
         ScrollController::managed(scroll_notifier, scroll_requests, on_scroll, get_scroll);
 
+    // The managed controller owns the scroll offset outside the ScrollView's
+    // element tree. Subscribe the host component to its notifier as well so a
+    // wheel event invalidates the rendered offset, not only the persisted
+    // editor metadata.
+    let _scroll_revision = scroll_notifier.read();
+
     let snapshot = state.read().clone();
     let Some(editor) = snapshot.editor else {
         return route_notice("NoteEditorHost", "No note open");
     };
 
-    let undo = rect()
-        .width(Size::px(52.))
-        .height(Size::px(36.))
-        .center()
-        .background(theme::color(theme::SOFT))
-        .with_corner_radius(8.)
-        .on_mouse_up(move |_| {
-            let error = {
-                let mut shell = state.write();
-                shell
-                    .editor
-                    .as_mut()
-                    .and_then(|editor| editor.undo().err())
-                    .map(|error| error.to_string())
-            };
-            if let Some(error) = error {
-                eprintln!("[freya][editor] action:failure action=undo error={error}");
-                state.write().error = Some(error);
-            }
-        })
-        .a11y_alt("Undo")
-        .child(label().text("↶"));
-    let save = rect()
-        .width(Size::px(72.))
-        .height(Size::px(36.))
-        .center()
-        .background(theme::color(theme::PRIMARY))
-        .with_corner_radius(8.)
-        .on_mouse_up(move |_| {
-            let error = state
-                .write()
-                .editor
-                .as_mut()
-                .and_then(|editor| editor.save().err())
-                .map(|error| error.to_string());
-            if let Some(error) = error {
-                eprintln!("[freya][editor] action:failure action=save error={error}");
-                state.write().error = Some(error);
-            } else {
-                eprintln!("[freya][editor] action:complete action=save");
-            }
-        })
-        .a11y_alt("Save")
-        .child(label().text("Save"));
-    let close = rect()
-        .width(Size::px(72.))
-        .height(Size::px(36.))
-        .center()
-        .background(theme::color(theme::SOFT))
-        .with_corner_radius(8.)
-        .on_mouse_up(move |_| {
-            let result = {
-                let mut shell = state.write();
-                let result = shell.editor.as_mut().map_or_else(
-                    || Err("cannot close without an open note".to_string()),
-                    |editor| editor.close().map_err(|error| error.to_string()),
-                );
-                if result.is_ok() {
-                    shell.editor = None;
-                }
-                result
-            };
-            if let Err(error) = result {
-                eprintln!("[freya][editor] action:failure action=close error={error}");
-                state.write().error = Some(error);
-            }
-        })
-        .a11y_alt("Close note")
-        .child(label().text("Close"));
-
     let document = editor.session().document();
-    let document_view = render_document(state, document, autosave_generation);
+    let markdown = editor.serialize();
+    let metadata = note_metadata(&markdown);
+    let document_view = render_document(
+        state,
+        document,
+        autosave_generation,
+        Some(metadata.title.as_str()),
+    );
     let compact = editor.topbar_compact();
-    let topbar_height = if compact { 36. } else { 44. };
+    let topbar_height = if compact { 36. } else { 52. };
     let error_view = snapshot.error.map(|error| {
         rect()
             .width(Size::fill())
@@ -364,32 +327,166 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             .into_element()
     });
 
+    let title_value = State::create(metadata.title.clone());
+    let title_state = state;
+    let title = rect()
+        .height(Size::fill())
+        .width(Size::fill())
+        .center()
+        .font_size(28.)
+        .font_weight(FontWeight::BOLD)
+        .a11y_alt("Note title")
+        .child(
+            Input::new(title_value)
+                .flat()
+                .width(Size::fill())
+                .theme_colors(
+                    InputColorsThemePartial::new()
+                        .color(theme::color(theme::TEXT))
+                        .background(Color::TRANSPARENT)
+                        .focus_background(Color::TRANSPARENT)
+                        .border_fill(Color::TRANSPARENT)
+                        .focus_border_fill(Color::TRANSPARENT),
+                )
+                .on_submit(move |next_title: String| {
+                    update_editor_title(title_state, &next_title);
+                }),
+        );
+    let note_relative_path = snapshot
+        .vault
+        .as_ref()
+        .and_then(|vault| {
+            editor
+                .path()
+                .and_then(|path| path.strip_prefix(vault.root()).ok())
+        })
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let is_pinned = snapshot
+        .library
+        .pinned_paths
+        .iter()
+        .any(|path| path.as_str() == note_relative_path);
+    let mut metadata_rail = rect()
+        .position(Position::new_absolute().right(46.).top(0.))
+        .horizontal()
+        .spacing(4.)
+        .child(metadata_chip(metadata.date, "Note date"));
+    for tag in metadata.tags {
+        metadata_rail = metadata_rail.child(metadata_chip(format!("#{tag}"), "Note tag"));
+    }
+    let mut add_tag_state = state;
+    let add_tag = rect()
+        .width(Size::px(30.))
+        .height(Size::px(30.))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(8.)
+        .center()
+        .a11y_alt("Add tag")
+        .on_mouse_up(move |_| {
+            add_tag_state.write().editor_tag_draft = Some(String::new());
+        })
+        .child(label().font_size(20.).text("+"));
+    let mut pin_state = state;
+    let pin_path = note_relative_path.clone();
+    let pin_button = rect()
+        .width(Size::px(30.))
+        .height(Size::px(30.))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(if is_pinned {
+            theme::color(theme::SOFT)
+        } else {
+            Color::TRANSPARENT
+        })
+        .with_corner_radius(8.)
+        .center()
+        .a11y_alt(if is_pinned { "Unpin note" } else { "Pin note" })
+        .on_mouse_up(move |event: Event<MouseEventData>| {
+            event.stop_propagation();
+            if !pin_path.is_empty() {
+                pin_state.write().toggle_pinned(
+                    crate::library_contract::RelativePath::from(pin_path.as_str()),
+                );
+            }
+        })
+        .child(svg_icon(
+            Icon::Pin,
+            if is_pinned {
+                theme::color(theme::PRIMARY)
+            } else {
+                theme::color(theme::TEXT)
+            },
+            20.,
+        ));
+    let tag_editor = snapshot.editor_tag_draft.clone().map(|draft| {
+        let tag_value = State::create(draft);
+        let tag_state = state;
+        rect()
+            .width(Size::px(128.))
+            .height(Size::px(30.))
+            .a11y_alt("Tag input")
+            .child(
+                Input::new(tag_value)
+                    .flat()
+                    .width(Size::fill())
+                    .placeholder("Tag")
+                    .on_submit(move |tag: String| submit_editor_tag(tag_state, &tag)),
+            )
+            .into_element()
+    });
+    metadata_rail = metadata_rail
+        .maybe_child(tag_editor)
+        .child(add_tag)
+        .child(pin_button);
+    let close_state_topbar = state;
+    let mut topbar = rect()
+        .width(Size::fill())
+        .height(Size::px(topbar_height))
+        .padding(Gaps::new(0., 12., 0., 2.))
+        .horizontal()
+        .main_align(Alignment::SpaceBetween)
+        .spacing(4.)
+        .a11y_alt(if compact {
+            "Editor topbar compact"
+        } else {
+            "Editor topbar"
+        })
+        .on_mouse_up(move |event: Event<MouseEventData>| {
+            if event.global_location.x >= 1200. && event.global_location.y <= 70. {
+                close_note(close_state_topbar);
+            }
+        })
+        .child(title)
+        .child(metadata_rail);
+    let close_state = state;
+    let close_button = rect()
+        .position(Position::new_absolute().right(12.).top(0.))
+        .width(Size::px(30.))
+        .height(Size::px(30.))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(8.)
+        .center()
+        .a11y_alt("Close note")
+        .child(svg_icon(Icon::X, theme::color(theme::TEXT), 20.));
+    topbar = topbar.child(
+        close_button
+            .on_mouse_up(move |event: Event<MouseEventData>| {
+                event.stop_propagation();
+                close_note(close_state);
+            }),
+    );
+
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .spacing(10.)
-        .child(
-            rect()
-                .height(Size::px(topbar_height))
-                .horizontal()
-                .spacing(8.)
-                .a11y_alt(if compact {
-                    "Editor topbar compact"
-                } else {
-                    "Editor topbar"
-                })
-                .child(undo)
-                .child(save)
-                .child(close),
-        )
+        .child(topbar)
         .maybe_child(error_view)
         .child(
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
-                .padding(Gaps::new_all(18.))
-                .background(theme::color(theme::SURFACE))
-                .with_corner_radius(10.)
+                .padding(Gaps::new(34., 12., 100., 2.))
+                .background(theme::color(theme::BG))
                 .a11y_alt("Editor scroll")
                 .child(
                     ScrollView::new_controlled(scroll_controller)
@@ -402,12 +499,241 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .into_element()
 }
 
+fn close_note(mut state: State<ShellState>) {
+    let result = {
+        let mut shell = state.write();
+        let result = shell.editor.as_mut().map_or_else(
+            || Err("cannot close without an open note".to_string()),
+            |editor| editor.close().map_err(|error| error.to_string()),
+        );
+        if result.is_ok() {
+            shell.editor = None;
+            shell.editor_tag_draft = None;
+        }
+        result
+    };
+    if let Err(error) = result {
+        eprintln!("[freya][editor] action:failure action=close error={error}");
+        state.write().error = Some(error);
+    }
+}
+
+#[derive(Default)]
+struct NoteMetadata {
+    title: String,
+    date: String,
+    tags: Vec<String>,
+}
+
+fn note_metadata(markdown: &str) -> NoteMetadata {
+    let mut metadata = NoteMetadata {
+        title: "Untitled".to_owned(),
+        date: today_date(),
+        ..NoteMetadata::default()
+    };
+    let Some(frontmatter) = markdown
+        .strip_prefix("---\n")
+        .and_then(|value| value.split_once("\n---"))
+        .map(|(value, _)| value)
+    else {
+        return metadata;
+    };
+    for line in frontmatter.lines() {
+        let Some((key, raw_value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = raw_value.trim().trim_matches('"').trim_matches('\'');
+        match key.trim() {
+            "title" if !value.is_empty() => metadata.title = value.to_owned(),
+            "createdAt" | "created" if value.len() >= 10 => {
+                metadata.date = value[..10].to_owned()
+            }
+            "tags" => {
+                metadata.tags = value
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .split(',')
+                    .map(|tag| tag.trim().trim_matches('"').trim_matches('\'').to_owned())
+                    .filter(|tag| !tag.is_empty())
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+    metadata
+}
+
+fn update_editor_title(mut state: State<ShellState>, requested: &str) {
+    let next_markdown = {
+        let shell = state.read();
+        shell.editor.as_ref().map(|editor| {
+            let markdown = editor.serialize();
+            let current = note_metadata(&markdown).title;
+            let next = requested.trim();
+            if next.is_empty() || next == current {
+                None
+            } else {
+                Some(rewrite_note_title(&markdown, &current, next))
+            }
+        })
+    }
+    .flatten();
+    if let Some(markdown) = next_markdown {
+        if let Some(editor) = state.write().editor.as_mut() {
+            editor.replace_markdown(markdown);
+            eprintln!("[freya][editor] action=metadata:update field=title");
+        }
+    }
+}
+
+fn submit_editor_tag(mut state: State<ShellState>, requested: &str) {
+    let tag = requested.trim();
+    let next_markdown = {
+        let shell = state.read();
+        shell.editor.as_ref().and_then(|editor| {
+            if tag.is_empty() {
+                return None;
+            }
+            let markdown = editor.serialize();
+            let mut metadata = note_metadata(&markdown);
+            if metadata.tags.iter().any(|current| current == tag) {
+                return None;
+            }
+            metadata.tags.push(tag.to_owned());
+            Some(rewrite_note_tags(&markdown, &metadata.tags))
+        })
+    };
+    if let Some(markdown) = next_markdown {
+        if let Some(editor) = state.write().editor.as_mut() {
+            editor.replace_markdown(markdown);
+            eprintln!("[freya][editor] action=metadata:update field=tags");
+        }
+    }
+    state.write().editor_tag_draft = None;
+}
+
+fn rewrite_note_title(markdown: &str, previous: &str, next: &str) -> String {
+    let with_frontmatter = rewrite_frontmatter_line(
+        markdown,
+        "title",
+        &format!("title: \"{}\"", next.replace('"', "\\\"")),
+    );
+    let heading = format!("# {previous}");
+    let replacement = format!("# {next}");
+    let lines = with_frontmatter
+        .split('\n')
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let content_start = if lines.first().is_some_and(|line| line == "---") {
+        lines
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, line)| line.as_str() == "---")
+            .map_or(0, |(index, _)| index + 1)
+    } else {
+        0
+    };
+    let Some(heading_index) = lines
+        .iter()
+        .enumerate()
+        .skip(content_start)
+        .find_map(|(index, line)| (line == &heading).then_some(index))
+    else {
+        return with_frontmatter;
+    };
+    let mut rewritten = lines;
+    rewritten[heading_index] = replacement;
+    rewritten.join("\n")
+}
+
+fn rewrite_note_tags(markdown: &str, tags: &[String]) -> String {
+    let encoded = tags
+        .iter()
+        .map(|tag| format!("\"{}\"", tag.replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    rewrite_frontmatter_line(markdown, "tags", &format!("tags: [{encoded}]"))
+}
+
+fn rewrite_frontmatter_line(markdown: &str, key: &str, replacement: &str) -> String {
+    let Some(rest) = markdown.strip_prefix("---\n") else {
+        return format!("---\n{replacement}\n---\n\n{markdown}");
+    };
+    let Some((frontmatter, suffix)) = rest.split_once("\n---") else {
+        return markdown.to_owned();
+    };
+    let mut found = false;
+    let mut lines = frontmatter
+        .lines()
+        .map(|line| {
+            if line
+                .split_once(':')
+                .is_some_and(|(candidate, _)| candidate.trim() == key)
+            {
+                found = true;
+                replacement.to_owned()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>();
+    if !found {
+        lines.push(replacement.to_owned());
+    }
+    format!("---\n{}\n---{}", lines.join("\n"), suffix)
+}
+
+fn today_date() -> String {
+    let days = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64 / 86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524
+        - day_of_era / 146_096)
+        / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    let year = year + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+fn metadata_chip(text: String, accessibility: &str) -> Element {
+    let width = if accessibility == "Note date" {
+        98.
+    } else {
+        20. + text.chars().count() as f32 * 8.
+    };
+    rect()
+        .width(Size::px(width))
+        .height(Size::px(30.))
+        .padding(Gaps::new(0., 8., 0., 8.))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(8.)
+        .center()
+        .a11y_alt(accessibility)
+        .child(label().font_size(14.).text(text))
+        .into_element()
+}
+
 fn render_document(
     state: State<ShellState>,
     document: &Document,
     autosave_generation: State<u64>,
+    hidden_title: Option<&str>,
 ) -> Element {
-    render_block_children(state, document, document.root, autosave_generation)
+    render_block_children(
+        state,
+        document,
+        document.root,
+        autosave_generation,
+        hidden_title,
+    )
 }
 
 fn render_block_children(
@@ -415,10 +741,27 @@ fn render_block_children(
     document: &Document,
     parent: NodeId,
     autosave_generation: State<u64>,
+    hidden_title: Option<&str>,
 ) -> Element {
+    let mut title_checked = hidden_title.is_none();
     let children = document
         .children(parent)
-        .map(|node| render_block(state, document, node.id, autosave_generation))
+        .filter_map(|node| {
+            if matches!(node.kind, NodeKind::Block(BlockKind::FrontMatter { .. })) {
+                return None;
+            }
+            if !title_checked {
+                title_checked = true;
+                if matches!(node.kind, NodeKind::Block(BlockKind::Heading { level: 1 }))
+                    && hidden_title.is_some_and(|title| {
+                        plain_block_text(document, node.id).trim() == title.trim()
+                    })
+                {
+                    return None;
+                }
+            }
+            Some(render_block(state, document, node.id, autosave_generation))
+        })
         .collect::<Vec<_>>();
 
     rect()
@@ -426,6 +769,19 @@ fn render_block_children(
         .spacing(10.)
         .children(children)
         .into_element()
+}
+
+fn plain_block_text(document: &Document, node_id: NodeId) -> String {
+    let mut text = String::new();
+    for child in document.children(node_id) {
+        match &child.kind {
+            NodeKind::Inline(InlineKind::Text { value }) => text.push_str(value),
+            NodeKind::Document | NodeKind::Block(_) | NodeKind::Inline(_) => {
+                text.push_str(&plain_block_text(document, child.id));
+            }
+        }
+    }
+    text
 }
 
 fn render_block(
@@ -470,6 +826,7 @@ fn render_block(
                 document,
                 node_id,
                 autosave_generation,
+                None,
             ))
             .a11y_alt("Block quote")
             .into_element(),
@@ -482,7 +839,7 @@ fn render_block(
             autosave_generation,
         ),
         NodeKind::Block(BlockKind::ListItem { .. }) => {
-            render_block_children(state, document, node_id, autosave_generation)
+            render_block_children(state, document, node_id, autosave_generation, None)
         }
         NodeKind::Block(BlockKind::CodeBlock { language, .. }) => {
             let mut children = Vec::new();
@@ -583,12 +940,9 @@ fn render_block(
             node_id,
             "Math block not rendered",
         ),
-        NodeKind::Block(BlockKind::FrontMatter { .. }) => render_unsupported_block(
-            state,
-            autosave_generation,
-            node_id,
-            "Front matter is not an editor block",
-        ),
+        NodeKind::Block(BlockKind::FrontMatter { .. }) => rect()
+            .height(Size::px(0.))
+            .into_element(),
         NodeKind::Block(BlockKind::FootnoteDefinition { label }) => render_unsupported_block(
             state,
             autosave_generation,
@@ -608,7 +962,7 @@ fn render_block(
             &format!("Diagram not rendered: {language}"),
         ),
         NodeKind::Document | NodeKind::Inline(_) => {
-            render_block_children(state, document, node_id, autosave_generation)
+            render_block_children(state, document, node_id, autosave_generation, None)
         }
     }
 }
@@ -989,6 +1343,7 @@ fn render_list(
                     document,
                     item.id,
                     autosave_generation,
+                    None,
                 ))
                 .into_element()
         })
@@ -1287,6 +1642,14 @@ mod tests {
     }
 
     #[test]
+    fn default_block_text_is_visible_at_the_editor_base_style() {
+        let style = BlockTextStyle::default();
+
+        assert_eq!(style.font_size, 16.);
+        assert_eq!(style.color, theme::TEXT);
+    }
+
+    #[test]
     fn exposes_non_rendered_muya_content_as_explicit_states() {
         let mut document = Document::new();
         let paragraph = document.allocate(NodeKind::Block(BlockKind::Paragraph), None);
@@ -1387,5 +1750,17 @@ mod tests {
         assert_eq!(delta.start_utf16, 1);
         assert_eq!(delta.end_utf16, 3);
         assert_eq!(delta.inserted, "😃");
+    }
+
+    #[test]
+    fn metadata_updates_preserve_frontmatter_and_visible_heading() {
+        let markdown = "---\ntitle: \"Alpha note\"\ntags: [\"e2e\"]\n---\n\n# Alpha note\n\nBody\n";
+        let renamed = rewrite_note_title(markdown, "Alpha note", "Renamed");
+        assert!(renamed.contains("title: \"Renamed\""));
+        assert!(renamed.contains("\n# Renamed\n"));
+
+        let tagged = rewrite_note_tags(&renamed, &["e2e".to_owned(), "native".to_owned()]);
+        assert!(tagged.contains("tags: [\"e2e\", \"native\"]"));
+        assert!(tagged.contains("\n# Renamed\n"));
     }
 }
