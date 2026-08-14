@@ -14,7 +14,7 @@
       "cwd": "../../.."
     },
     "devUrl": "http://127.0.0.1:1420",
-    "frontendDist": "/Users/sorbet/Desktop/Dev/c-editor/build/out/renderer"
+    "frontendDist": "../../../build/out/renderer"
   },
   "app": {
     "withGlobalTauri": true,
