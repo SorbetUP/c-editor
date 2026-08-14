@@ -81,11 +81,18 @@ export const stateSnapshot = async (vaultRoot, action = {}) => {
   const labels = [...railLabels, ...menuLabels]
   const editor = await optional('.en-editor-host .editor-component, .en-note-editor-shell')
   const editorParagraphs = editorOpen ? await browserFor().$$('.editor-component .ag-paragraph') : []
-  const editorText = editorOpen
-    ? editorParagraphs.length
-      ? (await Promise.all(editorParagraphs.map((paragraph) => paragraph.getText().catch(() => '')))).join('\n')
-      : editor ? await editor.getText().catch(() => '') : ''
-    : ''
+  let editorText = ''
+  if (editorOpen) {
+    if (editorParagraphs.length) {
+      const paragraphTexts = []
+      for (let index = 0; index < editorParagraphs.length; index += 1) {
+        paragraphTexts.push(await editorParagraphs[index].getText().catch(() => ''))
+      }
+      editorText = paragraphTexts.join('\n')
+    } else if (editor) {
+      editorText = await editor.getText().catch(() => '')
+    }
+  }
   const query = await value('[placeholder="Search notes, paths, tags, or ideas…"]')
   const resultTitles = await texts('.en-search-result-title')
   const body = await readFile(path.join(vaultRoot, 'Alpha.md'), 'utf8').catch(() => '')
