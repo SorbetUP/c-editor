@@ -323,9 +323,18 @@ pub fn render(
         .on_sized(move |event: Event<SizedEventData>| {
             size_canvas.write().set_size(event.area);
         })
-        .on_mouse_down(move |event: Event<MouseEventData>| {
-            if event.button == Some(MouseButton::Left) {
-                let pointer = point(event.global_location);
+        .on_global_pointer_down(move |event: Event<PointerEventData>| {
+            if event.button() == Some(MouseButton::Left) {
+                let pointer = point(event.global_location());
+                let viewport = stage_canvas.read().clone();
+                let local = viewport.local_pointer(pointer);
+                if local[0] < 0.
+                    || local[1] < 0.
+                    || local[0] > viewport.size[0]
+                    || local[1] > viewport.size[1]
+                {
+                    return;
+                }
                 let world = stage_canvas.read().world_at(pointer);
                 let hit = click_hit_nodes.iter().find(|node| {
                     let dx = world[0] - node.position[0];
@@ -344,10 +353,7 @@ pub fn render(
                 event.stop_propagation();
             }
         })
-        .on_global_pointer_move(move |event: Event<PointerEventData>| {
-            if !event.is_primary() {
-                return;
-            }
+        .on_capture_global_pointer_move(move |event: Event<PointerEventData>| {
             let pointer = point(event.global_location());
             if move_canvas.read().is_dragging() {
                 move_canvas.write().move_pointer(pointer);

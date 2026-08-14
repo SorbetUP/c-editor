@@ -496,11 +496,9 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             }
         })
         .on_global_pointer_move(move |event: Event<PointerEventData>| {
-            if event.is_primary() {
-                resize_move_state
-                    .write()
-                    .update_sidebar_resize(event.global_location().x);
-            }
+            resize_move_state
+                .write()
+                .update_sidebar_resize(event.global_location().x);
         })
         .on_global_pointer_press(move |event: Event<PointerEventData>| {
             if event.is_primary() {
@@ -556,16 +554,11 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .a11y_alt("Sidebar")
         .child(sidebar_scroll);
     rect()
-        .width(Size::px(f32::from(snapshot.sidebar_width.get())))
+        .width(Size::px(sidebar_width + theme::SIDEBAR_RESIZER_WIDTH))
         .height(Size::fill())
+        .horizontal()
         .child(sidebar)
-        .child(
-            rect()
-                .position(Position::new_absolute().top(0.).right(0.))
-                .width(Size::px(theme::SIDEBAR_RESIZER_WIDTH))
-                .height(Size::fill())
-                .child(resizer),
-        )
+        .child(resizer)
         .into_element()
 }
 

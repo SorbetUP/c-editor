@@ -33,7 +33,12 @@ pub(crate) fn key_down_handler(
                 .focus_target()
                 .is_some_and(|target| !contains_node(editor.session().document(), node_id, target))
         });
-        if !stale_focus {
+        let composition_active = state
+            .read()
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.snapshot().composition_active);
+        if !stale_focus && !composition_active {
             if let Err(error) = sync_muya_selection(state, node_id, &editable) {
                 state.write().error = Some(error.clone());
                 eprintln!("[freya][editor] action:failure action=selection error={error}");

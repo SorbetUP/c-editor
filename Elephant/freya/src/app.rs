@@ -298,12 +298,13 @@ fn app_shell(state: State<ShellState>) -> Element {
         .expect("AppShell source contract must remain registered");
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state)
-    } else if snapshot.view == WorkspaceView::Graph {
+    } else if snapshot.view == WorkspaceView::Graph || snapshot.search_open {
         explorer::explorer_view(
             explorer_state,
             explorer_query,
             explorer_graph_query,
             graph_canvas_state,
+            snapshot.search_open,
         )
     } else {
         library::main_content(state)

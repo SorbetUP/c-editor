@@ -928,4 +928,32 @@ mod tests {
             .expect("the edit after selection must use the unchanged revision");
         assert_eq!(inserted.markdown, "aXlpha");
     }
+
+    #[test]
+    fn dispatches_task_toggle_through_the_real_editor_adapter() {
+        let mut document = EditorDocument::from_markdown("- [ ] ship it");
+        let item = document
+            .session()
+            .document()
+            .nodes
+            .values()
+            .find_map(|node| match node.kind {
+                NodeKind::Block(muya_core::model::BlockKind::ListItem { checked: Some(false) }) => {
+                    Some(node.id)
+                }
+                _ => None,
+            })
+            .expect("fixture must contain an unchecked task item");
+
+        document
+            .dispatch(EditorAction::SetTaskChecked {
+                item,
+                checked: true,
+                auto_check: false,
+            })
+            .expect("task toggle must dispatch through Muya");
+
+        assert_eq!(document.serialize(), "- [x] ship it");
+        assert!(document.is_dirty());
+    }
 }

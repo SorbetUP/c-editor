@@ -14,10 +14,21 @@ pub(crate) fn ime_preedit_handler(
     mut autosave_generation: State<u64>,
 ) -> impl FnMut(Event<ImePreeditEventData>) {
     move |event: Event<ImePreeditEventData>| {
-        if let Err(error) = sync_muya_selection(state, node_id, &editable) {
-            state.write().error = Some(error.clone());
-            eprintln!("[freya][editor] action:failure action=ime-selection error={error}");
-            return;
+        // The first preedit starts at the native caret. Subsequent preedit
+        // updates must preserve Muya's composition range; syncing the
+        // transient Freya selection again would move the replacement caret
+        // and replace the committed prefix instead of the previous preedit.
+        let composition_active = state
+            .read()
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.snapshot().composition_active);
+        if !composition_active {
+            if let Err(error) = sync_muya_selection(state, node_id, &editable) {
+                state.write().error = Some(error.clone());
+                eprintln!("[freya][editor] action:failure action=ime-selection error={error}");
+                return;
+            }
         }
         let result = {
             let mut shell = state.write();

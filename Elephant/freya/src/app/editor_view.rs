@@ -115,8 +115,8 @@ impl Component for EditableInlineBlock {
                 contains
             })
         });
-        use_side_effect(move || {
-            if should_focus {
+        use_side_effect_with_deps(&should_focus, move |should_focus| {
+            if *should_focus {
                 a11y_id.request_focus();
             }
         });
@@ -132,6 +132,10 @@ impl Component for EditableInlineBlock {
         }
 
         let cursor_index = editable.editor().read().cursor_pos();
+        let document_revision = snapshot
+            .editor
+            .as_ref()
+            .map_or(0, |editor| editor.session().revision());
         let highlights = editable
             .editor()
             .read()
@@ -170,7 +174,12 @@ impl Component for EditableInlineBlock {
         let on_pointer_up = move |_| editable.process_event(EditableEvent::Release);
 
         let mut view = paragraph()
+            .key(("editor-paragraph", self.node_id, document_revision))
             .a11y_id(a11y_id)
+            // Muya's table navigation needs real focusable cell owners. Keep
+            // ordinary paragraphs on the same focus path as before so native
+            // clipboard and IME events continue to reach the editable node.
+            .a11y_focusable(self.accessibility_label.contains("Table"))
             .width(Size::fill())
             .holder(holder.read().clone())
             .cursor_index(cursor_index)
@@ -375,6 +384,39 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
     for tag in metadata.tags {
         metadata_rail = metadata_rail.child(metadata_chip(format!("#{tag}"), "Note tag"));
     }
+    let save_bounds = use_state(|| None::<Area>);
+    let mut save_bounds_for_size = save_bounds;
+    let save_bounds_for_event = save_bounds;
+    let save_state = state;
+    let save_button = rect()
+        .width(Size::px(58.))
+        .height(Size::px(30.))
+        .padding(Gaps::new(0., 10., 0., 10.))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(8.)
+        .center()
+        .a11y_alt("Save")
+        .on_sized(move |event: Event<SizedEventData>| {
+            save_bounds_for_size.set(Some(event.area));
+        })
+        .child(label().font_size(12.).font_weight(FontWeight::BOLD).text("Save"));
+    let mut save_button = save_button;
+    save_button = save_button.on_global_pointer_press(
+        move |event: Event<PointerEventData>| {
+            let Some(area) = save_bounds_for_event.read().clone() else {
+                return;
+            };
+            let (x, y) = event.global_location().to_tuple();
+            let inside = x as f32 >= area.origin.x
+                && x as f32 <= area.origin.x + area.size.width
+                && y as f32 >= area.origin.y
+                && y as f32 <= area.origin.y + area.size.height;
+            if inside {
+                event.stop_propagation();
+                save_note(save_state);
+            }
+        },
+    );
     let mut add_tag_state = state;
     let add_tag = rect()
         .width(Size::px(30.))
@@ -436,6 +478,7 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
     });
     metadata_rail = metadata_rail
         .maybe_child(tag_editor)
+        .child(save_button)
         .child(add_tag)
         .child(pin_button);
     let close_state_topbar = state;
@@ -515,6 +558,23 @@ fn close_note(mut state: State<ShellState>) {
     if let Err(error) = result {
         eprintln!("[freya][editor] action:failure action=close error={error}");
         state.write().error = Some(error);
+    }
+}
+
+fn save_note(mut state: State<ShellState>) {
+    let result = state
+        .write()
+        .editor
+        .as_mut()
+        .map_or_else(|| Err("cannot save without an open note".to_owned()), |editor| {
+            editor.save().map_err(|error| error.to_string())
+        });
+    match result {
+        Ok(()) => eprintln!("[freya][editor] action:complete action=save"),
+        Err(error) => {
+            eprintln!("[freya][editor] action:failure action=save error={error}");
+            state.write().error = Some(error);
+        }
     }
 }
 

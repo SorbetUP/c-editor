@@ -685,6 +685,7 @@ pub fn explorer_view(
     query: State<String>,
     graph_query: State<String>,
     graph_canvas: State<super::graph_canvas::GraphCanvasState>,
+    overlay_open: bool,
 ) -> Element {
     let snapshot = state.read().clone();
 
@@ -712,8 +713,12 @@ pub fn explorer_view(
     };
 
     let content = match snapshot.surface {
-        ExplorerSurface::Search => search_surface(state, &snapshot, search_input, query),
-        ExplorerSurface::Graph => graph_surface(state, &snapshot, graph_input, graph_canvas),
+        // The modal owns the search input while it is open. Keep the Explorer
+        // header mounted for the Search/Graph workspace contract, but do not
+        // mount a second search editor underneath the modal.
+        ExplorerSurface::Search if overlay_open => None,
+        ExplorerSurface::Search => Some(search_surface(state, &snapshot, search_input, query)),
+        ExplorerSurface::Graph => Some(graph_surface(state, &snapshot, graph_input, graph_canvas)),
     };
 
     rect()
@@ -723,7 +728,7 @@ pub fn explorer_view(
         .color(theme::color(theme::TEXT))
         .spacing(10.)
         .child(explorer_header(state, snapshot.surface))
-        .child(content)
+        .maybe_child(content)
         .into_element()
 }
 

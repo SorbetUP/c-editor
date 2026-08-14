@@ -272,15 +272,19 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
 
 fn library_grid(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
-    let entries = snapshot
-        .library
-        .visible_entries()
+    let visible_entries = snapshot.library.visible_entries();
+    let fallback_menu_path = visible_entries
+        .iter()
+        .find(|entry| !matches!(entry.effective_kind(), ContractKind::Folder))
+        .map(|entry| entry.path.clone());
+    let entries = visible_entries
         .into_iter()
         .map(|entry| {
             LibraryCard {
                 entry: entry.clone(),
                 mode: snapshot.library.view_mode,
                 state,
+                fallback_menu: fallback_menu_path.as_ref() == Some(&entry.path),
             }
             .into_element()
         })
@@ -316,6 +320,7 @@ struct LibraryCard {
     entry: LibraryEntry,
     mode: ViewMode,
     state: State<ShellState>,
+    fallback_menu: bool,
 }
 
 impl Component for LibraryCard {
@@ -334,6 +339,7 @@ impl Component for LibraryCard {
             card_menu_state,
             rename_value,
             hover_state,
+            self.fallback_menu,
         )
     }
 }
@@ -344,7 +350,8 @@ fn render_library_card(
     state: State<ShellState>,
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
-    mut hover_state: State<bool>,
+    hover_state: State<bool>,
+    fallback_menu: bool,
 ) -> Element {
     let path = entry.path.as_str().to_string();
     let is_drawing =
@@ -359,6 +366,11 @@ fn render_library_card(
     let hover_key = format!("card:{path}");
     let hovered = *hover_state.read()
         || state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let any_card_hovered = state
+        .read()
+        .hovered_target
+        .as_deref()
+        .is_some_and(|target| target.starts_with("card:"));
     let is_pinned = state
         .read()
         .library
@@ -387,7 +399,11 @@ fn render_library_card(
     } else {
         None
     };
-    let menu_trigger = {
+    // With no pointer hover the legacy shell still exposes one accessible
+    // action trigger (the first note). Once a card is hovered, expose only
+    // that card's trigger so overlays do not duplicate the action contract.
+    let show_menu_trigger = hovered || (fallback_menu && !any_card_hovered);
+    let menu_trigger = if show_menu_trigger {
         let mut trigger_state = card_menu_state;
         Some(
             rect()
@@ -410,6 +426,8 @@ fn render_library_card(
                 })
                 .child(svg_icon(Icon::MoreHorizontal, theme::color(theme::MUTED), 18.)),
         )
+    } else {
+        None
     };
     let pin_trigger = if hovered || is_pinned {
         let mut pin_state = state;
@@ -529,7 +547,7 @@ fn render_library_card(
         .background(theme::color(if hovered {
             theme::SOFT
         } else {
-            theme::mix(theme::SURFACE, theme::BG, 0.34)
+            theme::SURFACE
         }))
         .border(
             Border::new()
