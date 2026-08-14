@@ -71,6 +71,7 @@ impl Component for EditableInlineBlock {
                 &mut spans,
             );
         }
+        coalesce_adjacent_spans(&mut spans);
         if spans.is_empty() {
             spans.push(styled_span(String::new(), InlineStyle::default()));
         }
@@ -1228,6 +1229,20 @@ fn styled_span(value: String, style: InlineStyle) -> Span<'static> {
         }
     }
     span
+}
+
+fn coalesce_adjacent_spans(spans: &mut Vec<Span<'static>>) {
+    let mut merged: Vec<Span<'static>> = Vec::with_capacity(spans.len());
+    for span in spans.drain(..) {
+        if let Some(previous) = merged.last_mut() {
+            if previous.text_style_data == span.text_style_data {
+                previous.text = format!("{}{}", previous.text, span.text).into();
+                continue;
+            }
+        }
+        merged.push(span);
+    }
+    *spans = merged;
 }
 
 fn heading_font_size(level: u8) -> f32 {

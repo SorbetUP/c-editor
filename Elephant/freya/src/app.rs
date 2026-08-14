@@ -306,7 +306,16 @@ fn app_shell(state: State<ShellState>) -> Element {
                 .height(Size::fill())
                 .horizontal()
                 .child(navigation::icon_rail(state, palette, &settings_effects))
-                .child(SidebarNavHost { state, palette }.into_element())
+                .child(
+                    rect()
+                        .width(Size::px(if snapshot.sidebar_visible {
+                            f32::from(snapshot.sidebar_width.get())
+                        } else {
+                            0.
+                        }))
+                        .height(Size::fill())
+                        .child(SidebarNavHost { state, palette }.into_element()),
+                )
                 .child(content),
         )
         .a11y_alt(contract.provenance.component.source_name());

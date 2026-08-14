@@ -12,8 +12,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-type ClipboardResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
 #[derive(Clone)]
 struct MemoryClipboard(Arc<Mutex<String>>);
 
@@ -33,7 +31,10 @@ impl ClipboardProvider for MemoryClipboard {
     }
 }
 
-fn boxed_clipboard_error(message: &str) -> Box<dyn std::error::Error + Send + Sync> {
+type ClipboardResult<T> =
+    std::result::Result<T, Box<dyn std::error::Error + Send + Sync + 'static>>;
+
+fn boxed_clipboard_error(message: &str) -> Box<dyn std::error::Error + Send + Sync + 'static> {
     Box::new(std::io::Error::other(message))
 }
 

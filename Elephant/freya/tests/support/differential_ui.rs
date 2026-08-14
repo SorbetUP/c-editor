@@ -19,7 +19,7 @@ pub fn require_label(runner: &TestingRunner, label: &str) -> TestingNode {
 pub fn require_note_card(runner: &TestingRunner, label: &str) -> TestingNode {
     labeled_nodes(runner, label)
         .into_iter()
-        .find(|node| node.layout().area.origin.x > 300.0)
+        .find(|node| node.layout().area.origin.x >= 300.0)
         .unwrap_or_else(|| {
             panic!(
                 "Freya action target is missing: visible library card with accessibility label {label:?}"
@@ -110,7 +110,13 @@ pub fn accessibility_value(runner: &TestingRunner, label: &str) -> Option<String
 }
 
 pub fn read_rail_order(vault_root: &Path) -> Vec<String> {
-    let path = vault_root.join(".elephantnote/workspace.json");
+    let paths = [
+        vault_root.join(".elephantnote/config/workspace.json"),
+        vault_root.join(".elephantnote/workspace.json"),
+    ];
+    let Some(path) = paths.iter().find(|path| path.is_file()) else {
+        return vec!["sidebar-toggle".into(), "search".into()];
+    };
     let Ok(raw) = fs::read_to_string(path) else {
         return vec!["sidebar-toggle".into(), "search".into()];
     };
