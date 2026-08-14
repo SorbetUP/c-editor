@@ -14,54 +14,100 @@ pub(super) fn preference_switch(
     active: bool,
     alt: &'static str,
 ) -> Element {
-    let palette = state.read().effects().palette();
-    let mut state = state;
-    rect()
-        .width(Size::fill())
-        .padding(Gaps::new(10., 12., 10., 12.))
-        .background(theme::token_color(palette, theme::ThemeToken::Bg))
-        .border(
-            Border::new()
-                .fill(theme::token_color(palette, theme::ThemeToken::Border))
-                .width(1.),
-        )
-        .with_corner_radius(8.)
-        .horizontal()
-        .main_align(Alignment::SpaceBetween)
-        .child(
-            rect()
-                .spacing(3.)
-                .child(label().font_weight(FontWeight::BOLD).text(title))
-                .child(
-                    label()
-                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
-                        .text(description),
-                ),
-        )
-        .child(
-            rect()
-                .height(Size::px(30.))
-                .padding(Gaps::new(0., 10., 0., 10.))
-                .center()
-                .with_corner_radius(15.)
-                .background(theme::token_color(
-                    palette,
-                    if active {
-                        theme::ThemeToken::Primary
-                    } else {
-                        theme::ThemeToken::Surface
-                    },
-                ))
-                .a11y_alt(alt)
-                // Use Freya's semantic press event so mouse, touch and keyboard
-                // activation all share the same functional transition.
-                .on_press(move |event: Event<PressEventData>| {
+    PreferenceSwitch {
+        state,
+        title,
+        description,
+        key,
+        active,
+        alt,
+    }
+    .into_element()
+}
+
+#[derive(PartialEq)]
+struct PreferenceSwitch {
+    state: State<SettingsViewState>,
+    title: &'static str,
+    description: &'static str,
+    key: &'static str,
+    active: bool,
+    alt: &'static str,
+}
+
+impl Component for PreferenceSwitch {
+    fn render(&self) -> impl IntoElement {
+        let palette = self.state.read().effects().palette();
+        let switch_bounds = use_state(|| None::<Area>);
+        let mut bounds_for_size = switch_bounds;
+        let bounds_for_event = switch_bounds;
+        let mut pointer_state = self.state;
+        let mut keyboard_state = self.state;
+        let key = self.key;
+        let switch = rect()
+            .height(Size::px(30.))
+            .padding(Gaps::new(0., 10., 0., 10.))
+            .center()
+            .with_corner_radius(15.)
+            .background(theme::token_color(
+                palette,
+                if self.active {
+                    theme::ThemeToken::Primary
+                } else {
+                    theme::ThemeToken::Surface
+                },
+            ))
+            .a11y_alt(self.alt)
+            .on_sized(move |event: Event<SizedEventData>| {
+                bounds_for_size.set(Some(event.area));
+            })
+            .on_global_pointer_down(move |event: Event<PointerEventData>| {
+                let left_mouse = event.button() == Some(MouseButton::Left);
+                let touch = event.button().is_none();
+                let Some(area) = bounds_for_event.read().clone() else {
+                    return;
+                };
+                let (x, y) = event.global_location().to_tuple();
+                let inside = x as f32 >= area.origin.x
+                    && x as f32 <= area.origin.x + area.size.width
+                    && y as f32 >= area.origin.y
+                    && y as f32 <= area.origin.y + area.size.height;
+                if inside && (left_mouse || touch) {
                     event.stop_propagation();
-                    state.write().toggle_bool(key);
-                })
-                .child(label().text(if active { "On" } else { "Off" })),
-        )
-        .into_element()
+                    pointer_state.write().toggle_bool(key);
+                }
+            })
+            .on_key_down(move |event: Event<KeyboardEventData>| {
+                if event.is_press_event() {
+                    keyboard_state.write().toggle_bool(key);
+                }
+            })
+            .child(label().text(if self.active { "On" } else { "Off" }));
+        rect()
+            .width(Size::fill())
+            .padding(Gaps::new(10., 12., 10., 12.))
+            .background(theme::token_color(palette, theme::ThemeToken::Bg))
+            .border(
+                Border::new()
+                    .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                    .width(1.),
+            )
+            .with_corner_radius(8.)
+            .horizontal()
+            .main_align(Alignment::SpaceBetween)
+            .child(
+                rect()
+                    .spacing(3.)
+                    .child(label().font_weight(FontWeight::BOLD).text(self.title))
+                    .child(
+                        label()
+                            .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                            .text(self.description),
+                    ),
+            )
+            .child(switch)
+            .into_element()
+    }
 }
 
 pub(super) fn text_preference(
