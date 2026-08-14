@@ -53,7 +53,9 @@ pub(super) fn preference_switch(
                     },
                 ))
                 .a11y_alt(alt)
-                .on_mouse_up(move |event: Event<MouseEventData>| {
+                // Use Freya's semantic press event so mouse, touch and keyboard
+                // activation all share the same functional transition.
+                .on_press(move |event: Event<PressEventData>| {
                     event.stop_propagation();
                     state.write().toggle_bool(key);
                 })
