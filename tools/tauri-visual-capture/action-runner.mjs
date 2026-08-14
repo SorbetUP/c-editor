@@ -53,7 +53,13 @@ export const runSharedActions = async ({ shared, client, fixture, runtime, manif
       const frames = []
       try {
         frames.push(captureFrame(action, 0, action.frameTimes[0] ?? 0, 'before'))
-        const physical = executePhysicalAction({ action: shared.scenario.actions[action.index], pid: runtime.pid, requestDir: requestRoot })
+        const physical = await executePhysicalAction({
+          action: shared.scenario.actions[action.index],
+          pid: runtime.pid,
+          requestDir: requestRoot,
+          client,
+          windowBounds: manifest.window?.bounds
+        })
         manifest.physicalInput.status = 'dispatched'
         manifest.physicalInput.events.push(...physical.events)
         for (let index = 1; index < action.frameTimes.length; index += 1) {

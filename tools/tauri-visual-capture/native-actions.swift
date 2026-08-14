@@ -1,8 +1,10 @@
 import CoreGraphics
 import Foundation
+import AppKit
 
 struct ActionRequest: Codable {
   let operation: String
+  let processId: Int32?
   let points: [[Double]]?
   let key: String?
   let repeatCount: Int?
@@ -23,9 +25,14 @@ func point(_ values: [Double]) -> CGPoint {
   CGPoint(x: values.first ?? 0, y: values.dropFirst().first ?? 0)
 }
 
+let eventSource = CGEventSource(stateID: .hidSystemState)
+
 func postMouse(_ type: CGEventType, at position: CGPoint, button: CGMouseButton = .left) {
-  guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: position, mouseButton: button) else {
+  guard let event = CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: position, mouseButton: button) else {
     fatalError("CGEvent could not create a mouse event")
+  }
+  if type == .leftMouseDown || type == .leftMouseUp {
+    event.setIntegerValueField(.mouseEventClickState, value: 1)
   }
   event.post(tap: .cghidEventTap)
 }
@@ -46,8 +53,8 @@ func keyCode(_ key: String) -> CGKeyCode {
 func postKey(_ name: String, control: Bool, command: Bool) {
   let code = keyCode(name)
   let flags: CGEventFlags = [control ? .maskControl : [], command ? .maskCommand : []]
-  guard let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
-        let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else {
+  guard let down = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: true),
+        let up = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: false) else {
     fatalError("CGEvent could not create a keyboard event")
   }
   down.flags = flags
@@ -58,19 +65,27 @@ func postKey(_ name: String, control: Bool, command: Bool) {
 }
 
 func postText(_ value: String) {
-  guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true) else {
+  guard let event = CGEvent(keyboardEventSource: eventSource, virtualKey: 0, keyDown: true) else {
     fatalError("CGEvent could not create a text event")
   }
   var utf16 = Array(value.utf16)
   event.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
   event.post(tap: .cghidEventTap)
   usleep(12_000)
-  if let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+  if let up = CGEvent(keyboardEventSource: eventSource, virtualKey: 0, keyDown: false) {
     up.post(tap: .cghidEventTap)
   }
 }
 
+func activateProcess(_ processId: Int32?) {
+  guard let processId,
+        let application = NSRunningApplication(processIdentifier: pid_t(processId)) else { return }
+  application.activate(options: [.activateIgnoringOtherApps])
+  usleep(80_000)
+}
+
 func dispatch(_ request: ActionRequest) -> Int {
+  activateProcess(request.processId)
   let points = (request.points ?? []).map(point)
   switch request.operation {
   case "move-pointer":
@@ -101,7 +116,7 @@ func dispatch(_ request: ActionRequest) -> Int {
   case "scroll":
     guard let position = points.first else { fatalError("scroll requires a point") }
     postMouse(.mouseMoved, at: position)
-    guard let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: request.deltaY ?? 0, wheel2: 0, wheel3: 0) else {
+    guard let event = CGEvent(scrollWheelEvent2Source: eventSource, units: .pixel, wheelCount: 1, wheel1: request.deltaY ?? 0, wheel2: 0, wheel3: 0) else {
       fatalError("CGEvent could not create a scroll event")
     }
     event.post(tap: .cghidEventTap)

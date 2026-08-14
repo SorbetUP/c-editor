@@ -38,6 +38,53 @@ const elementsFor = (report, target, actionId) => {
   throw new MissingPhysicalTargetError(actionId, `no unambiguous macOS Accessibility target for ${JSON.stringify(tauri)}`)
 }
 
+const cssTarget = (target) => {
+  const tauri = target?.tauri || target || {}
+  if (tauri.strategy === 'placeholder') return { selector: `[placeholder="${tauri.value}"]` }
+  if (tauri.strategy === 'testid') return { selector: `[data-testid="${tauri.value}"]` }
+  if (tauri.strategy === 'role') {
+    if (tauri.role === 'button' && tauri.name === 'All notes') return { selector: 'button.en-all-notes' }
+    return { selector: `${tauri.role === 'button' ? 'button' : `[role="${tauri.role}"]`}[aria-label="${tauri.name}"]` }
+  }
+  if (tauri.strategy === 'locator-filter') return { selector: tauri.selector, text: tauri.hasText }
+  if (tauri.strategy === 'css') return { selector: tauri.selector }
+  return null
+}
+
+const translated = (rect, windowBounds, scale = { x: 1, y: 1 }) => ({
+  x: Number(windowBounds?.x || 0) + Number(rect.x || 0) * scale.x,
+  y: Number(windowBounds?.y || 0) + Number(rect.y || 0) * scale.y,
+  width: Number(rect.width || 0) * scale.x,
+  height: Number(rect.height || 0) * scale.y
+})
+
+export const translateObservedRect = ({ rect, windowBounds, viewportRect }) => {
+  // The acceptance DOM is rooted at the native window origin. contentBounds is
+  // only the capture crop and must never be used to position input events.
+  const scale = {
+    x: viewportRect?.width > 0 && windowBounds?.width > 0 ? Number(windowBounds.width) / Number(viewportRect.width) : 1,
+    y: viewportRect?.height > 0 && windowBounds?.height > 0 ? Number(windowBounds.height) / Number(viewportRect.height) : 1
+  }
+  return { rect: translated(rect, windowBounds, scale), scale }
+}
+
+const observedElement = async (client, target, actionId, windowBounds) => {
+  const query = cssTarget(target)
+  if (!query || !client) return null
+  const observation = await client.command('readDom', query.selector, query.text ?? null)
+  if (!observation?.exists || !observation.visible || !observation.rect || area(observation.rect) <= 1) {
+    throw new MissingPhysicalTargetError(actionId, `no visible observation target for ${JSON.stringify(query)}`)
+  }
+  const viewport = await client.command('readDom', '.en-shell')
+  const translatedObservation = translateObservedRect({ rect: observation.rect, windowBounds, viewportRect: viewport?.rect })
+  return { ...translatedObservation, cssRect: observation.rect }
+}
+
+const resolveElement = async ({ report, client, target, actionId, windowBounds }) => {
+  if (client && cssTarget(target)) return observedElement(client, target, actionId, windowBounds)
+  return elementsFor(report, target, actionId)
+}
+
 const pointPath = (rect, shape = []) => {
   const point = center(rect)
   return shape.map((name) => {
@@ -57,9 +104,11 @@ const dragPoints = (source, drop) => {
 }
 
 const dispatch = (request, requestDir, events) => {
-  const filename = path.join(requestDir, `${String(events.length).padStart(3, '0')}-${request.operation}.json`)
+  const filename = path.join(requestDir, `${events.actionId || 'action'}-${String(events.length).padStart(3, '0')}-${request.operation}.json`)
   const nativePoints = (request.points || []).map((point) => [Number(point.x), Number(point.y)])
-  const nativeRequest = request.points ? { ...request, points: nativePoints } : request
+  const nativeRequest = request.points
+    ? { ...request, processId: events.processId, points: nativePoints }
+    : { ...request, processId: events.processId }
   writeFileSync(filename, `${JSON.stringify(nativeRequest, null, 2)}\n`, 'utf8')
   const startedAt = Date.now()
   const result = dispatchNativeAction({ requestFile: filename })
@@ -71,35 +120,37 @@ export const observeAccessibility = (pid) => inspectAccessibility({ pid })
 
 export const resolvePhysicalEvent = (action) => action.event || (action.target ? 'move-pointer' : null)
 
-export const executePhysicalAction = ({ action, pid, requestDir }) => {
+export const executePhysicalAction = async ({ action, pid, requestDir, client, windowBounds }) => {
   const report = inspectAccessibility({ pid })
   if (!report.accessibilityTrusted) throw new MissingPhysicalTargetError(action.id, 'macOS Accessibility trust is unavailable; bridge control is forbidden')
   const events = []
+  events.processId = pid
+  events.actionId = action.id
   const target = action.target
   const event = resolvePhysicalEvent(action)
   if (event === 'press-key') {
     dispatch({ operation: 'press-key', key: action.key, repeatCount: action.repeat || 1 }, requestDir, events)
   } else if (event === 'write-text' || event === 'focus-write-text') {
-    const element = elementsFor(report, target, action.id)
+    const element = await resolveElement({ report, client, target, actionId: action.id, windowBounds })
     dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
     for (const key of action.keysBeforeText || []) {
       dispatch({ operation: 'press-key', key, control: key.startsWith('Control+') }, requestDir, events)
     }
     dispatch({ operation: 'write-text', text: action.input || action.text || '' }, requestDir, events)
   } else if (event === 'drag') {
-    const source = elementsFor(report, target?.source, action.id)
-    const dropTarget = elementsFor(report, target?.dropTarget, action.id)
+    const source = await resolveElement({ report, client, target: target?.source, actionId: action.id, windowBounds })
+    const dropTarget = await resolveElement({ report, client, target: target?.dropTarget, actionId: action.id, windowBounds })
     dispatch({ operation: 'drag', points: dragPoints(source.rect, dropTarget.rect) }, requestDir, events)
   } else if (event === 'scroll') {
-    const element = elementsFor(report, target, action.id)
+    const element = await resolveElement({ report, client, target, actionId: action.id, windowBounds })
     const points = pointPath(element.rect, action.pointerPath || ['center'])
     dispatch({ operation: 'move-pointer', points }, requestDir, events)
     dispatch({ operation: 'scroll', points: [points.at(-1)], deltaY: action.delta?.y || 0 }, requestDir, events)
   } else if (event === 'move-pointer') {
-    const element = elementsFor(report, target, action.id)
+    const element = await resolveElement({ report, client, target, actionId: action.id, windowBounds })
     dispatch({ operation: 'move-pointer', points: pointPath(element.rect, action.pointerPath || ['center']) }, requestDir, events)
   } else if (event === 'click') {
-    const element = elementsFor(report, target, action.id)
+    const element = await resolveElement({ report, client, target, actionId: action.id, windowBounds })
     dispatch({ operation: 'click', points: [center(element.rect)] }, requestDir, events)
   } else if (event) {
     throw new MissingPhysicalTargetError(action.id, `unsupported shared physical event ${event}`)
