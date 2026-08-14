@@ -162,7 +162,7 @@
   },
   "viewport": {
     "width": 1280,
-    "height": 840,
+    "height": 684,
     "scaleFactor": 1,
     "deviceScaleFactor": 1,
     "fullPage": false,
@@ -386,7 +386,7 @@
         "x": 0,
         "y": 560
       },
-      "pointerPath": ["center", "center-plus-y-120", "center-plus-y-240"],
+      "pointerPath": ["center", "center", "center"],
       "durationMs": 400,
       "frames": [0, 50, 100, 150, 200, 250, 300, 350, 400],
       "checkpoint": "note-scrolled",

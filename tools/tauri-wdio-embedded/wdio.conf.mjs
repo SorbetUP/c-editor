@@ -87,10 +87,6 @@ export const config = {
     // every DOM command. The app remains the real Tauri window/session.
     await browser.switchToWindow(await browser.getWindowHandle())
     const devicePixelRatio = await browser.execute(() => window.devicePixelRatio || 1)
-    // macOS runners expose only 684 points in the visible work area. Keep the
-    // real 840-point application viewport by allowing the native window to
-    // extend below that work area; WebDriver still captures the full webview.
-    await browser.setWindowPosition(0, -25)
     await browser.setWindowSize(
       Math.round(scenario.viewport.width * devicePixelRatio),
       Math.round(scenario.viewport.height * devicePixelRatio)
