@@ -255,8 +255,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
-        with:
-          targets: wasm32-unknown-unknown
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
@@ -280,6 +278,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
