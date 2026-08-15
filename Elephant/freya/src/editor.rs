@@ -447,6 +447,11 @@ impl EditorDocument {
         }))
     }
 
+    pub(crate) fn initial_focus_block(&self) -> Option<muya_core::NodeId> {
+        let selection = self.session.snapshot().selection;
+        initial_caret_block(self.session.document(), selection)
+    }
+
     pub fn insert_paragraph(&mut self) -> Result<EditorUpdate, EditorError> {
         let before = self.serialize();
         let revision = self.session.revision();
@@ -647,6 +652,59 @@ fn collect_text_nodes(
             }
         }
     }
+}
+
+fn initial_caret_block(
+    document: &muya_core::Document,
+    selection: Selection,
+) -> Option<muya_core::NodeId> {
+    let caret_node = selection.caret()?.node;
+    let mut active = caret_node;
+    loop {
+        let node = document.node(active)?;
+        if matches!(node.kind, NodeKind::Block(_)) {
+            break;
+        }
+        active = node.parent?;
+    }
+
+    let skips_initial_focus = document.node(active).is_some_and(|node| {
+        matches!(
+            node.kind,
+            NodeKind::Block(
+                muya_core::model::BlockKind::Heading { .. }
+                    | muya_core::model::BlockKind::FrontMatter { .. }
+            )
+        )
+    });
+    if !skips_initial_focus {
+        return Some(active);
+    }
+
+    let mut after_active = false;
+    for node in document.children(document.root) {
+        if node.id == active {
+            after_active = true;
+            continue;
+        }
+        if after_active
+            && matches!(node.kind, NodeKind::Block(_))
+            && !matches!(
+                node.kind,
+                NodeKind::Block(
+                    muya_core::model::BlockKind::FrontMatter { .. }
+                        | muya_core::model::BlockKind::Heading { .. }
+                )
+            )
+        {
+            let mut text_nodes = Vec::new();
+            collect_text_nodes(document, node.id, &mut text_nodes);
+            if text_nodes.iter().any(|(_, value)| !value.is_empty()) {
+                return Some(node.id);
+            }
+        }
+    }
+    Some(active)
 }
 
 fn next_utf16_boundary(value: &str, offset: u32) -> Option<u32> {
@@ -927,6 +985,36 @@ mod tests {
             .dispatch(before.revision, EditorAction::InsertText("X".into()))
             .expect("the edit after selection must use the unchanged revision");
         assert_eq!(inserted.markdown, "aXlpha");
+    }
+
+    #[test]
+    fn initial_focus_block_follows_visible_body_after_heading() {
+        let document = EditorDocument::from_markdown("# Title\n\nBody text");
+        let block = document
+            .initial_focus_block()
+            .expect("a visible body block must be selected for initial focus");
+        let mut text_nodes = Vec::new();
+        collect_text_nodes(document.session().document(), block, &mut text_nodes);
+        assert_eq!(
+            text_nodes.first().map(|(_, value)| value.as_str()),
+            Some("Body text")
+        );
+    }
+
+    #[test]
+    fn initial_focus_block_skips_frontmatter_and_hidden_title() {
+        let document = EditorDocument::from_markdown(
+            "---\ntitle: \"Alpha note\"\n---\n\n# Alpha note\n\nVisible alpha body line.\n\nDeterministic scroll fixture line 1.\n",
+        );
+        let block = document
+            .initial_focus_block()
+            .expect("a visible body block must be selected for initial focus");
+        let mut text_nodes = Vec::new();
+        collect_text_nodes(document.session().document(), block, &mut text_nodes);
+        assert_eq!(
+            text_nodes.first().map(|(_, value)| value.as_str()),
+            Some("Visible alpha body line.")
+        );
     }
 
     #[test]

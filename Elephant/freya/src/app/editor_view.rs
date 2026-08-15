@@ -132,8 +132,36 @@ impl Component for EditableInlineBlock {
             inner.set(&value);
             inner.clear_selection();
         }
+        // A newly mounted block starts Freya's transient editor at offset 0.
+        // Hydrate it only when Muya owns a non-zero initial caret; subsequent
+        // selections are already synchronized by the input handlers and must
+        // not be overwritten during ordinary rerenders.
+        let muya_initial_caret = snapshot.editor.as_ref().and_then(|editor| {
+            let mut nodes = Vec::new();
+            editable_text_nodes(editor.session().document(), self.node_id, &mut nodes);
+            block_offset_for_selection(&nodes, editor.session().snapshot().selection)
+        });
+        let initial_focus_block = snapshot
+            .editor
+            .as_ref()
+            .is_some_and(|editor| editor.initial_focus_block() == Some(self.node_id));
+        if editable.editor().read().cursor_pos() == 0
+            && (initial_focus_block
+                || muya_initial_caret.is_some_and(|(anchor, focus)| anchor == focus && focus > 0))
+        {
+            if muya_initial_caret.is_some() {
+                sync_editable_from_muya(self.state, self.node_id, &mut editable);
+            } else {
+                editable
+                    .editor_mut()
+                    .write()
+                    .move_cursor_to(value.encode_utf16().count());
+            }
+        }
 
-        let cursor_index = editable.editor().read().cursor_pos();
+        // Only the Muya-selected block owns a visible caret. Passing index 0
+        // to every paragraph makes inactive paragraphs paint extra cursors.
+        let cursor_index = muya_initial_caret.map(|_| editable.editor().read().cursor_pos());
         let document_revision = snapshot
             .editor
             .as_ref()
@@ -392,7 +420,7 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
         .iter()
         .any(|path| path.as_str() == note_relative_path);
     let mut metadata_rail = rect()
-        .position(Position::new_absolute().right(46.).top(0.))
+        .position(Position::new_absolute().right(theme::NOTE_METADATA_RIGHT).top(0.))
         .horizontal()
         .spacing(4.)
         .child(metadata_chip(metadata.date, "Note date"));
@@ -484,7 +512,7 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
         .child(metadata_rail);
     let close_state = state;
     let close_button = rect()
-        .position(Position::new_absolute().right(12.).top(0.))
+        .position(Position::new_absolute().right(theme::NOTE_CLOSE_RIGHT).top(0.))
         .width(Size::px(30.))
         .height(Size::px(30.))
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
@@ -772,9 +800,10 @@ fn today_date() -> String {
 
 fn metadata_chip(text: String, accessibility: &str) -> Element {
     let width = if accessibility == "Note date" {
-        98.
+        theme::NOTE_METADATA_DATE_WIDTH
     } else {
-        20. + text.chars().count() as f32 * 8.
+        theme::NOTE_METADATA_TAG_BASE_WIDTH
+            + text.chars().count() as f32 * theme::NOTE_METADATA_TAG_CHAR_WIDTH
     };
     rect()
         .width(Size::px(width))
