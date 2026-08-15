@@ -193,6 +193,7 @@ impl Component for EditableInlineBlock {
             .on_key_up(on_key_up)
             .on_ime_preedit(on_ime_preedit)
             .font_size(self.style.font_size)
+            .line_height(if self.style.code { 1.4 } else { 1.6 })
             .color(theme::color(self.style.color));
         if self.style.bold {
             view = view.font_weight(FontWeight::BOLD);
@@ -497,7 +498,7 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
-                .padding(Gaps::new(34., 12., 100., 2.))
+                .padding(Gaps::new(27., 12., 100., 2.))
                 .background(theme::color(theme::BG))
                 .a11y_alt("Editor scroll")
                 .child(
@@ -778,7 +779,7 @@ fn render_block_children(
 
     rect()
         .width(Size::fill())
-        .spacing(10.)
+        .spacing(5.)
         .children(children)
         .into_element()
 }

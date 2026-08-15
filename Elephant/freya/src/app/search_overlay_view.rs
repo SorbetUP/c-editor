@@ -57,11 +57,11 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
         let mut concept_state = state;
         let concept_for_action = concept.clone();
         view = view
-            .child(section_title("WIKIS & CONCEPTS", 10.))
+            .child(section_title("WIKIS & CONCEPTS", 7.))
             .child(
                 rect()
-                    .position(Position::new_absolute().left(14.).top(30.))
-                    .width(Size::px(658.))
+                    .position(Position::new_absolute().left(18.).top(28.))
+                    .width(Size::px(654.))
                     .height(Size::px(58.))
                     .padding(Gaps::new(10., 12., 10., 12.))
                     .horizontal()
@@ -116,12 +116,13 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
     if let Some(result) = snapshot.search.results.first() {
         let result = result.clone();
         let mut result_state = state;
+        let result_title = highlighted_title(&result.title, &snapshot.search.query);
         view = view
-            .child(section_title("NOTES & PASSAGES", 98.))
+            .child(section_title("NOTES & PASSAGES", 94.))
             .child(
                 rect()
-                    .position(Position::new_absolute().left(14.).top(116.))
-                    .width(Size::px(658.))
+                    .position(Position::new_absolute().left(18.).top(120.))
+                    .width(Size::px(654.))
                     .height(Size::px(70.))
                     .padding(Gaps::new(12., 14., 12., 14.))
                     .background(Color::from_argb(51, 37, 99, 235))
@@ -129,38 +130,37 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
                     .layer(Layer::OverlayLevel(SEARCH_CONTENT_LAYER))
                     .a11y_alt(format!("Open note {}", result.title))
                     .on_mouse_up(move |_| result_state.write().open_search_result(0))
+                    .horizontal()
+                    .spacing(12.)
                     .child(
                         rect()
-                            .position(Position::new_absolute().left(16.).top(25.))
-                            .width(Size::px(20.))
-                            .height(Size::px(20.))
+                            .width(Size::px(38.))
+                            .height(Size::px(38.))
                             .center()
                             .background(Color::from_argb(87, 255, 255, 255))
                             .with_corner_radius(14.)
                             .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .child(svg_icon(Icon::FileText, Color::from_rgb(37, 99, 235), 20.)),
+                            .child(svg_icon(Icon::FileText, Color::from_rgb(37, 99, 235), 18.)),
                     )
                     .child(
-                        label()
-                            .position(Position::new_absolute().left(68.).top(12.))
-                            .font_size(15.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(Color::from_rgb(16, 24, 40))
+                        rect()
+                            .width(Size::flex(1.))
+                            .height(Size::fill())
+                            .spacing(4.)
                             .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .text(result.title.clone()),
-                    )
-                    .child(
-                        label()
-                            .position(Position::new_absolute().left(68.).top(38.))
-                            .font_size(12.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(Color::from_rgb(37, 99, 235))
-                            .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .text(result.relative_path.clone()),
+                            .child(result_title)
+                            .child(
+                                label()
+                                    .font_size(12.)
+                                    .font_weight(FontWeight::BOLD)
+                                    .color(Color::from_rgb(37, 99, 235))
+                                    .text(result.relative_path.clone()),
+                            ),
                     )
                     .child(
                         rect()
                             .position(Position::new_absolute().right(50.).top(12.))
+                            .width(Size::px(86.))
                             .height(Size::px(22.))
                             .padding(Gaps::new(0., 9., 0., 9.))
                             .center()
@@ -176,12 +176,18 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
                             ),
                     )
                     .child(
-                        label()
-                            .position(Position::new_absolute().right(14.).top(24.))
-                            .font_size(18.)
-                            .color(Color::from_rgb(100, 116, 139))
+                        rect()
+                            .position(Position::new_absolute().right(14.).top(20.))
+                            .width(Size::px(30.))
+                            .height(Size::px(30.))
+                            .center()
                             .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .text("↗"),
+                            .child(
+                                label()
+                                    .font_size(18.)
+                                    .color(Color::from_rgb(100, 116, 139))
+                                    .text("↗"),
+                            ),
                     ),
             );
     }
@@ -197,6 +203,50 @@ fn section_title(title: &'static str, top: f32) -> Element {
         .a11y_alt(title)
         .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
         .text(title)
+        .into_element()
+}
+
+fn highlighted_title(title: &str, query: &str) -> Element {
+    let token = query
+        .split_whitespace()
+        .find(|part| part.chars().count() >= 2)
+        .unwrap_or_default();
+    if token.is_empty() {
+        return plain_title(title);
+    }
+    let Some(start) = title.to_lowercase().find(&token.to_lowercase()) else {
+        return plain_title(title);
+    };
+    let end = start + token.len();
+    let mut row = rect().height(Size::px(20.)).horizontal();
+    if start > 0 {
+        row = row.child(plain_title(&title[..start]));
+    }
+    row = row.child(
+        rect()
+            .padding(Gaps::new(0., 2., 0., 2.))
+            .with_corner_radius(4.)
+            .background(Color::from_argb(66, 37, 99, 235))
+            .child(
+                label()
+                    .font_size(15.)
+                    .font_weight(FontWeight::BOLD)
+                    .color(Color::from_rgb(37, 99, 235))
+                    .text(title[start..end].to_owned()),
+            ),
+    );
+    if end < title.len() {
+        row = row.child(plain_title(&title[end..]));
+    }
+    row.into_element()
+}
+
+fn plain_title(title: &str) -> Element {
+    label()
+        .font_size(15.)
+        .font_weight(FontWeight::BOLD)
+        .color(Color::from_rgb(16, 24, 40))
+        .text(title.to_owned())
         .into_element()
 }
 

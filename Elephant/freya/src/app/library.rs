@@ -185,7 +185,7 @@ pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
         .height(Size::px(56.))
         .center()
         .background(theme::color(if hovered {
-            theme::BORDER_STRONG
+            theme::mix(theme::PRIMARY, theme::SURFACE, 0.92)
         } else {
             theme::PRIMARY
         }))
@@ -240,12 +240,22 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
             .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
             .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
             .a11y_alt(title)
-            .child(label().font_size(21.).text(icon))
+            .child(svg_icon(icon, theme::color(theme::PRIMARY), 20.))
             .child(
                 rect()
-                    .spacing(2.)
-                    .child(label().font_weight(FontWeight::BOLD).text(title))
-                    .child(label().color(theme::color(theme::MUTED)).text(description)),
+                    .spacing(7.)
+                    .child(
+                        label()
+                            .font_size(14.)
+                            .font_weight(FontWeight::BOLD)
+                            .text(title),
+                    )
+                    .child(
+                        label()
+                            .font_size(12.)
+                            .color(theme::color(theme::MUTED))
+                            .text(description),
+                    ),
             )
             .into_element()
     };
@@ -254,10 +264,10 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
         .position(
             Position::new_absolute()
                 .right(20.)
-                .bottom(88.),
+                .bottom(86.),
         )
         .width(Size::px(280.))
-        .height(Size::px(248.))
+        .height(Size::px(240.))
         .padding(Gaps::new_all(8.))
         .background(theme::color(theme::SURFACE))
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
@@ -270,27 +280,28 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
         })
         .child(
             label()
-                .padding(Gaps::new_all(8.))
+                .padding(Gaps::new(19., 8., 6., 8.))
                 .font_size(12.)
                 .font_weight(FontWeight::BOLD)
                 .color(theme::color(theme::MUTED))
                 .text("CREATE"),
         )
+        .child(rect().height(Size::px(11.)))
         .child(item(
             crate::library_contract::CreateAction::Note,
-            "▤",
+            Icon::FilePlus,
             "Note",
             "Create a new note",
         ))
         .child(item(
             crate::library_contract::CreateAction::Drawing,
-            "✎",
+            Icon::Excalidraw,
             "Drawing",
             "Open a new Excalidraw canvas",
         ))
         .child(item(
             crate::library_contract::CreateAction::Folder,
-            "▱",
+            Icon::FolderPlus,
             "Folder",
             "Organize notes in a folder",
         ))
