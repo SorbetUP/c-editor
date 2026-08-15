@@ -77,6 +77,13 @@ impl ExplorerSearchState {
         self.error = None;
     }
 
+    fn clear_query(&mut self) {
+        self.query.clear();
+        self.selected_index = (!self.results.is_empty()).then_some(0);
+        self.error = None;
+        self.refresh_phase();
+    }
+
     fn refresh_phase(&mut self) {
         self.phase = if self.error.is_some() {
             ExplorerPhase::Error
@@ -322,25 +329,32 @@ impl ExplorerState {
     }
 
     pub fn clear_search(&mut self) {
-        self.search.clear();
+        self.search.clear_query();
         self.pending
             .push(ExplorerAction::Search(SearchCommand::ClearQuery));
     }
 
     /// Completes a queued clear without enqueueing another host command.
     pub fn finish_clear_query(&mut self) {
-        self.search.clear();
+        self.search.clear_query();
     }
 
     pub fn close_search(&mut self) {
-        self.search.clear();
         self.pending
             .push(ExplorerAction::Search(SearchCommand::Close));
     }
 
     /// Completes a queued close without enqueueing another host command.
     pub fn finish_close(&mut self) {
-        self.search.clear();
+        if self.search.phase != ExplorerPhase::Idle
+            || !self.search.query.is_empty()
+            || !self.search.results.is_empty()
+            || !self.search.concepts.is_empty()
+            || self.search.selected_index.is_some()
+            || self.search.error.is_some()
+        {
+            self.search.clear();
+        }
     }
 
     pub fn select_search_result(&mut self, index: usize) {
@@ -543,6 +557,7 @@ impl ExplorerSearchState {
 pub fn search_overlay(
     state: State<ExplorerState>,
     query: State<String>,
+    interactive: bool,
     backdrop_opacity: f32,
     content_opacity: f32,
 ) -> Element {
@@ -576,7 +591,12 @@ pub fn search_overlay(
             move |value: String| submit_state.write().submit_or_open_search(value)
         });
     let search_input = rect()
-        .key(("search-input-host", snapshot.search.query.clone()))
+        // Keep the input identity stable while the debounced search result
+        // state changes. Re-keying on the result query remounts the native
+        // input and moves the caret back to the start, which is observable
+        // during the real search flow even though the functional query is
+        // still correct.
+        .key(("search-input-host", "search"))
         .width(Size::fill())
         .a11y_alt("Search input")
         .a11y_builder({
@@ -683,6 +703,7 @@ pub fn search_overlay(
     rect()
         .position(Position::new_global())
         .layer(Layer::Overlay)
+        .interactive(interactive)
         .child(
             rect()
                 .position(Position::new_global().left(0.).top(0.))
@@ -1311,5 +1332,15 @@ mod tests {
             SurfaceError::Unknown("new request failed".to_string()),
         ));
         assert_eq!(state.search.phase, ExplorerPhase::Error);
+    }
+
+    #[test]
+    fn closing_an_already_cleared_search_is_idempotent() {
+        let mut state = ExplorerState::new();
+        state.finish_close();
+        assert_eq!(state.search.phase, ExplorerPhase::Idle);
+        assert!(state.search.query.is_empty());
+        assert!(state.search.results.is_empty());
+        assert!(state.search.concepts.is_empty());
     }
 }

@@ -365,7 +365,7 @@ fn app_shell(state: State<ShellState>) -> Element {
     let settings_state = use_state(settings::SettingsViewState::default);
     let settings_effects = settings_state.read().effects();
     let palette = settings_effects.palette();
-    let explorer_state = use_state(explorer::ExplorerState::new);
+    let mut explorer_state = use_state(explorer::ExplorerState::new);
     let explorer_query = use_state(String::new);
     let explorer_graph_query = use_state(String::new);
     let graph_canvas_state = use_state(graph_canvas::GraphCanvasState::default);
@@ -380,6 +380,12 @@ fn app_shell(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
     let contract = source_contracts::contract(ComponentId::AppShell)
         .expect("AppShell source contract must remain registered");
+    if !snapshot.search_open && !overlay_transition.mounted {
+        // SearchModal.vue clears its result payload from the unmount hook,
+        // after the close transition has finished. Keep the same lifecycle
+        // boundary in the functional explorer state.
+        explorer_state.write().finish_close();
+    }
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state)
     } else if snapshot.view == WorkspaceView::Graph {
@@ -419,10 +425,11 @@ fn app_shell(state: State<ShellState>) -> Element {
                 .child(content),
         )
         .maybe_child((snapshot.editor.is_none()).then(|| library::create_fab(state)))
-        .maybe_child(snapshot.search_open.then(|| {
+        .maybe_child(overlay_transition.mounted.then(|| {
             explorer::search_overlay(
                 explorer_state,
                 explorer_query,
+                overlay_transition.interactive,
                 overlay_transition.backdrop_opacity,
                 overlay_transition.content_opacity,
             )

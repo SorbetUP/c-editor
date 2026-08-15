@@ -46,7 +46,6 @@ fn dispatch_search_command(
         SearchCommand::Open => shell.write().search_open = true,
         SearchCommand::Close => {
             shell.write().search_open = false;
-            explorer.write().finish_close();
             eprintln!("[freya][search] action=close");
         }
         SearchCommand::SetQuery(_) | SearchCommand::SetMode(_) => {}

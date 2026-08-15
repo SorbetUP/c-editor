@@ -53,6 +53,7 @@ struct BlockTextStyle {
     italic: bool,
     code: bool,
     color: (u8, u8, u8, u8),
+    bottom_margin: f32,
 }
 
 impl Default for BlockTextStyle {
@@ -66,6 +67,7 @@ impl Default for BlockTextStyle {
             italic: false,
             code: false,
             color: theme::editor_text_color(),
+            bottom_margin: 0.,
         }
     }
 }
@@ -186,14 +188,22 @@ impl Component for EditableInlineBlock {
             .highlights(highlights.map(|selection| vec![selection]))
             .spans_iter(spans.into_iter())
             .a11y_alt(self.accessibility_label.clone())
+            .margin(Gaps::new(0., 0., self.style.bottom_margin, 0.))
             .on_mouse_down(on_mouse_down)
             .on_mouse_move(on_mouse_move)
             .on_global_pointer_press(on_pointer_up)
             .on_key_down(on_key_down)
             .on_key_up(on_key_up)
             .on_ime_preedit(on_ime_preedit)
+            // Muya's editor surface explicitly uses Open Sans. Keep the
+            // editor typography local to the display component so the shell
+            // font contract remains independent from document behavior.
+            .font_family("Open Sans")
             .font_size(self.style.font_size)
-            .line_height(if self.style.code { 1.4 } else { 1.6 })
+            // Open Sans' raster line box is one pixel taller than Muya's
+            // browser line box at 16px. Calibrate the display metric locally
+            // while leaving document text and editing semantics untouched.
+            .line_height(if self.style.code { 1.4 } else { 1.55 })
             .color(theme::color(self.style.color));
         if self.style.bold {
             view = view.font_weight(FontWeight::BOLD);
@@ -505,7 +515,12 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
-                .padding(Gaps::new(25., 12., 100., 2.))
+                // The source keeps the 100px Muya bottom gutter inside the
+                // scrollable document, not on the viewport itself. Keeping
+                // it on the host would clip the last visible lines at the
+                // bottom of the window while the source continues painting
+                // them behind the compact toolbar.
+                .padding(Gaps::new(26., 12., 0., 2.))
                 .background(theme::color(theme::BG))
                 .a11y_alt("Editor scroll")
                 .child(
@@ -513,7 +528,12 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
                         .width(Size::fill())
                         .height(Size::fill())
                         .show_scrollbar(false)
-                        .child(document_view),
+                        .child(
+                            rect()
+                                .width(Size::fill())
+                                .padding(Gaps::new(0., 0., 100., 0.))
+                                .child(document_view),
+                        ),
                 ),
         )
         .a11y_alt("NoteEditorHost")
@@ -842,13 +862,17 @@ fn render_block(
     };
 
     match &node.kind {
-        NodeKind::Block(BlockKind::Paragraph) => render_inline_block(
-            state,
-            autosave_generation,
-            node_id,
-            "Paragraph",
-            BlockTextStyle::default(),
-        ),
+        NodeKind::Block(BlockKind::Paragraph) => {
+            let mut style = BlockTextStyle::default();
+            if plain_block_text(document, node_id).trim().is_empty() {
+                // Muya gives an empty paragraph a little more separation than
+                // the generic Freya stack. Keep that as a style on the same
+                // editable node so live Enter/undo updates never change the
+                // element tree shape.
+                style.bottom_margin = 3.;
+            }
+            render_inline_block(state, autosave_generation, node_id, "Paragraph", style)
+        }
         NodeKind::Block(BlockKind::Heading { level }) => render_inline_block(
             state,
             autosave_generation,
@@ -1609,7 +1633,10 @@ fn styled_span(value: String, style: InlineStyle) -> Span<'static> {
     } else if style.code {
         theme::MUTED
     } else {
-        theme::TEXT
+        // Muya's normal editor spans use `--editorColor`, not the opaque
+        // shell text token. Keep this renderer-level choice separate from
+        // the functional document/editor state.
+        theme::editor_text_color()
     };
     let mut span = Span::new(value).color(theme::color(color));
     if style.strong {

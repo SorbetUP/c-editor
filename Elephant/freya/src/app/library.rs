@@ -181,7 +181,6 @@ pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
     let mut enter_state = state;
     let mut leave_state = state;
     let fab = rect()
-        .position(Position::new_absolute().right(20.).bottom(20.))
         .width(Size::px(56.))
         .height(Size::px(56.))
         .center()
@@ -204,20 +203,21 @@ pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
             theme::color(theme::SURFACE),
             27.,
         ));
+    let mut fab_frame = rect()
+        .position(Position::new_absolute().right(16.).bottom(16.))
+        .width(Size::px(64.))
+        .height(Size::px(64.))
+        .center()
+        .with_corner_radius(14.)
+        .layer(Layer::OverlayLevel(9));
     if menu_open {
-        rect()
-            .position(Position::new_absolute().right(16.).bottom(16.))
-            .width(Size::px(64.))
-            .height(Size::px(64.))
-            .center()
-            .border(Border::new().fill(theme::color(theme::PRIMARY)).width(2.))
-            .with_corner_radius(14.)
-            .layer(Layer::OverlayLevel(9))
-            .child(fab)
-            .into_element()
-    } else {
-        fab.into_element()
+        fab_frame = fab_frame.border(
+            Border::new()
+                .fill(theme::color(theme::PRIMARY))
+                .width(2.),
+        );
     }
+    fab_frame.child(fab).into_element()
 }
 
 pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
@@ -257,7 +257,9 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
             .child(svg_icon(icon, theme::color(theme::PRIMARY), 20.))
             .child(
                 rect()
-                    .spacing(7.)
+                    // Keep the compact title/description spacing local to this
+                    // renderer so the library action model stays reusable.
+                    .spacing(6.)
                     .child(
                         label()
                             .font_size(14.)
@@ -293,9 +295,13 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
                 close_state.write().menu_open = false;
             }
         })
+        // The source menu leaves a short visual inset above its heading. Keep
+        // it as an explicit display-only node so the action list remains
+        // independently reusable and its click semantics stay unchanged.
+        .child(rect().height(Size::px(10.)))
         .child(
             label()
-                .padding(Gaps::new(19., 8., 6., 8.))
+                .padding(Gaps::new(8., 10., 6., 10.))
                 .font_size(12.)
                 .font_weight(FontWeight::BOLD)
                 .color(theme::color(theme::MUTED))

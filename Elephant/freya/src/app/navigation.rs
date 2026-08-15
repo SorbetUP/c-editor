@@ -153,11 +153,7 @@ pub(super) fn icon_rail(
                         } else {
                             "Show sidebar"
                         },
-                        if snapshot.sidebar_visible {
-                            Icon::PanelLeftClose
-                        } else {
-                            Icon::PanelLeftOpen
-                        },
+                        Icon::PanelLeft,
                     )),
                     "search" => Some(("search", "Search", Icon::Search)),
                     _ => None,
@@ -309,13 +305,13 @@ fn rail_action(
             if was_drag {
                 return;
             }
-            match label_text {
-                "Search" => {
+            match item_id {
+                "search" => {
                     let mut shell = release_state.write();
                     shell.search_open = !shell.search_open;
                     shell.settings_open = false;
                 }
-                "Settings" => {
+                "settings" => {
                     let mut shell = release_state.write();
                     shell.settings_open = !shell.settings_open;
                     shell.search_open = false;
@@ -339,7 +335,15 @@ fn rail_action(
         })
         .a11y_alt(label_text)
         .child(svg_icon(
-            icon,
+            if item_id == "sidebar-toggle" && hovered {
+                if label_text == "Hide sidebar" {
+                    Icon::PanelLeftClose
+                } else {
+                    Icon::PanelLeftOpen
+                }
+            } else {
+                icon
+            },
             theme::token_color(palette, theme::ThemeToken::Muted),
             18.,
         ))
