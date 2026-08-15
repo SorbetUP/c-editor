@@ -19,6 +19,17 @@ pub(super) const SEARCH_PANEL_LAYER: u8 = 14;
 pub(super) const SEARCH_CONTENT_LAYER: u8 = 15;
 pub(super) const SEARCH_TEXT_LAYER: u8 = 16;
 
+/// The source search shell is a translucent glass surface. Keeping this fill
+/// in the presentation module lets the explorer own only search state and
+/// geometry while the renderer owns the visual contract.
+pub(super) fn glass_surface() -> impl Into<Fill> {
+    LinearGradient::new()
+        .angle(135.)
+        .stop((Color::from_argb(122, 255, 255, 255), 0.))
+        .stop((Color::from_argb(87, 225, 240, 255), 58.))
+        .stop((Color::from_argb(102, 255, 255, 255), 100.))
+}
+
 pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> Element {
     let mut view = rect()
         .width(Size::fill())
@@ -55,8 +66,12 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
                     .padding(Gaps::new(10., 12., 10., 12.))
                     .horizontal()
                     .main_align(Alignment::SpaceBetween)
-                    .background(Color::from_rgb(235, 241, 252))
-                    .border(Border::new().fill(Color::from_rgb(190, 205, 235)).width(1.))
+                    .background(Color::from_argb(18, 37, 99, 235))
+                    .border(
+                        Border::new()
+                            .fill(Color::from_argb(46, 37, 99, 235))
+                            .width(1.),
+                    )
                     .with_corner_radius(14.)
                     .layer(Layer::OverlayLevel(SEARCH_CONTENT_LAYER))
                     .on_mouse_up(move |_| concept_state.write().open_concept(&concept_for_action))
@@ -90,6 +105,9 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
                             .font_size(12.)
                             .font_weight(FontWeight::BOLD)
                             .color(Color::from_rgb(37, 99, 235))
+                            .width(Size::px(36.))
+                            .height(Size::px(20.))
+                            .position(Position::new_absolute().right(14.).top(10.))
                             .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
                             .text(score),
                     ),
@@ -106,7 +124,7 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
                     .width(Size::px(658.))
                     .height(Size::px(70.))
                     .padding(Gaps::new(12., 14., 12., 14.))
-                    .background(Color::from_rgb(215, 225, 249))
+                    .background(Color::from_argb(51, 37, 99, 235))
                     .with_corner_radius(16.)
                     .layer(Layer::OverlayLevel(SEARCH_CONTENT_LAYER))
                     .a11y_alt(format!("Open note {}", result.title))
@@ -117,7 +135,7 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
                             .width(Size::px(20.))
                             .height(Size::px(20.))
                             .center()
-                            .background(Color::from_argb(70, 255, 255, 255))
+                            .background(Color::from_argb(87, 255, 255, 255))
                             .with_corner_radius(14.)
                             .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
                             .child(svg_icon(Icon::FileText, Color::from_rgb(37, 99, 235), 20.)),

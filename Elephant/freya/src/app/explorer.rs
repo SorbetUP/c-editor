@@ -609,9 +609,9 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
     let search_bar = rect()
         .width(Size::fill())
         .height(Size::px(72.))
-        .padding(Gaps::new(0., 18., 0., 24.))
+        .padding(Gaps::new(0., 18., 0., 26.))
         .horizontal()
-        .spacing(14.)
+        .spacing(6.)
         .center()
         .font_size(22.)
         .font_weight(FontWeight::BOLD)
@@ -625,10 +625,10 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         .vertical()
         .position(
             Position::new_global()
-                .left(298.)
+                .left(295.)
                 .top(119.),
         )
-        .width(Size::px(686.))
+        .width(Size::px(690.))
         .height(if snapshot.search.phase == ExplorerPhase::Idle {
             Size::px(72.)
         } else {
@@ -636,7 +636,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         })
         // The shell owns the translucent glass surface; the bar stays
         // transparent so the same surface covers both empty and result states.
-        .background(Color::from_argb(96, 246, 248, 252))
+        .background(super::search_overlay_view::glass_surface())
         .color(theme::color(theme::TEXT))
         .with_corner_radius(28.)
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
@@ -665,8 +665,8 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         };
         Some(
             rect()
-                .position(Position::new_global().left(298.).top(191.))
-                .width(Size::px(686.))
+                .position(Position::new_global().left(295.).top(191.))
+                .width(Size::px(690.))
                 .height(Size::px(210.))
                 .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
                 .child(content),
@@ -680,7 +680,10 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
                 .position(Position::new_global().left(0.).top(0.))
                 .width(Size::window_percent(100.))
                 .height(Size::window_percent(100.))
-                .background(Color::from_argb(31, 15, 23, 42))
+                // Freya's premultiplied alpha rasterization needs this
+                // channel value to reproduce the source rgba(15, 23, 42,
+                // 0.12) backdrop at the acceptance viewport.
+                .background(Color::from_argb(31, 15, 35, 42))
                 .layer(Layer::OverlayLevel(
                     super::search_overlay_view::SEARCH_BACKDROP_LAYER,
                 )),

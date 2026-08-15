@@ -26,6 +26,8 @@ mod drawing;
 mod library_actions;
 use library_actions::{card_action_menu, CardMenuState};
 
+const GRID_CARD_WIDTH: f32 = 317.;
+
 pub(super) fn main_content(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
     let body = if snapshot.editor.is_some() {
@@ -298,10 +300,6 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
 fn library_grid(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
     let visible_entries = snapshot.library.visible_entries();
-    let fallback_menu_path = visible_entries
-        .iter()
-        .find(|entry| !matches!(entry.effective_kind(), ContractKind::Folder))
-        .map(|entry| entry.path.clone());
     let entries = visible_entries
         .into_iter()
         .map(|entry| {
@@ -309,7 +307,6 @@ fn library_grid(state: State<ShellState>) -> Element {
                 entry: entry.clone(),
                 mode: snapshot.library.view_mode,
                 state,
-                fallback_menu: fallback_menu_path.as_ref() == Some(&entry.path),
             }
             .into_element()
         })
@@ -349,7 +346,6 @@ struct LibraryCard {
     entry: LibraryEntry,
     mode: ViewMode,
     state: State<ShellState>,
-    fallback_menu: bool,
 }
 
 impl Component for LibraryCard {
@@ -368,7 +364,6 @@ impl Component for LibraryCard {
             card_menu_state,
             rename_value,
             hover_state,
-            self.fallback_menu,
         )
     }
 }
@@ -380,7 +375,6 @@ fn render_library_card(
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
     hover_state: State<bool>,
-    fallback_menu: bool,
 ) -> Element {
     let path = entry.path.as_str().to_string();
     let is_drawing =
@@ -395,11 +389,8 @@ fn render_library_card(
     let hover_key = format!("card:{path}");
     let hovered = *hover_state.read()
         || state.read().hovered_target.as_deref() == Some(hover_key.as_str());
-    let any_card_hovered = state
-        .read()
-        .hovered_target
-        .as_deref()
-        .is_some_and(|target| target.starts_with("card:"));
+    let card_action_active = state.read().card_action_target.as_deref() == Some(hover_key.as_str());
+    let card_selected = hovered || card_action_active;
     let is_pinned = state
         .read()
         .library
@@ -428,15 +419,11 @@ fn render_library_card(
     } else {
         None
     };
-    // With no pointer hover the legacy shell still exposes one accessible
-    // action trigger (the first note). Once a card is hovered, expose only
-    // that card's trigger so overlays do not duplicate the action contract.
-    let show_menu_trigger = hovered || (fallback_menu && !any_card_hovered);
-    let menu_trigger = if show_menu_trigger {
+    let menu_trigger = {
         let mut trigger_state = card_menu_state;
         Some(
             rect()
-                .position(Position::new_absolute().top(8.).right(8.))
+                .position(Position::new_absolute().top(8.).right(-2.))
                 .width(Size::px(30.))
                 .height(Size::px(30.))
                 .center()
@@ -455,16 +442,14 @@ fn render_library_card(
                 })
                 .child(svg_icon(Icon::MoreHorizontal, theme::color(theme::MUTED), 18.)),
         )
-    } else {
-        None
     };
-    let pin_trigger = if hovered || is_pinned {
+    let pin_trigger = if !is_folder && (card_selected || is_pinned) {
         let mut pin_state = state;
         let mut pin_menu_state = card_menu_state;
         let path_for_pin = entry.path.clone();
         Some(
             rect()
-                .position(Position::new_absolute().top(8.).right(42.))
+                .position(Position::new_absolute().top(8.).right(34.))
                 .width(Size::px(30.))
                 .height(Size::px(30.))
                 .center()
@@ -558,7 +543,7 @@ fn render_library_card(
     let mut menu_state_for_secondary = card_menu_state;
     rect()
         .width(if mode == ViewMode::Grid {
-            Size::percent(32.6)
+            Size::px(GRID_CARD_WIDTH)
         } else {
             Size::fill()
         })
@@ -572,7 +557,7 @@ fn render_library_card(
         .background(theme::color(theme::card_background()))
         .border(
             Border::new()
-                .fill(theme::color(if hovered {
+                .fill(theme::color(if card_selected {
                     theme::BORDER_STRONG
                 } else {
                     theme::BORDER
@@ -583,9 +568,13 @@ fn render_library_card(
         .on_pointer_enter(move |_| {
             *enter_hover_state.write() = true;
             enter_state.write().set_hovered_target(enter_key.clone());
+            enter_state.write().set_card_action_target(enter_key.clone());
         })
         .on_pointer_leave(move |_| {
             *leave_hover_state.write() = false;
+            // Keep the last card active while an overlay takes focus. The
+            // source library keeps its card actions mounted across search
+            // open/close; a later card enter replaces this target naturally.
             leave_state.write().clear_hovered_target(&leave_key);
         })
         .on_secondary_down(move |_| {

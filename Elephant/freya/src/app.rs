@@ -44,6 +44,7 @@ struct ShellState {
     library: LibraryState,
     menu_open: bool,
     hovered_target: Option<String>,
+    card_action_target: Option<String>,
     vault_menu_open: bool,
     search_open: bool,
     settings_open: bool,
@@ -69,6 +70,7 @@ impl ShellState {
             library: LibraryState::default(),
             menu_open: false,
             hovered_target: None,
+            card_action_target: None,
             vault_menu_open: false,
             search_open: false,
             settings_open: false,
@@ -233,6 +235,10 @@ impl ShellState {
         if self.hovered_target.as_deref() == Some(target) {
             self.hovered_target = None;
         }
+    }
+
+    fn set_card_action_target(&mut self, target: impl Into<String>) {
+        self.card_action_target = Some(target.into());
     }
 }
 
