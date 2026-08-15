@@ -327,7 +327,21 @@ jobs:
             --freya-command "$freya_command" \
             --scenario migration/freya/differential-scenarios.json \
             --output "$root" \
-            --timeout-ms 600000
+            --timeout-ms 600000 \
+            --threshold 0.12 \
+            --max-different-ratio 0.10
+          set +e
+          node tools/freya-differential/compare.mjs \
+            "$root/comparison/tauri" \
+            "$root/comparison/freya" \
+            --reference-label tauri \
+            --candidate-label freya \
+            --threshold 0 \
+            --max-different-ratio 0 \
+            --report "$root/strict-comparison-report.json" \
+            --diff-dir "$root/strict-diffs"
+          strict_compare_status=$?
+          set -e
           node --input-type=module - "$root" <<'NODE'
           import fs from 'node:fs'
           import path from 'node:path'
@@ -338,6 +352,7 @@ jobs:
           const comparisons = Array.isArray(comparison.comparisons) ? comparison.comparisons : []
           const maxChangedPixelRatio = comparisons.reduce((max, item) => Math.max(max, Number(item.pixels?.differentRatio ?? 0)), 0)
           const differentFrames = comparisons.filter((item) => item.status !== 'passed' && item.status !== 'passed-byte-identical').length
+          const strictReport = JSON.parse(fs.readFileSync(path.join(root, 'strict-comparison-report.json'), 'utf8'))
           const summary = [
             '## Default Tauri / Freya differential',
             '',
@@ -346,6 +361,8 @@ jobs:
             `- Compared frames: ${report.summary?.frames?.compared ?? comparison.summary?.files?.compared ?? 0}`,
             `- Different frames: ${differentFrames}`,
             `- Max changed-pixel ratio: ${maxChangedPixelRatio}`,
+            `- Perceptual gate: threshold 0.12 / max ratio 0.10`,
+            `- Strict diagnostic: **${strictReport.status}** (threshold 0 / max ratio 0)`,
             `- Evidence: uploaded in the workflow artifact under \`${root}\``,
           ]
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\\n')}\\n`)

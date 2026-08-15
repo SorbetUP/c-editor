@@ -370,14 +370,13 @@ fn app_shell(state: State<ShellState>) -> Element {
     let explorer_graph_query = use_state(String::new);
     let graph_canvas_state = use_state(graph_canvas::GraphCanvasState::default);
     explorer::bind_live_search(explorer_state, explorer_query);
+    explorer_runtime::drain_explorer_actions(state, explorer_state);
     let snapshot = state.read().clone();
     let search_open = snapshot.search_open;
     let overlay_transition = visual_transition::use_search_overlay_transition(search_open);
     if snapshot.vault.is_none() {
         return empty_vault_picker(state);
     }
-    explorer_runtime::drain_explorer_actions(state, explorer_state);
-    let snapshot = state.read().clone();
     let contract = source_contracts::contract(ComponentId::AppShell)
         .expect("AppShell source contract must remain registered");
     if !snapshot.search_open && !overlay_transition.mounted {

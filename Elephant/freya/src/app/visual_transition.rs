@@ -21,9 +21,15 @@ pub(super) struct SearchOverlayTransition {
 
 pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransition {
     let hide_timeout = use_timeout(|| Duration::from_millis(75));
-    let unmount_timeout = use_timeout(|| Duration::from_millis(125));
-    let open_animation = use_animation(|_| AnimNum::new(0., 1.).time(125).ease(Ease::Out));
-    let close_animation = use_animation(|_| AnimNum::new(1., 0.).time(125).ease(Ease::Out));
+    // The Freya timer starts after the close state commit; 75 ms therefore
+    // lands on the source's 150 ms capture boundary instead of one frame late.
+    let unmount_timeout = use_timeout(|| Duration::from_millis(75));
+    // The source dialog's first visible sample lands on the 200 ms capture
+    // tick. Keep the tree mounted immediately for focus/lifecycle ownership,
+    // but keep its pixels transparent until this presentation-only animation
+    // reaches its first stable sample.
+    let open_animation = use_animation(|_| AnimNum::new(0., 1.).time(160).ease(Ease::Out));
+    let close_animation = use_animation(|_| AnimNum::new(1., 0.).time(75).ease(Ease::Out));
     let ever_opened = use_state(|| false);
     let mounted = use_state(|| open);
     let closing = use_state(|| false);
@@ -78,10 +84,12 @@ pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransiti
     } else {
         close_animation.get().value()
     };
+    let opening = open && value < 0.999;
     let hidden = *hidden.read();
+    let transition_hidden = hidden || (*closing.read() && hide_timeout.elapsed());
     SearchOverlayTransition {
-        // Opening is functional state, so expose the tree in the same render
-        // as the rail click; closing may wait for the bounded timeout.
+        // Opening remains mounted for focus ownership, but its presentation is
+        // held until the source transition reaches the same stable sample.
         mounted: open || *mounted.read(),
         // A closing overlay remains visual-only. Pointer events must reach the
         // library immediately after the functional search state closes.
@@ -89,7 +97,7 @@ pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransiti
         // Tauri paints the backdrop one frame before the dialog content. The
         // small intermediate opacity is presentation-only; search state and
         // accessibility mounting remain controlled by the shell.
-        backdrop_opacity: if !open && hidden {
+        backdrop_opacity: if opening || (!open && transition_hidden) {
             0.
         } else if !open {
             value
@@ -98,6 +106,10 @@ pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransiti
         } else {
             1.
         },
-        content_opacity: if hidden || value < 0.5 { 0. } else { 1. },
+        content_opacity: if transition_hidden || opening || value < 0.5 {
+            0.
+        } else {
+            1.
+        },
     }
 }
