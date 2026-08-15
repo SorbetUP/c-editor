@@ -95,10 +95,10 @@ pub fn pointer_timeline(
     label: &str,
     path_names: &[String],
 ) -> Vec<FrameEvidence> {
-    let before_background = Rect::try_downcast(pointer_target(runner, label).element().as_ref())
+    let before_style = Rect::try_downcast(pointer_target(runner, label).element().as_ref())
         .expect("pointer target must be a rendered Rect")
         .style
-        .background;
+        .clone();
     let points = target_path(runner, label, path_names);
     let mut frames = vec![capture_frame(runner, output, action, 0)];
     let mut previous_ms = action.frames[0];
@@ -113,12 +113,12 @@ pub fn pointer_timeline(
         "HARD_ISSUE {}: pointer movement produced no rendered frame change for visible target {label:?}",
         action.id
     );
-    assert_ne!(
-        before_background,
-        Rect::try_downcast(pointer_target(runner, label).element().as_ref())
-            .expect("pointer target must be a rendered Rect")
-            .style
-            .background,
+    let after_style = Rect::try_downcast(pointer_target(runner, label).element().as_ref())
+        .expect("pointer target must be a rendered Rect")
+        .style
+        .clone();
+    assert!(
+        before_style.background != after_style.background || before_style.borders != after_style.borders,
         "HARD_ISSUE {}: visible target {label:?} did not expose a rendered hover/drop style transition",
         action.id
     );

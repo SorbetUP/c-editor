@@ -332,6 +332,24 @@ pub const MUTED: (u8, u8, u8, u8) = (71, 84, 103, 255);
 pub const PRIMARY: (u8, u8, u8, u8) = (37, 99, 235, 255);
 pub const DANGER: (u8, u8, u8, u8) = (220, 38, 38, 255);
 
+/// Source `.en-card` uses a 34% surface / 66% background blend rather than a
+/// fully opaque surface. Keep this presentation token centralized so every
+/// native card owner uses the same visual contract.
+pub fn card_background() -> (u8, u8, u8, u8) {
+    mix(SURFACE, BG, 0.34)
+}
+
+/// Source folder previews blend the surface over the already blended card.
+pub fn card_preview_background() -> (u8, u8, u8, u8) {
+    mix(SURFACE, card_background(), 0.55)
+}
+
+/// Source toolbar buttons use a translucent surface over the application
+/// background, not an opaque white fill.
+pub fn toolbar_button_background() -> (u8, u8, u8, u8) {
+    mix(SURFACE, BG, 0.52)
+}
+
 /// Source runtime fix: `.en-topstrip { height: 28px !important; }`.
 pub const TOPBAR_HEIGHT: f32 = 28.;
 pub const TOPBAR_NAV_BUTTON_SIZE: f32 = 24.;

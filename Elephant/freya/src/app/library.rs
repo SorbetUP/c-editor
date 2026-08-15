@@ -4,7 +4,8 @@ use freya::prelude::*;
 
 use crate::{
     library_contract::{
-        EntryKind as ContractKind, EntryTitle, EntryType, LibraryEntry, RelativePath, ViewMode,
+        EntryKind as ContractKind, EntryTitle, EntryType, LibraryEntry, RelativePath, SortMode,
+        ViewMode,
     },
     navigation_contract::WorkspaceView,
     theme,
@@ -28,7 +29,12 @@ use library_actions::{card_action_menu, CardMenuState};
 pub(super) fn main_content(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
     let body = if snapshot.editor.is_some() {
-        editor_view::note_editor_host(state)
+        rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .padding(Gaps::new(0., 0., 12., 10.))
+            .child(editor_view::note_editor_host(state))
+            .into_element()
     } else if snapshot.view == WorkspaceView::Notes {
         rect()
             .width(Size::fill())
@@ -48,7 +54,6 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
         .width(Size::fill())
         .height(Size::fill())
         .background(theme::color(theme::BG))
-        .padding(Gaps::new(0., 10., 12., 10.))
         .on_mouse_up(move |_| dismiss_menu_state.write().menu_open = false)
         .maybe_child(
             snapshot
@@ -89,7 +94,7 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         .background(theme::color(if sort_hovered {
             theme::SOFT
         } else {
-            theme::SURFACE
+            theme::toolbar_button_background()
         }))
         .with_corner_radius(10.)
         .on_mouse_up(move |_| state.write().library.cycle_sort())
@@ -100,7 +105,16 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
                 .clear_hovered_target("toolbar:sort")
         })
         .a11y_alt(format!("Sort: {}", snapshot.library.sort.as_contract()))
-        .child(label().font_size(19.).text("↕"));
+        .child(svg_icon(
+            match snapshot.library.sort {
+                SortMode::UpdatedNewest => Icon::ArrowDownNarrowWide,
+                SortMode::UpdatedOldest => Icon::ArrowUpNarrowWide,
+                SortMode::TitleAz => Icon::ArrowDownAz,
+                SortMode::TitleZa => Icon::ArrowDownZa,
+            },
+            theme::color(theme::TEXT),
+            22.,
+        ));
     let view_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:view");
     let mut view_enter_state = state;
     let mut view_leave_state = state;
@@ -111,7 +125,7 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         .background(theme::color(if view_hovered {
             theme::SOFT
         } else {
-            theme::SURFACE
+            theme::toolbar_button_background()
         }))
         .with_corner_radius(10.)
         .on_mouse_up(move |_| state.write().library.cycle_view())
@@ -126,15 +140,15 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         } else {
             "Show notes as grid"
         })
-        .child(
-            label()
-                .font_size(19.)
-                .text(if snapshot.library.view_mode == ViewMode::Grid {
-                    "☷"
-                } else {
-                    "▦"
-                }),
-        );
+        .child(svg_icon(
+            if snapshot.library.view_mode == ViewMode::Grid {
+                Icon::List
+            } else {
+                Icon::Grid3x3
+            },
+            theme::color(theme::TEXT),
+            22.,
+        ));
     rect()
         .position(Position::new_absolute().left(0.).top(0.))
         .width(Size::fill())
@@ -170,12 +184,11 @@ pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
         .on_pointer_enter(move |_| enter_state.write().set_hovered_target("create-fab"))
         .on_pointer_leave(move |_| leave_state.write().clear_hovered_target("create-fab"))
         .a11y_alt("Create")
-        .child(
-            label()
-                .font_size(28.)
-                .color(theme::color(theme::TEXT))
-                .text("+"),
-        )
+        .child(svg_icon(
+            Icon::Plus,
+            theme::color(theme::SURFACE),
+            27.,
+        ))
         .into_element()
 }
 
@@ -301,11 +314,15 @@ fn library_grid(state: State<ShellState>) -> Element {
     let surface = if snapshot.library.view_mode == ViewMode::Grid {
         rect()
             .horizontal()
+            .padding(Gaps::new(0., 10., 10., 10.))
             .content(Content::wrap_spacing(10.))
             .spacing(10.)
             .children(entries)
     } else {
-        rect().spacing(8.).children(entries)
+        rect()
+            .padding(Gaps::new(0., 10., 10., 10.))
+            .spacing(8.)
+            .children(entries)
     };
     rect()
         .width(Size::fill())
@@ -471,11 +488,7 @@ fn render_library_card(
                     .horizontal()
                     .cross_align(Alignment::Center)
                     .spacing(6.)
-                    .background(theme::color(theme::mix(
-                        theme::SURFACE,
-                        theme::BG,
-                        0.55,
-                    )))
+                    .background(theme::color(theme::card_preview_background()))
                     .border(
                         Border::new()
                             .fill(theme::color(theme::mix(
@@ -544,11 +557,7 @@ fn render_library_card(
         })
         .height(Size::px(height))
         .padding(Gaps::new_all(10.))
-        .background(theme::color(if hovered {
-            theme::SOFT
-        } else {
-            theme::SURFACE
-        }))
+        .background(theme::color(theme::card_background()))
         .border(
             Border::new()
                 .fill(theme::color(if hovered {

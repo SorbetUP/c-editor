@@ -460,7 +460,10 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .width(Size::px(theme::SIDEBAR_RESIZER_WIDTH))
         .height(Size::fill())
         .center()
-        .background(theme::token_color(palette, theme::ThemeToken::Sidebar))
+        // The resize target overlaps the first pixels of the main content in
+        // the source shell. Its hit area is transparent there; only the
+        // sidebar's one-pixel edge belongs to the sidebar surface.
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .child(
             rect()
                 .width(Size::px(3.))
@@ -538,7 +541,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                         .font_weight(FontWeight::BOLD)
                         .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .a11y_alt("Notes")
-                        .text("Notes"),
+                        .text("NOTES"),
                 )
                 .child(rect().a11y_alt("Search notes").child(svg_icon(
                     Icon::Search,
@@ -551,10 +554,17 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .width(Size::px(sidebar_width))
         .height(Size::fill())
         .background(theme::token_color(palette, theme::ThemeToken::Sidebar))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .a11y_alt("Sidebar")
         .child(sidebar_scroll);
     rect()
-        .width(Size::px(sidebar_width + theme::SIDEBAR_RESIZER_WIDTH))
+        // Keep the resizer's pointer target outside the measured sidebar
+        // without making the flex sibling reserve those extra pixels.
+        .width(Size::px(sidebar_width))
         .height(Size::fill())
         .horizontal()
         .child(sidebar)
@@ -605,12 +615,18 @@ fn sidebar_entry(
             rect()
                 .horizontal()
                 .cross_align(Alignment::Center)
-                .spacing(4.)
-                .child(svg_icon(
-                    Icon::ChevronRight,
-                    theme::token_color(palette, theme::ThemeToken::Muted),
-                    15.,
-                ))
+                .spacing(6.)
+                .child(
+                    rect()
+                        .width(Size::px(22.))
+                        .height(Size::px(22.))
+                        .center()
+                        .child(svg_icon(
+                            Icon::ChevronRight,
+                            theme::token_color(palette, theme::ThemeToken::Muted),
+                            15.,
+                        )),
+                )
                 .child(
                     label()
                         .font_size(14.)

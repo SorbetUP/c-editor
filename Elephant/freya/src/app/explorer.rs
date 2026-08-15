@@ -622,7 +622,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         .position(
             Position::new_global()
                 .left(298.)
-                .top(142.),
+                .top(119.),
         )
         .width(Size::px(686.))
         .height(if snapshot.search.phase == ExplorerPhase::Idle {
@@ -662,7 +662,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         };
         Some(
             rect()
-                .position(Position::new_global().left(298.).top(214.))
+                .position(Position::new_global().left(298.).top(191.))
                 .width(Size::px(686.))
                 .height(Size::px(210.))
                 .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
@@ -670,11 +670,18 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         )
     };
     rect()
-        .position(Position::new_global().left(0.).top(0.))
-        .width(Size::fill())
-        .height(Size::fill())
-        .background(Color::from_argb(110, 230, 236, 245))
-        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_BACKDROP_LAYER))
+        .position(Position::new_global())
+        .layer(Layer::Overlay)
+        .child(
+            rect()
+                .position(Position::new_global().left(0.).top(0.))
+                .width(Size::window_percent(100.))
+                .height(Size::window_percent(100.))
+                .background(Color::from_argb(31, 15, 23, 42))
+                .layer(Layer::OverlayLevel(
+                    super::search_overlay_view::SEARCH_BACKDROP_LAYER,
+                )),
+        )
         .child(modal)
         .maybe_child(panel)
         .into_element()
