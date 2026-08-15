@@ -387,6 +387,7 @@ pub const NOTE_METADATA_TAG_BASE_WIDTH: f32 = 18.;
 pub const NOTE_METADATA_TAG_CHAR_WIDTH: f32 = 7.;
 pub const NOTE_METADATA_RIGHT: f32 = 38.;
 pub const NOTE_CLOSE_RIGHT: f32 = 0.;
+pub const NOTE_CHROME_SIZE: f32 = 30.;
 
 pub fn color(value: (u8, u8, u8, u8)) -> Color {
     Color::from_rgb(value.0, value.1, value.2)

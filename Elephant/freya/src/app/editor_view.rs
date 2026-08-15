@@ -419,8 +419,13 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
         .pinned_paths
         .iter()
         .any(|path| path.as_str() == note_relative_path);
+    let topbar_control_top = (topbar_height - theme::NOTE_CHROME_SIZE) / 2.;
     let mut metadata_rail = rect()
-        .position(Position::new_absolute().right(theme::NOTE_METADATA_RIGHT).top(0.))
+        .position(
+            Position::new_absolute()
+                .right(theme::NOTE_METADATA_RIGHT)
+                .top(topbar_control_top),
+        )
         .horizontal()
         .spacing(4.)
         .child(metadata_chip(metadata.date, "Note date"));
@@ -512,9 +517,13 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
         .child(metadata_rail);
     let close_state = state;
     let close_button = rect()
-        .position(Position::new_absolute().right(theme::NOTE_CLOSE_RIGHT).top(0.))
-        .width(Size::px(30.))
-        .height(Size::px(30.))
+        .position(
+            Position::new_absolute()
+                .right(theme::NOTE_CLOSE_RIGHT)
+                .top(topbar_control_top),
+        )
+        .width(Size::px(theme::NOTE_CHROME_SIZE))
+        .height(Size::px(theme::NOTE_CHROME_SIZE))
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
         .with_corner_radius(8.)
         .center()
@@ -862,7 +871,7 @@ fn render_block_children(
 
     rect()
         .width(Size::fill())
-        .spacing(5.)
+        .spacing(8.)
         .children(children)
         .into_element()
 }
