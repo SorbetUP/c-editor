@@ -35,6 +35,12 @@ pub(super) enum Icon {
     FileText,
     X,
     Excalidraw,
+    BookOpen,
+    Calendar,
+    MessageCircle,
+    GitFork,
+    Database,
+    LayoutDashboard,
 }
 
 const SEARCH: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>"#;
@@ -63,6 +69,12 @@ const FILE_TEXT: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://
 const X: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"#;
 const EXCALIDRAW: &[u8] =
     include_bytes!("../../../frontend/src/muya/lib/assets/icons/excalidraw.svg");
+const BOOK_OPEN: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5A2.5 2.5 0 0 1 4.5 2H12v18H4.5A2.5 2.5 0 0 0 2 22.5z"/><path d="M22 4.5A2.5 2.5 0 0 0 19.5 2H12v18h7.5a2.5 2.5 0 0 1 2.5 2.5z"/></svg>"#;
+const CALENDAR: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>"#;
+const MESSAGE_CIRCLE: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg>"#;
+const GIT_FORK: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 9v1a5 5 0 0 0 5 5h2a5 5 0 0 0 5-5V9"/></svg>"#;
+const DATABASE: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>"#;
+const LAYOUT_DASHBOARD: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>"#;
 
 pub(super) fn svg_icon(icon: Icon, color: Color, size: f32) -> Element {
     SvgViewer::new(source(icon))
@@ -102,6 +114,12 @@ fn source(icon: Icon) -> &'static [u8] {
         Icon::FileText => FILE_TEXT,
         Icon::X => X,
         Icon::Excalidraw => EXCALIDRAW,
+        Icon::BookOpen => BOOK_OPEN,
+        Icon::Calendar => CALENDAR,
+        Icon::MessageCircle => MESSAGE_CIRCLE,
+        Icon::GitFork => GIT_FORK,
+        Icon::Database => DATABASE,
+        Icon::LayoutDashboard => LAYOUT_DASHBOARD,
     }
 }
 
@@ -135,6 +153,12 @@ mod tests {
             Icon::FolderPlus,
             Icon::FileText,
             Icon::X,
+            Icon::BookOpen,
+            Icon::Calendar,
+            Icon::MessageCircle,
+            Icon::GitFork,
+            Icon::Database,
+            Icon::LayoutDashboard,
         ] {
             let svg = std::str::from_utf8(source(icon)).expect("Lucide source is UTF-8");
             assert!(svg.contains("viewBox=\"0 0 24 24\""));

@@ -1,4 +1,4 @@
-use elephant_freya::app::app_with_vault;
+use elephant_freya::{app::app_with_vault, vault_adapter::VaultAdapter};
 use freya::prelude::Rect;
 use freya_testing::{TestingNode, TestingRunner};
 use serde_json::Value;
@@ -395,4 +395,83 @@ fn appearance_content_scrolls_to_controls_below_the_fold() {
         (after - before).abs() >= 0.5,
         "Appearance must scroll so bottom controls are reachable"
     );
+}
+
+#[test]
+fn vault_settings_reads_restores_and_persists_real_trash_entries() {
+    let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
+    let fixture = FixtureVault::new();
+    let adapter = VaultAdapter::open(&fixture.root).expect("open fixture vault");
+    adapter.delete("Welcome.md").expect("move note to trash");
+
+    let mut runner = runner_for(&fixture);
+    open_settings(&mut runner);
+    click_label(&mut runner, "Select Vaults settings");
+    click_label(&mut runner, "Refresh vault trash");
+
+    assert_eq!(accessible_nodes(&runner, "Expand vault trash").len(), 1);
+    click_label(&mut runner, "Expand vault trash");
+    assert_eq!(accessible_nodes(&runner, "Restore Welcome.md").len(), 1);
+
+    click_label(&mut runner, "Restore Welcome.md");
+    assert_eq!(accessible_nodes(&runner, "Vault trash").len(), 1);
+    assert!(fixture.root.join("Welcome.md").exists());
+}
+
+#[test]
+fn addons_settings_reads_and_updates_the_real_vault_registry() {
+    let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
+    let fixture = FixtureVault::new();
+    let addons = fixture.root.join(".elephantnote/addons");
+    fs::create_dir_all(addons.join("packages/example-addon")).expect("create addon package");
+    fs::write(
+        addons.join("registry.json"),
+        serde_json::json!({
+            "version": 1,
+            "addons": {
+                "example-addon": {
+                    "manifest": {
+                        "id": "example-addon",
+                        "name": "Example addon",
+                        "version": "1.0.0",
+                        "description": "Fixture addon",
+                        "runtime": {"type": "javascript-worker", "entry": "index.js"}
+                    },
+                    "enabled": false,
+                    "packageHash": "fixture",
+                    "installedAt": "2026-08-15T00:00:00Z",
+                    "source": "external"
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("write addon registry");
+
+    let mut runner = runner_for(&fixture);
+    open_settings(&mut runner);
+    click_label(&mut runner, "Select Addons settings");
+    click_label(&mut runner, "Refresh addons");
+    assert_eq!(
+        accessible_nodes(&runner, "Enable Example addon addon").len(),
+        1
+    );
+
+    click_label(&mut runner, "Enable Example addon addon");
+    let registry: Value = serde_json::from_str(
+        &fs::read_to_string(addons.join("registry.json")).expect("read addon registry"),
+    )
+    .expect("parse addon registry");
+    assert_eq!(
+        registry["addons"]["example-addon"]["enabled"],
+        Value::Bool(true)
+    );
+
+    click_label(&mut runner, "Uninstall Example addon addon");
+    let registry: Value = serde_json::from_str(
+        &fs::read_to_string(addons.join("registry.json")).expect("read updated addon registry"),
+    )
+    .expect("parse updated addon registry");
+    assert!(registry["addons"].get("example-addon").is_none());
+    assert!(!addons.join("packages/example-addon").exists());
 }

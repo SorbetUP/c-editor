@@ -450,6 +450,38 @@ fn grid_list_nested_folder_back_and_empty_states_use_real_fixture_content() {
 }
 
 #[test]
+fn dragging_a_library_entry_into_a_folder_moves_the_real_file() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    let source = library_card_node(&runner, "A")
+        .layout()
+        .area
+        .center()
+        .to_f64();
+    let target = library_card_node(&runner, "Folder")
+        .layout()
+        .area
+        .center()
+        .to_f64();
+    runner.move_cursor(source);
+    runner.press_cursor(source);
+    runner.move_cursor(target);
+    runner.sync_and_update();
+    runner.release_cursor(target);
+    runner.sync_and_update();
+
+    assert!(!fixture.path().join("A.md").exists());
+    assert!(fixture.path().join("Folder").join("A.md").exists());
+}
+
+#[test]
 fn scrolling_reveals_buffered_entries_and_fetches_beyond_first_real_page() {
     let fixture = FixtureVault::new();
     fixture.add_bulk_notes(250);

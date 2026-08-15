@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use freya::prelude::*;
 
-use crate::{theme, vault_adapter::VaultEntry};
+use crate::{addon_adapter, theme, vault_adapter::VaultEntry};
 
 use super::{
     navigation_icons::{svg_icon, Icon},
@@ -220,6 +220,28 @@ pub(super) fn top_vault_bar(state: State<ShellState>, palette: theme::ThemePalet
                 .width(Size::fill())
                 .height(Size::px(TAURI_TOPBAR_HEIGHT)),
         )
+        .child(
+            rect()
+                .position(Position::new_absolute().right(10.).top(3.))
+                .height(Size::px(22.))
+                .padding(Gaps::new(2., 9., 2., 9.))
+                .center()
+                .background(theme::token_color(palette, theme::ThemeToken::Soft))
+                .border(
+                    Border::new()
+                        .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                        .width(1.),
+                )
+                .with_corner_radius(7.)
+                .a11y_alt("Runtime Freya")
+                .child(
+                    label()
+                        .font_size(10.)
+                        .font_weight(FontWeight::BOLD)
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                        .text("Freya"),
+                ),
+        )
         .a11y_alt("TopVaultBar")
         .into_element()
 }
@@ -235,6 +257,11 @@ pub(super) fn icon_rail(
     } else {
         theme::RAIL_PADDING_TOP_DESKTOP
     };
+    let native_views = snapshot
+        .vault
+        .as_ref()
+        .and_then(|vault| addon_adapter::native_views(vault.root()).ok())
+        .unwrap_or_default();
     let nav = rect()
         .width(Size::fill())
         .expanded()
@@ -266,6 +293,16 @@ pub(super) fn icon_rail(
                 })
                 .collect::<Vec<_>>(),
         )
+        .children(native_views.into_iter().map(|view| {
+            RailAction {
+                item_id: view.view.source_id().to_owned(),
+                label_text: view.title,
+                icon: native_view_icon(view.icon),
+                state,
+                palette,
+            }
+            .into_element()
+        }))
         .child(rect().expanded());
     let bottom = rect()
         .position(Position::new_absolute().left(0.).right(0.).bottom(0.))
@@ -342,8 +379,8 @@ fn vault_action(mut state: State<ShellState>, palette: theme::ThemePalette) -> E
 
 #[derive(PartialEq)]
 struct RailAction {
-    item_id: &'static str,
-    label_text: &'static str,
+    item_id: String,
+    label_text: String,
     icon: Icon,
     state: State<ShellState>,
     palette: theme::ThemePalette,
@@ -351,8 +388,8 @@ struct RailAction {
 
 impl Component for RailAction {
     fn render(&self) -> impl IntoElement {
-        let item_id = self.item_id;
-        let label_text = self.label_text;
+        let item_id = self.item_id.clone();
+        let label_text = self.label_text.clone();
         let icon = self.icon;
         let state = self.state;
         let palette = self.palette;
@@ -360,12 +397,12 @@ impl Component for RailAction {
         let mut area_state = area;
         let hover_key = format!("rail:{label_text}");
         let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
-        let drop_target = state.read().rail_drop_target.as_deref() == Some(item_id);
+        let drop_target = state.read().rail_drop_target.as_deref() == Some(item_id.as_str());
         let dragging = state
             .read()
             .rail_drag
             .as_ref()
-            .is_some_and(|drag| drag.source == item_id && drag.moved);
+            .is_some_and(|drag| drag.source == item_id.as_str() && drag.moved);
         let shown_icon = if item_id == "sidebar-toggle" && !hovered {
             Icon::PanelLeft
         } else {
@@ -376,6 +413,12 @@ impl Component for RailAction {
         let mut focus_state = state;
         let mut hover_state = state;
         let move_key = hover_key.clone();
+        let drag_item_id = item_id.clone();
+        let move_item_id = item_id.clone();
+        let release_item_id = item_id.clone();
+        let activate_item_id = item_id.clone();
+        let global_item_id = item_id.clone();
+        let move_global_item_id = item_id.clone();
         let move_area = area;
         let release_area = area;
         rect()
@@ -398,7 +441,7 @@ impl Component for RailAction {
             .on_pointer_down(move |event: Event<PointerEventData>| {
                 if event.is_primary() {
                     focus_state.write().begin_rail_drag(
-                        item_id,
+                        &drag_item_id,
                         event.global_location().x,
                         event.global_location().y,
                     );
@@ -407,13 +450,28 @@ impl Component for RailAction {
             .on_pointer_move(move |event: Event<PointerEventData>| {
                 if event.is_primary() {
                     move_state.write().update_rail_drag(
-                        item_id,
+                        &move_item_id,
                         event.global_location().x,
                         event.global_location().y,
                     );
                 }
             })
+            // Keep the ordinary click path on the hit target itself.  The
+            // global pointer handler below is reserved for releasing a real
+            // drag over another rail item; relying on that handler for a
+            // simple icon click made the visible SVG unreliable in the
+            // native window even though synthetic label clicks passed.
+            .on_mouse_up(move |_| {
+                let was_drag = release_state.write().finish_rail_drag(&release_item_id);
+                if was_drag {
+                    return;
+                }
+                activate_rail_action(release_state, &activate_item_id);
+            })
             .on_global_pointer_press(move |event: Event<PointerEventData>| {
+                if release_state.read().rail_drag.is_none() {
+                    return;
+                }
                 let Some(area) = *release_area.read() else {
                     return;
                 };
@@ -425,24 +483,8 @@ impl Component for RailAction {
                 {
                     return;
                 }
-                let was_drag = release_state.write().finish_rail_drag(item_id);
-                if was_drag {
-                    return;
-                }
-                match item_id {
-                    "search" => {
-                        let mut shell = release_state.write();
-                        shell.search_open = !shell.search_open;
-                        shell.settings_open = false;
-                    }
-                    "settings" => {
-                        let mut shell = release_state.write();
-                        shell.settings_open = !shell.settings_open;
-                        shell.search_open = false;
-                    }
-                    "sidebar-toggle" => release_state.write().toggle_sidebar(),
-                    _ => {}
-                }
+                let was_drag = release_state.write().finish_rail_drag(&global_item_id);
+                let _ = was_drag;
             })
             .on_global_pointer_move(move |event: Event<PointerEventData>| {
                 let Some(area) = *move_area.read() else {
@@ -460,7 +502,7 @@ impl Component for RailAction {
                     }
                     hover_state
                         .write()
-                        .update_rail_drag(item_id, point.x, point.y);
+                        .update_rail_drag(&move_global_item_id, point.x, point.y);
                 } else if current.as_deref() == Some(move_key.as_str()) {
                     hover_state.write().clear_hovered_target(&move_key);
                 }
@@ -483,20 +525,64 @@ impl Component for RailAction {
 }
 
 fn rail_action(
-    item_id: &'static str,
-    label_text: &'static str,
+    item_id: &str,
+    label_text: &str,
     icon: Icon,
     state: State<ShellState>,
     palette: theme::ThemePalette,
 ) -> Element {
     RailAction {
-        item_id,
-        label_text,
+        item_id: item_id.to_owned(),
+        label_text: label_text.to_owned(),
         icon,
         state,
         palette,
     }
     .into_element()
+}
+
+fn native_view_icon(icon: addon_adapter::NativeViewIcon) -> Icon {
+    match icon {
+        addon_adapter::NativeViewIcon::Book => Icon::BookOpen,
+        addon_adapter::NativeViewIcon::Calendar => Icon::Calendar,
+        addon_adapter::NativeViewIcon::Chat => Icon::MessageCircle,
+        addon_adapter::NativeViewIcon::Dashboard => Icon::LayoutDashboard,
+        addon_adapter::NativeViewIcon::Graph => Icon::GitFork,
+        addon_adapter::NativeViewIcon::Models => Icon::Database,
+    }
+}
+
+fn activate_rail_action(mut state: State<ShellState>, item_id: &str) {
+    match item_id {
+        "search" => {
+            let mut shell = state.write();
+            shell.search_open = !shell.search_open;
+            shell.settings_open = false;
+        }
+        "settings" => {
+            let mut shell = state.write();
+            shell.settings_open = !shell.settings_open;
+            shell.search_open = false;
+        }
+        "sidebar-toggle" => state.write().toggle_sidebar(),
+        "graph" => state
+            .write()
+            .open_workspace(crate::navigation_contract::WorkspaceView::Graph),
+        "wiki" => state
+            .write()
+            .open_workspace(crate::navigation_contract::WorkspaceView::Wiki),
+        "calendar" => state
+            .write()
+            .open_workspace(crate::navigation_contract::WorkspaceView::Calendar),
+        "chat" => state
+            .write()
+            .open_workspace(crate::navigation_contract::WorkspaceView::Chat),
+        "models" => state
+            .write()
+            .open_workspace(crate::navigation_contract::WorkspaceView::Models),
+        "dashboard" => state.write().open_dashboard(),
+        _ => {}
+    }
 }
 
 fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) -> Element {

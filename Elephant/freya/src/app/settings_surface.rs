@@ -6,6 +6,14 @@ use crate::theme;
 
 use super::super::SettingsSurfaceState;
 
+#[path = "settings_addons.rs"]
+mod settings_addons;
+#[path = "settings_vault.rs"]
+mod settings_vault;
+
+pub(super) use settings_addons::addons_settings;
+pub(super) use settings_vault::vault_settings;
+
 pub(super) fn surface_state(
     surface: &SettingsSurfaceState,
     palette: theme::ThemePalette,

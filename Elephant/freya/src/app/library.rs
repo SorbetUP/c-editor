@@ -13,7 +13,10 @@ use crate::{
     vault_adapter::{EntryKind, VaultEntry},
 };
 
-use super::{drawing, editor_view, route_notice, ShellState};
+use super::{
+    calendar_view, chat_view, drawing, editor_view, models_view, route_notice, wiki_view,
+    ShellState,
+};
 
 #[path = "library_icons.rs"]
 mod library_icons;
@@ -22,12 +25,94 @@ mod library_icons;
 mod library_actions;
 
 use library_actions::{
-    card_action_menu, create_note_and_open, load_more_library_entries, rename_library_entry,
-    CardMenuState,
+    card_action_menu, create_note_and_open, load_more_library_entries, move_library_entry,
+    rename_library_entry, CardMenuState,
 };
 use library_icons::{svg_icon, Icon as LibraryIcon};
 
-pub(super) fn main_content(state: State<ShellState>) -> Element {
+const LIBRARY_DRAG_THRESHOLD: f64 = 4.;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct LibraryCardDrag {
+    source: Option<String>,
+    source_is_directory: bool,
+    start_x: f64,
+    start_y: f64,
+    moved: bool,
+    target: Option<String>,
+    target_allowed: bool,
+}
+
+impl LibraryCardDrag {
+    pub(super) fn begin(&mut self, source: &str, source_is_directory: bool, x: f64, y: f64) {
+        self.source = Some(source.to_owned());
+        self.source_is_directory = source_is_directory;
+        self.start_x = x;
+        self.start_y = y;
+        self.moved = false;
+        self.target = None;
+        self.target_allowed = false;
+    }
+
+    pub(super) fn update(&mut self, x: f64, y: f64) {
+        if self.source.is_some()
+            && ((x - self.start_x).abs() >= LIBRARY_DRAG_THRESHOLD
+                || (y - self.start_y).abs() >= LIBRARY_DRAG_THRESHOLD)
+        {
+            self.moved = true;
+        }
+    }
+
+    pub(super) fn enter_target(&mut self, target: &str, target_is_directory: bool) {
+        let Some(source) = self.source.as_deref() else {
+            return;
+        };
+        let allowed = target_is_directory
+            && source != target
+            && !target.starts_with(&format!("{source}/"))
+            && parent_path(source) != target;
+        self.target = Some(target.to_owned());
+        self.target_allowed = allowed;
+    }
+
+    pub(super) fn leave_target(&mut self, target: &str) {
+        if self.target.as_deref() == Some(target) {
+            self.target = None;
+            self.target_allowed = false;
+        }
+    }
+
+    pub(super) fn target_state(&self, target: &str) -> Option<bool> {
+        (self.source.is_some() && self.target.as_deref() == Some(target))
+            .then_some(self.target_allowed)
+    }
+
+    pub(super) fn is_dragging(&self, path: &str) -> bool {
+        self.moved && self.source.as_deref() == Some(path)
+    }
+
+    pub(super) fn finish(&mut self) -> Option<(String, String)> {
+        let result = if self.moved && self.target_allowed {
+            self.source.clone().zip(self.target.clone())
+        } else {
+            None
+        };
+        *self = Self::default();
+        result
+    }
+}
+
+fn parent_path(path: &str) -> &str {
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("")
+}
+
+pub(super) fn main_content(
+    state: State<ShellState>,
+    wiki_view_state: State<wiki_view::WikiViewState>,
+    palette: theme::ThemePalette,
+) -> Element {
     let snapshot = state.read().clone();
     let showing_library = snapshot.editor.is_none()
         && snapshot.drawing.is_none()
@@ -44,6 +129,14 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
             .child(library_grid(state))
             .child(library_create_button(state))
             .into_element()
+    } else if snapshot.view == WorkspaceView::Wiki {
+        wiki_view::wiki_workspace(state, wiki_view_state, palette)
+    } else if snapshot.view == WorkspaceView::Calendar {
+        calendar_view::workspace(state, palette)
+    } else if snapshot.view == WorkspaceView::Chat {
+        chat_view::workspace(state, palette)
+    } else if snapshot.view == WorkspaceView::Models {
+        models_view::workspace(state, palette)
     } else if snapshot.search_open {
         route_notice("Search", "Search notes")
     } else if snapshot.settings_open {
@@ -279,13 +372,25 @@ impl Component for CreateMenuItem {
             }))
             .layer(Layer::OverlayLevel(22))
             .on_sized(move |event: Event<SizedEventData>| area_state.set(Some(event.area)))
+            // Keep both paths: direct mouse-up handles the icon/root hit
+            // target, while the coordinate-checked global fallback handles
+            // text descendants that do not bubble mouse-up in Freya.  The
+            // menu-open guard makes the two paths idempotent when both fire.
+            .on_mouse_up(move |_| {
+                if action_state.read().menu_open {
+                    run_create_action(action_state, action);
+                }
+            })
             .on_global_pointer_press(move |event: Event<PointerEventData>| {
-                let Some(area) = *area.read() else { return };
+                let Some(area) = *area.read() else {
+                    return;
+                };
                 let point = event.global_location();
                 if point.x < f64::from(area.min_x())
                     || point.x > f64::from(area.max_x())
                     || point.y < f64::from(area.min_y())
                     || point.y > f64::from(area.max_y())
+                    || !action_state.read().menu_open
                 {
                     return;
                 }
@@ -453,11 +558,35 @@ fn library_grid(state: State<ShellState>) -> Element {
     };
 
     let mut paging_state = state;
+    let mut drag_move_state = state;
+    let mut drag_release_state = state;
+    let mut drag_action_state = state;
     rect()
         .width(Size::fill())
         .height(Size::fill())
         .on_wheel(move |_| {
             let _ = load_more_library_entries(paging_state);
+        })
+        .on_global_pointer_move(move |event: Event<PointerEventData>| {
+            if event.is_primary() {
+                let location = event.global_location();
+                drag_move_state
+                    .write()
+                    .library_drag
+                    .update(location.x, location.y);
+            }
+        })
+        .on_global_pointer_press(move |event: Event<PointerEventData>| {
+            if !event.is_primary() {
+                return;
+            }
+            let moved = {
+                let mut drag = drag_release_state.write();
+                drag.library_drag.finish()
+            };
+            if let Some((source, target)) = moved {
+                let _ = move_library_entry(&mut drag_action_state, &source, &target);
+            }
         })
         .child(
             ScrollView::new()
@@ -489,6 +618,7 @@ impl Component for LibraryCard {
     fn render(&self) -> impl IntoElement {
         let card_menu_state = use_state(CardMenuState::default);
         let rename_value = use_state(String::new);
+        let card_area = use_state(|| None::<Area>);
         render_library_card(
             &self.entry,
             self.mode,
@@ -496,6 +626,7 @@ impl Component for LibraryCard {
             self.state,
             card_menu_state,
             rename_value,
+            card_area,
         )
     }
 }
@@ -507,6 +638,7 @@ fn render_library_card(
     state: State<ShellState>,
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
+    card_area: State<Option<Area>>,
 ) -> Element {
     let path = entry.path.as_str().to_string();
     let is_drawing =
@@ -526,10 +658,22 @@ fn render_library_card(
 
     let hover_key = format!("card:{path}");
     let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let drag_snapshot = state.read().library_drag.clone();
+    let dragging = drag_snapshot.is_dragging(&path);
+    let drop_state = drag_snapshot.target_state(&path);
     let enter_key = hover_key.clone();
     let leave_key = hover_key.clone();
     let mut enter_state = state;
     let mut leave_state = state;
+    let drag_source_path = path.clone();
+    let mut drag_start_state = state;
+    let drag_target_path = path.clone();
+    let drag_leave_path = path.clone();
+    let mut drag_enter_state = state;
+    let mut drag_leave_state = state;
+    let mut card_area_state = card_area;
+    let drag_move_path = path.clone();
+    let mut drag_move_state = state;
 
     let mut trigger_state = card_menu_state;
     let menu_trigger = rect()
@@ -612,17 +756,67 @@ fn render_library_card(
             0.34,
         )))
         .border(
-            Border::new()
-                .fill(theme::color(if hovered {
-                    theme::BORDER_STRONG
-                } else {
-                    theme::BORDER
-                }))
+                Border::new()
+                    .fill(theme::color(if hovered {
+                        theme::BORDER_STRONG
+                    } else if drop_state == Some(true) {
+                        theme::PRIMARY
+                    } else {
+                        theme::BORDER
+                    }))
                 .width(1.),
         )
         .with_corner_radius(10.)
+        .opacity(if dragging { 0.45 } else { 1. })
+        .on_sized(move |event: Event<SizedEventData>| {
+            card_area_state.set(Some(event.area));
+        })
         .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
         .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
+        .on_mouse_down(move |event: Event<MouseEventData>| {
+            if event.button == Some(MouseButton::Left) {
+                let location = event.global_location;
+                drag_start_state.write().library_drag.begin(
+                    &drag_source_path,
+                    is_folder,
+                    location.x,
+                    location.y,
+                );
+            }
+        })
+        .on_pointer_enter(move |_| {
+            drag_enter_state
+                .write()
+                .library_drag
+                .enter_target(&drag_target_path, is_folder);
+        })
+        .on_pointer_leave(move |_| {
+            drag_leave_state
+                .write()
+                .library_drag
+                .leave_target(&drag_leave_path);
+        })
+        .on_global_pointer_move(move |event: Event<PointerEventData>| {
+            let Some(area) = *card_area.read() else {
+                return;
+            };
+            let point = event.global_location();
+            let inside = point.x >= f64::from(area.min_x())
+                && point.x <= f64::from(area.max_x())
+                && point.y >= f64::from(area.min_y())
+                && point.y <= f64::from(area.max_y());
+            if inside {
+                drag_move_state
+                    .write()
+                    .library_drag
+                    .enter_target(&drag_move_path, is_folder);
+            } else {
+                drag_move_state
+                    .write()
+                    .library_drag
+                    .leave_target(&drag_move_path);
+            }
+        })
         .on_secondary_down(move |_| {
             let mut menu = menu_state_for_secondary.write();
             menu.open = true;

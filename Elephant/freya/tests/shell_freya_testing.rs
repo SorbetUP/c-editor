@@ -2,6 +2,7 @@ use elephant_freya::{
     app::app_with_vault,
     source_contracts::{self, ComponentId},
 };
+use freya::elements::image::Image;
 use freya_testing::{TestingNode, TestingRunner};
 use std::{
     fs,
@@ -68,6 +69,20 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
     runner.click_cursor(center);
 }
 
+fn click_icon_inside(runner: &mut TestingRunner, label: &str) {
+    let node = require_labeled_node(runner, label);
+    let icon = node
+        .children()
+        .into_iter()
+        .find(|child| Image::try_downcast(child.element().as_ref()).is_some())
+        .unwrap_or_else(|| panic!("no rasterized icon inside {label:?}"));
+    let area = icon.layout().area;
+    runner.click_cursor((
+        ((area.min_x() + area.max_x()) / 2.) as f64,
+        ((area.min_y() + area.max_y()) / 2.) as f64,
+    ));
+}
+
 #[test]
 fn converted_shell_exposes_vue_source_contracts_through_freya_accessibility() {
     let fixture = FixtureVault::new();
@@ -95,6 +110,7 @@ fn converted_shell_exposes_vue_source_contracts_through_freya_accessibility() {
     }
 
     assert_eq!(accessible_nodes(&runner, "TopVaultBar").len(), 1);
+    assert_eq!(accessible_nodes(&runner, "Runtime Freya").len(), 1);
     assert!(accessible_nodes(&runner, "Create").len() >= 1);
     assert!(accessible_nodes(&runner, "Sort: Updated newest").len() >= 1);
     assert!(accessible_nodes(&runner, "Show notes as list").len() >= 1);
@@ -102,7 +118,7 @@ fn converted_shell_exposes_vue_source_contracts_through_freya_accessibility() {
     assert!(accessible_nodes(&runner, "Projects").len() >= 1);
     assert_eq!(accessible_nodes(&runner, "All notes").len(), 1);
 
-    click_label(&mut runner, "Create");
+    click_icon_inside(&mut runner, "Create");
     assert_eq!(accessible_nodes(&runner, "Note").len(), 1);
     assert_eq!(accessible_nodes(&runner, "Drawing").len(), 1);
     assert_eq!(accessible_nodes(&runner, "Folder").len(), 1);
@@ -154,6 +170,24 @@ fn converted_settings_search_graph_and_editor_surfaces_are_reachable() {
     runner.sync_and_update();
     assert!(accessible_nodes(&runner, "Heading 1").len() >= 1);
     assert!(accessible_nodes(&runner, "Paragraph").len() >= 1);
+}
+
+#[test]
+fn clicking_the_settings_logo_opens_the_real_settings_panel() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    assert_eq!(accessible_nodes(&runner, "ElephantNote settings").len(), 0);
+    click_icon_inside(&mut runner, "Settings");
+    runner.sync_and_update();
+    assert_eq!(accessible_nodes(&runner, "ElephantNote settings").len(), 1);
+    assert_eq!(accessible_nodes(&runner, "Settings sections").len(), 1);
 }
 
 #[test]

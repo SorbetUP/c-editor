@@ -327,3 +327,52 @@ pub(super) fn delete_library_entry(state: &mut State<ShellState>, path: &str) ->
         }
     }
 }
+
+pub(super) fn move_library_entry(
+    state: &mut State<ShellState>,
+    source: &str,
+    target: &str,
+) -> bool {
+    let (vault, directory) = {
+        let snapshot = state.read();
+        (
+            snapshot.vault.clone(),
+            snapshot.library.current_path.as_str().to_owned(),
+        )
+    };
+    let Some(vault) = vault else {
+        state.write().error = Some("No vault selected.".to_owned());
+        return false;
+    };
+
+    eprintln!(
+        "[freya][library] action:start action=move source={} target={}",
+        source, target
+    );
+    match vault.move_entry(source, Some(target.to_owned())) {
+        Ok(false) => {
+            eprintln!(
+                "[freya][library] action=noop action=move source={} target={}",
+                source, target
+            );
+            false
+        }
+        Ok(true) => {
+            let mut next = state.write();
+            next.reload_directory(&directory);
+            eprintln!(
+                "[freya][library] action:complete action=move source={} target={}",
+                source, target
+            );
+            true
+        }
+        Err(error) => {
+            eprintln!(
+                "[freya][library] action:failure action=move source={} target={} error={}",
+                source, target, error
+            );
+            state.write().error = Some(error.to_string());
+            false
+        }
+    }
+}

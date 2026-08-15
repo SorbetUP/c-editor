@@ -11,6 +11,7 @@ use crate::{
         search_core_settings, SectionTransition, SettingIndexEntry, SettingsState,
     },
     theme,
+    vault_adapter::TrashEntry,
 };
 
 #[path = "settings_controls.rs"]
@@ -57,11 +58,32 @@ impl Default for SettingsSurfaceState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) struct VaultTrashState {
+    pub(super) items: Vec<TrashEntry>,
+    pub(super) loaded: bool,
+    pub(super) loading: bool,
+    pub(super) error: Option<String>,
+    pub(super) action: Option<String>,
+    pub(super) empty_confirmation: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) struct AddonsViewState {
+    pub(super) items: Vec<crate::addon_adapter::InstalledAddon>,
+    pub(super) loaded: bool,
+    pub(super) loading: bool,
+    pub(super) error: Option<String>,
+    pub(super) action: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SettingsViewState {
     pub settings: SettingsState,
     pub surface: SettingsSurfaceState,
     pub runtime: SettingsRuntimeState,
+    pub(super) trash: VaultTrashState,
+    pub(super) addons: AddonsViewState,
 }
 
 impl SettingsViewState {
@@ -71,6 +93,8 @@ impl SettingsViewState {
             settings: SettingsState::default(),
             surface: SettingsSurfaceState::Ready,
             runtime,
+            trash: VaultTrashState::default(),
+            addons: AddonsViewState::default(),
         };
         if let Some(error) = state.runtime.load_error.clone() {
             state.surface = SettingsSurfaceState::Error {
@@ -110,6 +134,79 @@ impl SettingsViewState {
         self.runtime.cycle_auto_save_delay();
     }
 
+    pub(super) fn begin_trash_load(&mut self) {
+        self.trash.loading = true;
+        self.trash.error = None;
+    }
+
+    pub(super) fn apply_trash_result(&mut self, result: Result<Vec<TrashEntry>, String>) {
+        self.trash.loading = false;
+        self.trash.loaded = true;
+        match result {
+            Ok(items) => {
+                self.trash.items = items;
+                self.trash.error = None;
+            }
+            Err(error) => {
+                self.trash.error = Some(error);
+            }
+        }
+    }
+
+    pub(super) fn begin_trash_action(&mut self, action: impl Into<String>) {
+        self.trash.action = Some(action.into());
+        self.trash.error = None;
+    }
+
+    pub(super) fn finish_trash_action(&mut self, result: Result<(), String>) {
+        self.trash.action = None;
+        match result {
+            Ok(()) => self.trash.error = None,
+            Err(error) => self.trash.error = Some(error),
+        }
+        self.trash.empty_confirmation = false;
+    }
+
+    pub(super) fn toggle_trash_expanded(&mut self) {
+        self.settings.toggle_trash();
+    }
+
+    pub(super) fn request_empty_trash(&mut self) {
+        self.trash.empty_confirmation = !self.trash.empty_confirmation;
+    }
+
+    pub(super) fn begin_addons_load(&mut self) {
+        self.addons.loading = true;
+        self.addons.error = None;
+    }
+
+    pub(super) fn apply_addons_result(
+        &mut self,
+        result: Result<Vec<crate::addon_adapter::InstalledAddon>, String>,
+    ) {
+        self.addons.loading = false;
+        self.addons.loaded = true;
+        match result {
+            Ok(items) => {
+                self.addons.items = items;
+                self.addons.error = None;
+            }
+            Err(error) => self.addons.error = Some(error),
+        }
+    }
+
+    pub(super) fn begin_addon_action(&mut self, addon_id: impl Into<String>) {
+        self.addons.action = Some(addon_id.into());
+        self.addons.error = None;
+    }
+
+    pub(super) fn finish_addon_action(&mut self, result: Result<(), String>) {
+        self.addons.action = None;
+        if let Err(error) = result {
+            self.addons.error = Some(error);
+        }
+    }
+
     pub(super) fn effects(&self) -> super::settings_effects::SettingsEffects {
         super::settings_effects::SettingsEffects::from_runtime(&self.runtime)
     }
@@ -130,6 +227,8 @@ impl Default for SettingsViewState {
             settings: SettingsState::default(),
             surface,
             runtime,
+            trash: VaultTrashState::default(),
+            addons: AddonsViewState::default(),
         }
     }
 }
@@ -137,6 +236,7 @@ impl Default for SettingsViewState {
 #[derive(PartialEq)]
 struct SettingsPanelComponent {
     state: State<SettingsViewState>,
+    shell_state: State<super::ShellState>,
 }
 
 impl Component for SettingsPanelComponent {
@@ -203,6 +303,7 @@ impl Component for SettingsPanelComponent {
                             )
                             .child(settings_controls::section_content(
                                 state,
+                                self.shell_state,
                                 &active_section,
                                 &snapshot.surface,
                                 &query,
@@ -218,8 +319,11 @@ impl Component for SettingsPanelComponent {
 /// navigation and a 22px radius. The search input lives inside a dedicated
 /// component scope so its writable state survives normal rerenders without
 /// relying on a conditional host hook.
-pub fn settings_panel(state: State<SettingsViewState>) -> Element {
-    SettingsPanelComponent { state }.into_element()
+pub fn settings_panel(
+    state: State<SettingsViewState>,
+    shell_state: State<super::ShellState>,
+) -> Element {
+    SettingsPanelComponent { state, shell_state }.into_element()
 }
 
 pub fn search_labels(query: &str) -> Vec<&'static SettingIndexEntry> {

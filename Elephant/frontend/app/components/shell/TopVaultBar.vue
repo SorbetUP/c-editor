@@ -14,6 +14,13 @@
       @dblclick="handleMaximizeClick"
     />
     <div
+      class="en-runtime-badge"
+      :style="{ right: isMac ? '10px' : '148px' }"
+      aria-label="Runtime Tauri"
+    >
+      Tauri
+    </div>
+    <div
       v-if="!isMac"
       class="en-window-controls"
       aria-label="Window controls"
@@ -169,6 +176,27 @@ onBeforeUnmount(() => {
   z-index: 0;
   margin-left: 180px;
   -webkit-app-region: drag;
+}
+.en-runtime-badge {
+  position: absolute;
+  top: 5px;
+  z-index: 3;
+  min-width: 34px;
+  height: 20px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--en-border);
+  border-radius: 7px;
+  color: var(--en-muted);
+  background: var(--en-soft);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+  -webkit-app-region: no-drag;
 }
 .en-window-controls {
   position: relative;

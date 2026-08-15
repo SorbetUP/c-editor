@@ -3,12 +3,15 @@
 //! The state/effect boundary stays here. Renderers are split by the source
 //! component ownership they convert: navigation, library, and editor view.
 
+mod calendar_view;
+mod chat_view;
 mod drawing;
 mod editor_view;
 mod explorer;
 mod explorer_runtime;
 mod graph_canvas;
 mod library;
+mod models_view;
 mod navigation;
 mod navigation_icons;
 mod search_overlay_view;
@@ -20,6 +23,7 @@ mod shell_preferences;
 mod shell_runtime;
 mod vault_picker;
 mod visual_transition;
+mod wiki_view;
 
 use freya::prelude::*;
 use std::{env, path::PathBuf};
@@ -37,7 +41,7 @@ use shell_gestures::{RailDragState, SidebarResizeState};
 use shell_history::NavigationTarget;
 
 #[derive(Clone, Debug)]
-struct ShellState {
+pub(super) struct ShellState {
     view: WorkspaceView,
     sidebar_visible: bool,
     sidebar_width: SidebarWidth,
@@ -59,8 +63,12 @@ struct ShellState {
     rail_drag: Option<RailDragState>,
     rail_drop_target: Option<String>,
     sidebar_resize: Option<SidebarResizeState>,
+    library_drag: library::LibraryCardDrag,
     drawing: Option<drawing::DrawingCanvasState>,
     drawing_path: Option<PathBuf>,
+    calendar: calendar_view::CalendarState,
+    chat: chat_view::ChatState,
+    models: models_view::ModelsState,
 }
 
 impl ShellState {
@@ -87,8 +95,12 @@ impl ShellState {
             rail_drag: None,
             rail_drop_target: None,
             sidebar_resize: None,
+            library_drag: library::LibraryCardDrag::default(),
             drawing: None,
             drawing_path: None,
+            calendar: calendar_view::CalendarState::default(),
+            chat: chat_view::ChatState::default(),
+            models: models_view::ModelsState::default(),
         }
     }
 
@@ -303,7 +315,7 @@ impl ShellState {
     }
 }
 
-fn choose_vault(mut state: State<ShellState>) {
+pub(super) fn choose_vault(mut state: State<ShellState>) {
     match vault_picker::pick_vault() {
         Ok(Some(root)) => state.write().open_vault(root),
         Ok(None) => {}
@@ -370,9 +382,13 @@ fn app_shell(state: State<ShellState>) -> Element {
     let explorer_query = use_state(String::new);
     let explorer_graph_query = use_state(String::new);
     let graph_canvas_state = use_state(graph_canvas::GraphCanvasState::default);
+    let wiki_view_state = use_state(wiki_view::WikiViewState::default);
     explorer::bind_live_search(explorer_state, explorer_query);
     explorer_runtime::drain_explorer_actions(state, explorer_state);
     let snapshot = state.read().clone();
+    if snapshot.view == WorkspaceView::Graph {
+        explorer_state.write().surface = explorer::ExplorerSurface::Graph;
+    }
     let search_open = snapshot.search_open;
     let overlay_transition = visual_transition::use_search_overlay_transition(search_open);
     if snapshot.vault.is_none() {
@@ -387,7 +403,7 @@ fn app_shell(state: State<ShellState>) -> Element {
         explorer_state.write().finish_close();
     }
     let content = if snapshot.settings_open {
-        settings::settings_panel(settings_state)
+        settings::settings_panel(settings_state, state)
     } else if snapshot.view == WorkspaceView::Graph || snapshot.search_open {
         explorer::explorer_view(
             explorer_state,
@@ -397,7 +413,7 @@ fn app_shell(state: State<ShellState>) -> Element {
             snapshot.search_open,
         )
     } else {
-        library::main_content(state)
+        library::main_content(state, wiki_view_state, palette)
     };
     let shell = rect()
         .width(Size::fill())

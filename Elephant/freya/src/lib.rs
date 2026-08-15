@@ -1,4 +1,6 @@
 pub mod app;
+mod addon_adapter;
+mod pi_adapter;
 pub mod editor;
 pub mod library_contract;
 pub mod navigation_contract;

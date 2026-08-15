@@ -117,6 +117,7 @@ pub(super) fn search_results_content(
 
 pub(super) fn section_content(
     state: State<SettingsViewState>,
+    shell_state: State<super::super::ShellState>,
     active_section: &str,
     surface: &SettingsSurfaceState,
     query: &str,
@@ -157,7 +158,16 @@ pub(super) fn section_content(
         let entries = match active_section {
             "appearance" => settings_appearance_controls::appearance_settings(state),
             "editor" => settings_editor_controls::editor_settings(state),
-            "vaults" | "addons" => Vec::new(),
+            "vaults" => vec![settings_surface::vault_settings(
+                state,
+                shell_state,
+                palette,
+            )],
+            "addons" => vec![settings_surface::addons_settings(
+                state,
+                shell_state,
+                palette,
+            )],
             _ => CORE_SETTINGS_INDEX
                 .iter()
                 .filter(|entry| entry.section == active_section)

@@ -23,6 +23,8 @@ describe('desktop shell controls and creation actions', () => {
     expect(titleBar).toContain('v-if="!isMac"')
     expect(titleBar).toContain('aria-label="Minimize window"')
     expect(titleBar).toContain('aria-label="Close window"')
+    expect(titleBar).toContain('aria-label="Runtime Tauri"')
+    expect(titleBar).toContain('>\n      Tauri\n    </div>')
     expect(titleBar).toContain('getCurrentWindow().minimize()')
     expect(titleBar).toContain('await win.maximize()')
     expect(titleBar).toContain('await win.unmaximize()')

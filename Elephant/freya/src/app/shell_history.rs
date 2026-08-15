@@ -4,6 +4,7 @@ use crate::{
     editor::EditorDocument, library_contract::RelativePath, navigation_contract::WorkspaceView,
     vault_adapter::VaultEntry,
 };
+use std::{fs, path::Path};
 
 use super::ShellState;
 
@@ -14,6 +15,57 @@ pub(super) enum NavigationTarget {
 }
 
 impl ShellState {
+    pub(super) fn open_workspace(&mut self, view: WorkspaceView) {
+        eprintln!(
+            "[freya][navigation] action:workspace-open view={}",
+            view.source_id()
+        );
+        self.editor = None;
+        self.drawing = None;
+        self.drawing_path = None;
+        self.menu_open = false;
+        self.search_open = false;
+        self.settings_open = false;
+        if view == WorkspaceView::Calendar {
+            if let Some(vault) = self.vault.as_ref() {
+                self.calendar.load_for(vault.root());
+            }
+        }
+        if view == WorkspaceView::Chat {
+            if let Some(vault) = self.vault.as_ref() {
+                self.chat.load_for(vault.root());
+            }
+        }
+        if view == WorkspaceView::Models {
+            if let Some(vault) = self.vault.as_ref() {
+                self.models.load_for(vault.root());
+            }
+        }
+        self.view = view;
+    }
+
+    pub(super) fn open_dashboard(&mut self) {
+        let Some(vault) = self.vault.as_ref() else {
+            self.error = Some("No vault selected.".to_owned());
+            return;
+        };
+        let path = vault.root().join(".elephantnote").join("Dashboard.md");
+        let result = (|| {
+            if !path.exists() {
+                fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
+                fs::write(&path, "# Dashboard\n\n")?;
+            }
+            Ok::<(), std::io::Error>(())
+        })();
+        match result {
+            Ok(()) => self.open_note_path(".elephantnote/Dashboard.md"),
+            Err(error) => {
+                self.error = Some(format!("Unable to open Dashboard: {error}"));
+                eprintln!("[freya][dashboard] action=open-failure error={error}");
+            }
+        }
+    }
+
     pub(super) fn open_directory(&mut self, path: String) {
         self.open_directory_with_history(path, true);
     }
@@ -30,7 +82,33 @@ impl ShellState {
     }
 
     pub(super) fn open_note(&mut self, entry: &VaultEntry) {
-        self.open_note_with_history(entry, true);
+        self.open_note_with_history(&entry, true);
+    }
+
+    pub(super) fn open_note_path(&mut self, relative_path: &str) {
+        let filename = relative_path
+            .rsplit('/')
+            .next()
+            .unwrap_or(relative_path)
+            .to_owned();
+        let entry = VaultEntry {
+            path: relative_path.to_owned(),
+            filename: filename.clone(),
+            name: filename.clone(),
+            title: filename.trim_end_matches(".md").to_owned(),
+            entry_type: crate::vault_adapter::EntryKind::Note,
+            kind: crate::vault_adapter::EntryKind::Note,
+            is_directory: false,
+            note_count: 0,
+            excerpt: String::new(),
+            preview: String::new(),
+            tags: Vec::new(),
+            updated_at: String::new(),
+            children_preview: Vec::new(),
+            drawing_preview: None,
+            full_path: relative_path.to_owned(),
+        };
+        self.open_note_with_history(&entry, true);
     }
 
     fn open_note_with_history(&mut self, entry: &VaultEntry, record: bool) {
