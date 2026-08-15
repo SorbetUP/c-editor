@@ -6,6 +6,11 @@
 
 use freya::prelude::Color;
 
+/// The source web shell falls back to Helvetica Neue when Open Sans is not
+/// installed. Keeping this as a theme token avoids coupling functional state
+/// to a renderer-specific font choice.
+pub const UI_FONT_FAMILY: &str = "Helvetica Neue";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ThemePalette {
     pub bg: (u8, u8, u8, u8),
@@ -342,6 +347,13 @@ pub fn card_background() -> (u8, u8, u8, u8) {
 /// Source folder previews blend the surface over the already blended card.
 pub fn card_preview_background() -> (u8, u8, u8, u8) {
     mix(SURFACE, card_background(), 0.55)
+}
+
+/// The browser editor renders ordinary Muya text through the source
+/// `--editorColor` token (88% text over the page background), rather than the
+/// fully opaque shell text color used by navigation and headings.
+pub fn editor_text_color() -> (u8, u8, u8, u8) {
+    mix(TEXT, BG, 0.88)
 }
 
 /// Source toolbar buttons use a translucent surface over the application

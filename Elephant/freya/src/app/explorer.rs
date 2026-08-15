@@ -540,7 +540,12 @@ impl ExplorerSearchState {
 /// Search is opened by the rail while the library remains mounted underneath,
 /// matching the Vue `SearchModal` overlay contract.  The full Explorer
 /// workspace remains available for the explicit Graph route below.
-pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Element {
+pub fn search_overlay(
+    state: State<ExplorerState>,
+    query: State<String>,
+    backdrop_opacity: f32,
+    content_opacity: f32,
+) -> Element {
     let input_value = query.read().clone();
     let snapshot = state.read().clone();
     let search_placeholder = if snapshot.search.query.is_empty() {
@@ -586,6 +591,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         let mut clear_state = state;
         Some(
             rect()
+                .position(Position::new_absolute().right(15.).top(20.))
                 .width(Size::px(30.))
                 .height(Size::px(30.))
                 .center()
@@ -609,7 +615,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
     let search_bar = rect()
         .width(Size::fill())
         .height(Size::px(72.))
-        .padding(Gaps::new(0., 18., 0., 26.))
+        .padding(Gaps::new(0., 18., 0., 29.))
         .horizontal()
         .spacing(6.)
         .center()
@@ -639,6 +645,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         .background(super::search_overlay_view::glass_surface())
         .color(theme::color(theme::TEXT))
         .with_corner_radius(28.)
+        .opacity(content_opacity)
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
         .shadow(Shadow::new().y(30.).blur(90.).color(Color::from_argb(61, 15, 23, 42)))
         .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_MODAL_LAYER))
@@ -668,6 +675,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
                 .position(Position::new_global().left(295.).top(191.))
                 .width(Size::px(690.))
                 .height(Size::px(210.))
+                .opacity(content_opacity)
                 .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
                 .child(content),
         )
@@ -680,10 +688,10 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
                 .position(Position::new_global().left(0.).top(0.))
                 .width(Size::window_percent(100.))
                 .height(Size::window_percent(100.))
-                // Freya's premultiplied alpha rasterization needs this
-                // channel value to reproduce the source rgba(15, 23, 42,
-                // 0.12) backdrop at the acceptance viewport.
-                .background(Color::from_argb(31, 15, 35, 42))
+                // The source overlay is rgba(15, 23, 42, 0.12). Freya's
+                // premultiplied alpha rasterization uses 31/255 here.
+                .background(Color::from_argb(31, 15, 23, 42))
+                .opacity(backdrop_opacity)
                 .layer(Layer::OverlayLevel(
                     super::search_overlay_view::SEARCH_BACKDROP_LAYER,
                 )),

@@ -184,6 +184,11 @@ fn converted_settings_search_graph_and_editor_surfaces_are_reachable() {
 #[test]
 fn editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault() {
     let fixture = FixtureVault::new();
+    fs::write(
+        fixture.path().join("Alpha.md"),
+        "---\ntitle: \"Alpha note\"\ntype: \"note\"\n---\n\n# Alpha note\n\nA fixture note\n",
+    )
+    .expect("write frontmatter fixture note");
     let root = fixture.path().to_path_buf();
     let original = fs::read_to_string(fixture.path().join("Alpha.md")).unwrap();
     let (mut runner, ()) = TestingRunner::new(
@@ -193,7 +198,7 @@ fn editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault() {
         1.,
     );
 
-    click_label(&mut runner, "Alpha");
+    click_label(&mut runner, "Alpha note");
     runner.sync_and_update();
     click_label(&mut runner, "Paragraph");
     runner.write_text("!");
@@ -201,6 +206,10 @@ fn editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault() {
     click_label(&mut runner, "Close note");
     runner.sync_and_update();
     assert_eq!(accessible_nodes(&runner, "Paragraph").len(), 0);
+    assert!(
+        accessible_nodes(&runner, "Alpha note").len() >= 1,
+        "closing an edited note must refresh its library title from frontmatter"
+    );
 
     let saved = fs::read_to_string(fixture.path().join("Alpha.md")).unwrap();
     assert_ne!(saved, original, "typing must change the persisted note");

@@ -177,9 +177,10 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
 
 pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
     let hovered = state.read().hovered_target.as_deref() == Some("create-fab");
+    let menu_open = state.read().menu_open;
     let mut enter_state = state;
     let mut leave_state = state;
-    rect()
+    let fab = rect()
         .position(Position::new_absolute().right(20.).bottom(20.))
         .width(Size::px(56.))
         .height(Size::px(56.))
@@ -202,8 +203,21 @@ pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
             Icon::Plus,
             theme::color(theme::SURFACE),
             27.,
-        ))
-        .into_element()
+        ));
+    if menu_open {
+        rect()
+            .position(Position::new_absolute().right(16.).bottom(16.))
+            .width(Size::px(64.))
+            .height(Size::px(64.))
+            .center()
+            .border(Border::new().fill(theme::color(theme::PRIMARY)).width(2.))
+            .with_corner_radius(14.)
+            .layer(Layer::OverlayLevel(9))
+            .child(fab)
+            .into_element()
+    } else {
+        fab.into_element()
+    }
 }
 
 pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
@@ -272,6 +286,7 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
         .background(theme::color(theme::SURFACE))
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
         .with_corner_radius(14.)
+        .shadow(Shadow::new().y(18.).blur(32.).color(Color::from_argb(61, 15, 23, 42)))
         .layer(Layer::OverlayLevel(10))
         .on_global_key_down(move |event: Event<KeyboardEventData>| {
             if event.key == Key::Named(NamedKey::Escape) {

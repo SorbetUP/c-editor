@@ -65,7 +65,7 @@ impl Default for BlockTextStyle {
             bold: false,
             italic: false,
             code: false,
-            color: theme::TEXT,
+            color: theme::editor_text_color(),
         }
     }
 }
@@ -339,12 +339,13 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
 
     let title_value = State::create(metadata.title.clone());
     let title_state = state;
+    let title_font_size = if compact { 19. } else { 28. };
     let title = rect()
         .height(Size::fill())
         .width(Size::fill())
         .center()
-        .font_size(28.)
-        .font_weight(FontWeight::BOLD)
+        .font_size(title_font_size)
+        .font_weight(FontWeight::EXTRA_BOLD)
         .a11y_alt("Note title")
         .child(
             Input::new(title_value)
@@ -488,6 +489,12 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
                 close_note(close_state);
             }),
     );
+    topbar = topbar.child(
+        rect()
+            .position(Position::new_absolute().left(0.).right(0.).bottom(0.))
+            .height(Size::px(1.))
+            .background(theme::color(theme::BORDER)),
+    );
 
     rect()
         .width(Size::fill())
@@ -498,13 +505,14 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
             rect()
                 .width(Size::fill())
                 .height(Size::fill())
-                .padding(Gaps::new(27., 12., 100., 2.))
+                .padding(Gaps::new(25., 12., 100., 2.))
                 .background(theme::color(theme::BG))
                 .a11y_alt("Editor scroll")
                 .child(
                     ScrollView::new_controlled(scroll_controller)
                         .width(Size::fill())
                         .height(Size::fill())
+                        .show_scrollbar(false)
                         .child(document_view),
                 ),
         )
@@ -515,6 +523,24 @@ fn render_note_editor_host(state: State<ShellState>) -> Element {
 fn close_note(mut state: State<ShellState>) {
     let result = {
         let mut shell = state.write();
+        let note_context = shell
+            .editor
+            .as_ref()
+            .and_then(|editor| {
+                let path = editor.path()?;
+                let vault = shell.vault.as_ref()?;
+                let relative = path.strip_prefix(vault.root()).ok()?;
+                let relative_path = relative.to_string_lossy().replace('\\', "/");
+                let directory = relative
+                    .parent()
+                    .map(|parent| parent.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                Some((relative_path, directory))
+            });
+        let directory = note_context
+            .as_ref()
+            .map(|(_, directory)| directory.clone())
+            .unwrap_or_else(|| shell.library.current_path.as_str().to_owned());
         let result = shell.editor.as_mut().map_or_else(
             || Err("cannot close without an open note".to_string()),
             |editor| editor.close().map_err(|error| error.to_string()),
@@ -522,6 +548,14 @@ fn close_note(mut state: State<ShellState>) {
         if result.is_ok() {
             shell.editor = None;
             shell.editor_tag_draft = None;
+            shell.hovered_target = None;
+            shell.card_action_target = None;
+            if let Some((relative_path, directory)) = note_context.as_ref() {
+                shell.refresh_library_entry(relative_path, directory);
+            }
+            eprintln!(
+                "[freya][editor] action:complete action=close directory={directory}"
+            );
         }
         result
     };
@@ -1659,7 +1693,7 @@ mod tests {
         let style = BlockTextStyle::default();
 
         assert_eq!(style.font_size, 16.);
-        assert_eq!(style.color, theme::TEXT);
+        assert_eq!(style.color, theme::editor_text_color());
     }
 
     #[test]

@@ -10,7 +10,7 @@ use crate::{
         explorer::ExplorerState,
         navigation_icons::{svg_icon, Icon},
     },
-    search_graph_contract::SearchMatchType,
+    search_graph_contract::{EvidenceChunk, SearchMatchType},
 };
 
 pub(super) const SEARCH_BACKDROP_LAYER: u8 = 12;
@@ -41,17 +41,7 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
         let source = concept
             .evidence_chunks
             .first()
-            .map(|chunk| {
-                if chunk.heading_path.is_empty() {
-                    if chunk.relative_path.is_empty() {
-                        chunk.document_path.clone()
-                    } else {
-                        chunk.relative_path.clone()
-                    }
-                } else {
-                    chunk.heading_path.join(" › ")
-                }
-            })
+            .map(concept_source_label)
             .unwrap_or_else(|| "source chunk".to_owned());
         let score = format!("{}%", (concept.score.clamp(0., 1.) * 100.).round() as u8);
         let mut concept_state = state;
@@ -257,5 +247,40 @@ fn match_label(kind: SearchMatchType) -> &'static str {
         SearchMatchType::Keyword => "Keyword",
         SearchMatchType::Concept => "Concept",
         SearchMatchType::Unknown => "Local match",
+    }
+}
+
+fn concept_source_label(chunk: &EvidenceChunk) -> String {
+    if chunk.heading_path.is_empty() {
+        "source chunk".to_owned()
+    } else {
+        chunk.heading_path.join(" › ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::concept_source_label;
+    use crate::search_graph_contract::EvidenceChunk;
+
+    fn chunk(heading_path: Vec<&str>) -> EvidenceChunk {
+        EvidenceChunk {
+            id: "alpha:0".to_owned(),
+            document_path: "Alpha.md".to_owned(),
+            relative_path: "Alpha.md".to_owned(),
+            chunk_index: 0,
+            heading_path: heading_path.into_iter().map(str::to_owned).collect(),
+            score: 1.,
+            preview: "preview".to_owned(),
+        }
+    }
+
+    #[test]
+    fn concept_source_label_matches_the_default_search_contract() {
+        assert_eq!(concept_source_label(&chunk(Vec::new())), "source chunk");
+        assert_eq!(
+            concept_source_label(&chunk(vec!["Projects", "Migration"])),
+            "Projects › Migration"
+        );
     }
 }

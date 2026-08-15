@@ -191,17 +191,20 @@ pub(super) fn icon_rail(
         .width(Size::px(theme::RAIL_WIDTH))
         .height(Size::fill())
         .background(theme::token_color(palette, theme::ThemeToken::Sidebar))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(BorderWidth {
+                    top: 0.,
+                    right: 1.,
+                    bottom: 0.,
+                    left: 0.,
+                }),
+        )
         .padding(Gaps::new(rail_padding_top, 0., 0., 0.))
         .a11y_alt("Workspace navigation")
         .child(nav)
         .child(bottom)
-        .child(
-            rect()
-                .position(Position::new_absolute().top(0.).right(0.))
-                .width(Size::px(1.))
-                .height(Size::fill())
-                .background(theme::token_color(palette, theme::ThemeToken::Border)),
-        )
         .maybe_child(
             state
                 .read()
@@ -264,6 +267,10 @@ fn rail_action(
     let mut release_state = state;
     let mut focus_state = state;
     rect()
+        // Rail actions are reorderable. Stable keys keep Freya's diff aligned
+        // with the functional item identity instead of reusing children by
+        // their previous index after a drag.
+        .key(item_id)
         .width(Size::px(theme::RAIL_ACTION_SIZE))
         .height(Size::px(theme::RAIL_ACTION_SIZE))
         .center()
@@ -354,7 +361,12 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
         .border(
             Border::new()
                 .fill(theme::token_color(palette, theme::ThemeToken::Border))
-                .width(1.),
+                .width(BorderWidth {
+                    top: 0.,
+                    right: 1.,
+                    bottom: 0.,
+                    left: 0.,
+                }),
         )
         .with_corner_radius(10.)
         .layer(Layer::OverlayLevel(20))
@@ -411,9 +423,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     let all_notes_hovered = snapshot.hovered_target.as_deref() == Some("sidebar:all");
     let all_notes_active = snapshot.view == crate::navigation_contract::WorkspaceView::Notes
         && snapshot.library.current_path.as_str().is_empty()
-        && snapshot.editor.is_none()
-        && !snapshot.search_open
-        && !snapshot.settings_open;
+        && snapshot.editor.is_none();
     let sidebar_width = f32::from(snapshot.sidebar_width.get());
     let mut all_notes_enter = state;
     let mut all_notes_leave = state;
@@ -425,7 +435,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .spacing(10.)
         .cross_align(Alignment::Center)
         .background(theme::color(if all_notes_hovered {
-            theme::mix(palette.primary, palette.soft, 0.24)
+            theme::mix(palette.primary, palette.soft, 0.20)
         } else if all_notes_active {
             theme::mix(palette.primary, palette.soft, 0.20)
         } else {
@@ -449,7 +459,19 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .map(|page| {
             page.entries
                 .iter()
-                .map(|entry| sidebar_entry(entry, state, palette))
+                .map(|entry| {
+                    let active = snapshot
+                        .editor
+                        .as_ref()
+                        .and_then(|editor| editor.path())
+                        .and_then(|path| snapshot.vault.as_ref().and_then(|vault| {
+                            path.strip_prefix(vault.root())
+                                .ok()
+                                .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+                        }))
+                        .is_some_and(|path| path == entry.path.as_str());
+                    sidebar_entry(entry, state, palette, active)
+                })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -560,7 +582,12 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .border(
             Border::new()
                 .fill(theme::token_color(palette, theme::ThemeToken::Border))
-                .width(1.),
+                .width(BorderWidth {
+                    top: 0.,
+                    right: 1.,
+                    bottom: 0.,
+                    left: 0.,
+                }),
         )
         .a11y_alt("Sidebar")
         .child(sidebar_scroll);
@@ -579,6 +606,7 @@ fn sidebar_entry(
     entry: &VaultEntry,
     mut state: State<ShellState>,
     palette: theme::ThemePalette,
+    active: bool,
 ) -> Element {
     let entry = entry.clone();
     let path = entry.path.clone();
@@ -598,7 +626,7 @@ fn sidebar_entry(
         .cross_align(Alignment::Center)
         .background(theme::token_color(
             palette,
-            if hovered {
+            if hovered || active {
                 theme::ThemeToken::Soft
             } else {
                 theme::ThemeToken::Sidebar

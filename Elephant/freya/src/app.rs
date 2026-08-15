@@ -18,6 +18,7 @@ mod shell_history;
 mod shell_preferences;
 mod shell_runtime;
 mod vault_picker;
+mod visual_transition;
 
 use freya::prelude::*;
 use std::{env, path::PathBuf};
@@ -162,6 +163,62 @@ impl ShellState {
             }
             Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    fn refresh_library_entry(&mut self, relative_path: &str, directory: &str) {
+        let Some(vault) = self.vault.as_ref() else {
+            return;
+        };
+        let page = match vault.list(PageRequest::new(directory)) {
+            Ok(page) => page,
+            Err(error) => {
+                eprintln!(
+                    "[freya][library] action:refresh-failure path={relative_path} error={error}"
+                );
+                self.error = Some(error.to_string());
+                return;
+            }
+        };
+        let Some(entry) = page
+            .entries
+            .into_iter()
+            .find(|entry| entry.path == relative_path)
+        else {
+            let error = format!("Entry disappeared while refreshing: {relative_path}");
+            eprintln!("[freya][library] action:refresh-failure path={relative_path} error={error}");
+            self.error = Some(error);
+            return;
+        };
+        let mut replacement = library::to_library_entry(&entry);
+        if self.library.current_path.as_str() == directory {
+            if let Some(existing) = self
+                .library
+                .entries
+                .iter_mut()
+                .find(|existing| existing.path.as_str() == relative_path)
+            {
+                replacement.updated_at = existing.updated_at.clone();
+                *existing = replacement;
+            }
+        }
+        if let Some(page) = self
+            .page
+            .as_mut()
+            .filter(|page| page.relative_path == directory)
+        {
+            if let Some(existing) = page
+                .entries
+                .iter_mut()
+                .find(|existing| existing.path == relative_path)
+            {
+                let updated_at = existing.updated_at.clone();
+                *existing = entry;
+                existing.updated_at = updated_at;
+            }
+        }
+        eprintln!(
+            "[freya][library] action:refresh-complete path={relative_path} directory={directory}"
+        );
     }
 
     fn toggle_pinned(&mut self, path: crate::library_contract::RelativePath) {
@@ -314,6 +371,8 @@ fn app_shell(state: State<ShellState>) -> Element {
     let graph_canvas_state = use_state(graph_canvas::GraphCanvasState::default);
     explorer::bind_live_search(explorer_state, explorer_query);
     let snapshot = state.read().clone();
+    let search_open = snapshot.search_open;
+    let overlay_transition = visual_transition::use_search_overlay_transition(search_open);
     if snapshot.vault.is_none() {
         return empty_vault_picker(state);
     }
@@ -337,6 +396,7 @@ fn app_shell(state: State<ShellState>) -> Element {
     let shell = rect()
         .width(Size::fill())
         .height(Size::fill())
+        .font_family(theme::UI_FONT_FAMILY)
         .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .color(theme::token_color(palette, theme::ThemeToken::Text))
         .child(navigation::top_vault_bar(state, palette))
@@ -360,7 +420,12 @@ fn app_shell(state: State<ShellState>) -> Element {
         )
         .maybe_child((snapshot.editor.is_none()).then(|| library::create_fab(state)))
         .maybe_child(snapshot.search_open.then(|| {
-            explorer::search_overlay(explorer_state, explorer_query)
+            explorer::search_overlay(
+                explorer_state,
+                explorer_query,
+                overlay_transition.backdrop_opacity,
+                overlay_transition.content_opacity,
+            )
         }))
         .a11y_alt(contract.provenance.component.source_name());
 
