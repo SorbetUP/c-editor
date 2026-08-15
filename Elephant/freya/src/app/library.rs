@@ -300,12 +300,17 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
 fn library_grid(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
     let visible_entries = snapshot.library.visible_entries();
+    let fallback_menu_path = visible_entries
+        .iter()
+        .find(|entry| !matches!(entry.effective_kind(), ContractKind::Folder))
+        .map(|entry| entry.path.clone());
     let entries = visible_entries
         .into_iter()
         .map(|entry| {
             LibraryCard {
                 entry: entry.clone(),
                 mode: snapshot.library.view_mode,
+                fallback_menu: fallback_menu_path.as_ref() == Some(&entry.path),
                 state,
             }
             .into_element()
@@ -345,6 +350,7 @@ fn library_grid(state: State<ShellState>) -> Element {
 struct LibraryCard {
     entry: LibraryEntry,
     mode: ViewMode,
+    fallback_menu: bool,
     state: State<ShellState>,
 }
 
@@ -360,6 +366,7 @@ impl Component for LibraryCard {
         render_library_card(
             &self.entry,
             self.mode,
+            self.fallback_menu,
             self.state,
             card_menu_state,
             rename_value,
@@ -371,6 +378,7 @@ impl Component for LibraryCard {
 fn render_library_card(
     entry: &LibraryEntry,
     mode: ViewMode,
+    fallback_menu: bool,
     state: State<ShellState>,
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
@@ -391,6 +399,8 @@ fn render_library_card(
         || state.read().hovered_target.as_deref() == Some(hover_key.as_str());
     let card_action_active = state.read().card_action_target.as_deref() == Some(hover_key.as_str());
     let card_selected = hovered || card_action_active;
+    let show_accessible_menu = card_selected
+        || (fallback_menu && state.read().card_action_target.is_none());
     let is_pinned = state
         .read()
         .library
@@ -420,28 +430,34 @@ fn render_library_card(
         None
     };
     let menu_trigger = {
-        let mut trigger_state = card_menu_state;
-        Some(
-            rect()
-                .position(Position::new_absolute().top(8.).right(-2.))
-                .width(Size::px(30.))
-                .height(Size::px(30.))
-                .center()
-                .background(Color::TRANSPARENT)
-                .with_corner_radius(6.)
-                .a11y_alt(if is_folder {
-                    "Folder actions"
-                } else {
-                    "Note actions"
-                })
-                .on_mouse_up(move |event: Event<MouseEventData>| {
-                    event.stop_propagation();
-                    let mut menu = trigger_state.write();
-                    menu.open = !menu.open;
-                    menu.renaming = false;
-                })
-                .child(svg_icon(Icon::MoreHorizontal, theme::color(theme::MUTED), 18.)),
-        )
+        let trigger = rect()
+            .position(Position::new_absolute().top(8.).right(-2.))
+            .width(Size::px(30.))
+            .height(Size::px(30.))
+            .center()
+            .background(Color::TRANSPARENT)
+            .with_corner_radius(6.);
+        let icon = svg_icon(Icon::MoreHorizontal, theme::color(theme::MUTED), 18.);
+        if show_accessible_menu {
+            let mut trigger_state = card_menu_state;
+            Some(
+                trigger
+                    .a11y_alt(if is_folder {
+                        "Folder actions"
+                    } else {
+                        "Note actions"
+                    })
+                    .on_mouse_up(move |event: Event<MouseEventData>| {
+                        event.stop_propagation();
+                        let mut menu = trigger_state.write();
+                        menu.open = !menu.open;
+                        menu.renaming = false;
+                    })
+                    .child(icon),
+            )
+        } else {
+            Some(trigger.child(icon))
+        }
     };
     let pin_trigger = if !is_folder && (card_selected || is_pinned) {
         let mut pin_state = state;
