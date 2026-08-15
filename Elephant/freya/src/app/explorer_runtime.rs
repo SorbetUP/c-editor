@@ -358,7 +358,10 @@ fn concept_candidates(results: &[SearchResult]) -> Vec<ConceptCandidate> {
     let mut candidates = Vec::new();
     for result in results {
         let path = result.relative_path.replace('\\', "/");
-        let parts = path.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+        let parts = path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
         let id = if parts.len() > 1 {
             parts[0].to_owned()
         } else {

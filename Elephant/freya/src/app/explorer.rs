@@ -22,6 +22,9 @@ use crate::{
     theme,
 };
 
+use super::ShellState;
+use crate::navigation_contract::WorkspaceView;
+
 /// The two workspaces converted from the Vue surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExplorerSurface {
@@ -555,6 +558,7 @@ impl ExplorerSearchState {
 /// matching the Vue `SearchModal` overlay contract.  The full Explorer
 /// workspace remains available for the explicit Graph route below.
 pub fn search_overlay(
+    shell: State<ShellState>,
     state: State<ExplorerState>,
     query: State<String>,
     interactive: bool,
@@ -563,6 +567,14 @@ pub fn search_overlay(
 ) -> Element {
     let input_value = query.read().clone();
     let snapshot = state.read().clone();
+    if !interactive || snapshot.surface == ExplorerSurface::Graph {
+        return rect()
+            .position(Position::new_global())
+            .width(Size::fill())
+            .height(Size::fill())
+            .interactive(false)
+            .into_element();
+    }
     let search_placeholder = if snapshot.search.query.is_empty() {
         "Search notes, paths, tags, or ideas…".to_owned()
     } else {
@@ -620,7 +632,7 @@ pub fn search_overlay(
                 .center()
                 .background(Color::from_argb(36, 71, 84, 103))
                 .with_corner_radius(999.)
-                .on_mouse_up(move |_| {
+                .on_press(move |_| {
                     clear_query.set(String::new());
                     clear_state.write().clear_search();
                 })
@@ -644,24 +656,56 @@ pub fn search_overlay(
         .center()
         .font_size(22.)
         .font_weight(FontWeight::BOLD)
-        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
+        .layer(Layer::OverlayLevel(
+            super::search_overlay_view::SEARCH_PANEL_LAYER,
+        ))
         .background(Color::TRANSPARENT)
         .with_corner_radius(22.)
         .child(svg_icon(Icon::Search, Color::from_rgb(26, 35, 53), 22.))
         .child(search_input)
         .maybe_child(clear);
+    let mut search_tab_state = state;
+    let search_tab = rect()
+        .height(Size::px(28.))
+        .padding(Gaps::new(0., 10., 0., 10.))
+        .center()
+        .background(theme::color(theme::SOFT))
+        .with_corner_radius(7.)
+        .on_press(move |_| search_tab_state.write().surface = ExplorerSurface::Search)
+        .a11y_alt("Search workspace")
+        .child(label().font_size(12.).text("Search"));
+    let mut graph_tab_state = state;
+    let mut graph_shell_state = shell;
+    let graph_tab = rect()
+        .height(Size::px(28.))
+        .padding(Gaps::new(0., 10., 0., 10.))
+        .center()
+        .background(theme::color(theme::SURFACE))
+        .with_corner_radius(7.)
+        .on_press(move |_| {
+            graph_tab_state.write().surface = ExplorerSurface::Graph;
+            let mut shell = graph_shell_state.write();
+            shell.search_open = false;
+            shell.view = WorkspaceView::Graph;
+        })
+        .a11y_alt("Graph workspace")
+        .child(label().font_size(12.).text("Graph"));
+    let workspace_tabs = rect()
+        .width(Size::fill())
+        .height(Size::px(34.))
+        .padding(Gaps::new(6., 18., 0., 18.))
+        .horizontal()
+        .spacing(8.)
+        .child(search_tab)
+        .child(graph_tab);
     let modal = rect()
         .vertical()
-        .position(
-            Position::new_global()
-                .left(295.)
-                .top(119.),
-        )
+        .position(Position::new_global().left(295.).top(119.))
         .width(Size::px(690.))
         .height(if snapshot.search.phase == ExplorerPhase::Idle {
-            Size::px(72.)
+            Size::px(106.)
         } else {
-            Size::px(282.)
+            Size::px(316.)
         })
         // The shell owns the translucent glass surface; the bar stays
         // transparent so the same surface covers both empty and result states.
@@ -670,8 +714,15 @@ pub fn search_overlay(
         .with_corner_radius(28.)
         .opacity(content_opacity)
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
-        .shadow(Shadow::new().y(30.).blur(90.).color(Color::from_argb(61, 15, 23, 42)))
-        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_MODAL_LAYER))
+        .shadow(
+            Shadow::new()
+                .y(30.)
+                .blur(90.)
+                .color(Color::from_argb(61, 15, 23, 42)),
+        )
+        .layer(Layer::OverlayLevel(
+            super::search_overlay_view::SEARCH_MODAL_LAYER,
+        ))
         .on_global_key_down(move |event: Event<KeyboardEventData>| {
             if event.key != Key::Named(NamedKey::Escape) {
                 return;
@@ -684,6 +735,7 @@ pub fn search_overlay(
                 key_state.write().close_search();
             }
         })
+        .child(workspace_tabs)
         .child(search_bar);
     let panel = if snapshot.search.phase == ExplorerPhase::Idle {
         None
@@ -699,7 +751,9 @@ pub fn search_overlay(
                 .width(Size::px(690.))
                 .height(Size::px(210.))
                 .opacity(content_opacity)
-                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
+                .layer(Layer::OverlayLevel(
+                    super::search_overlay_view::SEARCH_PANEL_LAYER,
+                ))
                 .child(content),
         )
     };
@@ -772,7 +826,7 @@ pub fn explorer_view(
         .background(theme::color(theme::BG))
         .color(theme::color(theme::TEXT))
         .spacing(10.)
-        .child(explorer_header(state, snapshot.surface))
+        .maybe_child((!overlay_open).then(|| explorer_header(state, snapshot.surface)))
         .maybe_child(content)
         .into_element()
 }
@@ -834,7 +888,7 @@ fn search_surface(
         .center()
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| state.write().cycle_search_mode())
+        .on_press(move |_| state.write().cycle_search_mode())
         .a11y_alt(format!("Search mode: {}", snapshot.search.mode.as_str()))
         .child(label().text(format!("Mode: {}", snapshot.search.mode.as_str())));
     let clear = rect()
@@ -843,7 +897,7 @@ fn search_surface(
         .center()
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| {
+        .on_press(move |_| {
             query_state.set(String::new());
             state.write().clear_search();
         })
@@ -900,7 +954,9 @@ fn search_state_content(state: State<ExplorerState>, snapshot: &ExplorerState) -
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_CONTENT_LAYER))
+        .layer(Layer::OverlayLevel(
+            super::search_overlay_view::SEARCH_CONTENT_LAYER,
+        ))
         .color(theme::color(theme::TEXT))
         .with_corner_radius(12.)
         .padding(Gaps::new_all(12.))
@@ -988,15 +1044,24 @@ fn search_concept_section(state: State<ExplorerState>, concept: &ConceptCandidat
                 .background(Color::from_rgb(235, 241, 252))
                 .border(Border::new().fill(Color::from_rgb(190, 205, 235)).width(1.))
                 .with_corner_radius(14.)
-                .on_mouse_up(move |_| concept_state.write().open_concept(&concept))
-                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_CONTENT_LAYER))
+                .on_press(move |_| concept_state.write().open_concept(&concept))
+                .layer(Layer::OverlayLevel(
+                    super::search_overlay_view::SEARCH_CONTENT_LAYER,
+                ))
                 .child(
                     rect()
                         .width(Size::px(520.))
                         .height(Size::fill())
                         .spacing(2.)
-                        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
-                        .child(label().font_size(12.).color(theme::color(theme::TEXT)).text(meta)),
+                        .layer(Layer::OverlayLevel(
+                            super::search_overlay_view::SEARCH_TEXT_LAYER,
+                        ))
+                        .child(
+                            label()
+                                .font_size(12.)
+                                .color(theme::color(theme::TEXT))
+                                .text(meta),
+                        ),
                 ),
         )
         .into_element()
@@ -1026,7 +1091,9 @@ fn search_result_row(
         .width(Size::flex(1.))
         .height(Size::fill())
         .spacing(4.)
-        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
+        .layer(Layer::OverlayLevel(
+            super::search_overlay_view::SEARCH_TEXT_LAYER,
+        ))
         .child(
             rect()
                 .width(Size::fill())
@@ -1048,8 +1115,7 @@ fn search_result_row(
                 .font_weight(FontWeight::BOLD)
                 .color(theme::color(theme::PRIMARY))
                 .text(result.relative_path.clone()),
-        )
-        ;
+        );
     rect()
         .width(Size::fill())
         .height(Size::px(70.))
@@ -1063,8 +1129,10 @@ fn search_result_row(
         })
         .color(theme::color(theme::TEXT))
         .with_corner_radius(16.)
-        .on_mouse_up(move |_| state.write().open_search_result(index))
-        .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_CONTENT_LAYER))
+        .on_press(move |_| state.write().open_search_result(index))
+        .layer(Layer::OverlayLevel(
+            super::search_overlay_view::SEARCH_CONTENT_LAYER,
+        ))
         .a11y_alt(format!("Open note {}", result.title))
         .child(
             rect()
@@ -1073,7 +1141,9 @@ fn search_result_row(
                 .center()
                 .background(Color::from_argb(87, 255, 255, 255))
                 .with_corner_radius(14.)
-                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
+                .layer(Layer::OverlayLevel(
+                    super::search_overlay_view::SEARCH_TEXT_LAYER,
+                ))
                 .child(
                     label()
                         .font_size(18.)
@@ -1087,7 +1157,9 @@ fn search_result_row(
                 .width(Size::px(30.))
                 .height(Size::px(30.))
                 .center()
-                .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_TEXT_LAYER))
+                .layer(Layer::OverlayLevel(
+                    super::search_overlay_view::SEARCH_TEXT_LAYER,
+                ))
                 .child(
                     label()
                         .font_size(18.)
@@ -1110,7 +1182,7 @@ fn graph_surface(
         .center()
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| state.write().request_graph_refresh())
+        .on_press(move |_| state.write().request_graph_refresh())
         .a11y_alt("Refresh graph")
         .child(label().text("Refresh"));
     let reset = rect()
@@ -1119,7 +1191,7 @@ fn graph_surface(
         .center()
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| state.write().reset_graph_filter())
+        .on_press(move |_| state.write().reset_graph_filter())
         .a11y_alt("Reset graph filter")
         .child(label().text("Reset"));
     let mut recenter_canvas = graph_canvas.clone();
@@ -1129,7 +1201,7 @@ fn graph_surface(
         .center()
         .background(theme::color(theme::SURFACE))
         .with_corner_radius(7.)
-        .on_mouse_up(move |_| {
+        .on_press(move |_| {
             recenter_canvas.write().fit_to_content();
             state.write().reset_graph_view();
         })

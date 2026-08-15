@@ -18,6 +18,7 @@ pub(super) enum Icon {
     Settings,
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
     Inbox,
     MoreHorizontal,
     ArrowDownNarrowWide,
@@ -44,6 +45,7 @@ const VAULT: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.
 const SETTINGS: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>"#;
 const CHEVRON_LEFT: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>"#;
 const CHEVRON_RIGHT: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>"#;
+const CHEVRON_DOWN: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>"#;
 const INBOX: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>"#;
 const MORE_HORIZONTAL: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>"#;
 const ARROW_DOWN_NARROW_WIDE: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 3 3 3-3"/><path d="M10 6v12"/><path d="M17 6h4"/><path d="M17 10h4"/><path d="M17 14h4"/><path d="M17 18h4"/></svg>"#;
@@ -59,7 +61,8 @@ const FILE_PLUS: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://
 const FOLDER_PLUS: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;
 const FILE_TEXT: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg>"#;
 const X: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"#;
-const EXCALIDRAW: &[u8] = include_bytes!("../../../frontend/src/muya/lib/assets/icons/excalidraw.svg");
+const EXCALIDRAW: &[u8] =
+    include_bytes!("../../../frontend/src/muya/lib/assets/icons/excalidraw.svg");
 
 pub(super) fn svg_icon(icon: Icon, color: Color, size: f32) -> Element {
     SvgViewer::new(source(icon))
@@ -82,6 +85,7 @@ fn source(icon: Icon) -> &'static [u8] {
         Icon::Settings => SETTINGS,
         Icon::ChevronLeft => CHEVRON_LEFT,
         Icon::ChevronRight => CHEVRON_RIGHT,
+        Icon::ChevronDown => CHEVRON_DOWN,
         Icon::Inbox => INBOX,
         Icon::MoreHorizontal => MORE_HORIZONTAL,
         Icon::ArrowDownNarrowWide => ARROW_DOWN_NARROW_WIDE,

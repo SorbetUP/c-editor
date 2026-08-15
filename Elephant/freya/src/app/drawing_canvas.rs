@@ -9,9 +9,7 @@ mod drawing_scene;
 
 use freya::prelude::*;
 
-pub use drawing_scene::{
-    DrawingCanvasState, DrawingElement, DrawingScene, RenderableElement, Viewport,
-};
+pub use drawing_scene::{DrawingCanvasState, DrawingScene};
 
 pub fn drawing_canvas() -> Element {
     let state = use_consume::<State<DrawingCanvasState>>();

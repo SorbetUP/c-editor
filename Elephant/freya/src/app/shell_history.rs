@@ -47,7 +47,12 @@ impl ShellState {
         match EditorDocument::load(&path) {
             Ok(document) => {
                 self.editor = Some(document);
+                self.drawing = None;
+                self.drawing_path = None;
                 self.editor_tag_draft = None;
+                self.view = crate::navigation_contract::WorkspaceView::Notes;
+                self.search_open = false;
+                self.settings_open = false;
                 self.error = None;
                 if record {
                     self.record_navigation(NavigationTarget::Note(entry.path.clone()));

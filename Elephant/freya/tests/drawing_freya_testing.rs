@@ -94,9 +94,9 @@ fn clicking_a_real_drawing_does_not_open_the_markdown_editor() {
         "a real Excalidraw entry must not be routed into the Markdown editor"
     );
     assert_eq!(
-        labeled_nodes(&runner, "Native drawing renderer unavailable").len(),
+        labeled_nodes(&runner, "DrawingCanvas").len(),
         1,
-        "Freya must expose the renderer limitation instead of a fake canvas"
+        "Freya must mount the native drawing canvas for the real scene"
     );
     assert!(
         scene_path.is_file(),
@@ -137,16 +137,16 @@ fn clicking_a_markdown_drawing_reads_its_real_scene_and_preview_paths() {
 
     assert!(labeled_nodes(&runner, "NoteEditorHost").is_empty());
     assert_eq!(
-        labeled_nodes(&runner, "Native drawing renderer unavailable").len(),
+        labeled_nodes(&runner, "DrawingCanvas").len(),
         1,
-        "Markdown drawing cards must resolve the persisted scene and preview before the renderer gate"
+        "Markdown drawing cards must resolve and mount the persisted native scene"
     );
     assert!(scene_path.is_file());
     assert!(scene_path.with_extension("png").is_file());
 }
 
 #[test]
-fn missing_persisted_preview_surfaces_a_real_drawing_error() {
+fn missing_persisted_preview_still_opens_from_the_real_scene() {
     let fixture = FixtureVault::new("missing-preview");
     let scene_path = fixture.seed_scene("Missing preview.excalidraw");
     fs::remove_file(scene_path.with_extension("png")).expect("remove preview fixture");
@@ -163,14 +163,14 @@ fn missing_persisted_preview_surfaces_a_real_drawing_error() {
 
     assert!(labeled_nodes(&runner, "NoteEditorHost").is_empty());
     assert_eq!(
-        labeled_nodes(&runner, "Drawing preview unavailable").len(),
+        labeled_nodes(&runner, "DrawingCanvas").len(),
         1,
-        "a missing persisted PNG must remain a visible production error"
+        "the native renderer must use the real scene even without a preview companion"
     );
 }
 
 #[test]
-fn create_drawing_action_persists_real_scene_format_and_reports_renderer_blocker() {
+fn create_drawing_action_persists_real_scene_and_mounts_native_renderer() {
     let fixture = FixtureVault::new("create");
     let root = fixture.root.clone();
     let (mut runner, ()) = TestingRunner::new(
@@ -185,9 +185,9 @@ fn create_drawing_action_persists_real_scene_format_and_reports_renderer_blocker
     runner.sync_and_update();
 
     assert_eq!(
-        labeled_nodes(&runner, "Native drawing renderer unavailable").len(),
+        labeled_nodes(&runner, "DrawingCanvas").len(),
         1,
-        "the source Drawing action must report the missing native renderer"
+        "the source Drawing action must mount the native renderer"
     );
     let created_scene = fixture
         .root

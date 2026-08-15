@@ -18,13 +18,11 @@ pub(super) fn route_key(
         return Some(result);
     }
     let result = match key {
-        Key::Named(NamedKey::End) if modifiers.contains(Modifiers::ctrl_or_meta()) => {
-            Some(with_editor(state, "cannot move without an open note", |editor| {
-                editor
-                    .move_caret_to_end_of_block(node_id)
-                    .map(|_| ())
-            }))
-        }
+        Key::Named(NamedKey::End) if modifiers.contains(Modifiers::ctrl_or_meta()) => Some(
+            with_editor(state, "cannot move without an open note", |editor| {
+                editor.move_caret_to_end_of_block(node_id).map(|_| ())
+            }),
+        ),
         Key::Named(NamedKey::Enter) if modifiers.is_empty() => Some(with_editor(
             state,
             "cannot split without an open note",

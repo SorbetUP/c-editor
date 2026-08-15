@@ -102,7 +102,10 @@ fn error_state(error: String) -> ShellState {
 mod tests {
     use super::*;
     use crate::vault_adapter::vault_layout;
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temporary_vault() -> PathBuf {
         let stamp = SystemTime::now()
@@ -121,7 +124,10 @@ mod tests {
         let state = select_root(root.clone());
 
         assert!(state.vault.is_some(), "selected vault must become active");
-        assert!(state.error.is_none(), "valid folder selection must not surface an error");
+        assert!(
+            state.error.is_none(),
+            "valid folder selection must not surface an error"
+        );
         assert!(
             vault_layout::config_file(&root, vault_layout::WORKSPACE_FILE).is_file(),
             "workspace metadata must be initialized before the selected vault is exposed"

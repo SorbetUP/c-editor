@@ -3,6 +3,7 @@
 //! The state/effect boundary stays here. Renderers are split by the source
 //! component ownership they convert: navigation, library, and editor view.
 
+mod drawing;
 mod editor_view;
 mod explorer;
 mod explorer_runtime;
@@ -58,6 +59,8 @@ struct ShellState {
     rail_drag: Option<RailDragState>,
     rail_drop_target: Option<String>,
     sidebar_resize: Option<SidebarResizeState>,
+    drawing: Option<drawing::DrawingCanvasState>,
+    drawing_path: Option<PathBuf>,
 }
 
 impl ShellState {
@@ -84,6 +87,8 @@ impl ShellState {
             rail_drag: None,
             rail_drop_target: None,
             sidebar_resize: None,
+            drawing: None,
+            drawing_path: None,
         }
     }
 
@@ -117,16 +122,9 @@ impl ShellState {
     }
 
     fn open_vault(&mut self, root: PathBuf) {
-        eprintln!(
-            "[freya][vault] action:open-start path={}",
-            root.display()
-        );
+        eprintln!("[freya][vault] action:open-start path={}", root.display());
         let mut next = shell_runtime::select_root(root);
-        if let Some(canonical_root) = next
-            .vault
-            .as_ref()
-            .map(|vault| vault.root().to_path_buf())
-        {
+        if let Some(canonical_root) = next.vault.as_ref().map(|vault| vault.root().to_path_buf()) {
             if let Err(error) = vault_picker::remember_vault(&canonical_root) {
                 eprintln!("[freya][vault] action:remember-failure error={error}");
                 next.error = Some(format!(
@@ -228,7 +226,10 @@ impl ShellState {
         eprintln!(
             "[freya][library] action:pin-toggle path={} pinned={}",
             path_for_log.as_str(),
-            self.library.pinned_paths.iter().any(|pinned| pinned == &path_for_log)
+            self.library
+                .pinned_paths
+                .iter()
+                .any(|pinned| pinned == &path_for_log)
         );
     }
 
@@ -256,7 +257,10 @@ impl ShellState {
                 )
                 .map(|_| ()),
             crate::library_contract::CreateAction::Folder => vault
-                .create_folder(Some(self.library.current_path.as_str().to_string()))
+                .create_folder(
+                    (!self.library.current_path.as_str().is_empty())
+                        .then(|| format!("{}/New Folder", self.library.current_path.as_str())),
+                )
                 .map(|_| ()),
             crate::library_contract::CreateAction::Drawing => {
                 Err(crate::vault_adapter::AdapterError::from(
@@ -329,10 +333,7 @@ pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
 /// another registered view before mounting the same production shell. Keeping
 /// that selection at the state boundary makes the Explorer and graph routes
 /// testable without adding a test-only renderer or hidden UI control.
-pub fn app_with_vault_view(
-    root: impl Into<PathBuf>,
-    view: WorkspaceView,
-) -> impl IntoElement {
+pub fn app_with_vault_view(root: impl Into<PathBuf>, view: WorkspaceView) -> impl IntoElement {
     let root = root.into();
     let state = use_state(move || {
         let mut state = shell_runtime::load_from_root(root.clone());
@@ -387,7 +388,7 @@ fn app_shell(state: State<ShellState>) -> Element {
     }
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state)
-    } else if snapshot.view == WorkspaceView::Graph {
+    } else if snapshot.view == WorkspaceView::Graph || snapshot.search_open {
         explorer::explorer_view(
             explorer_state,
             explorer_query,
@@ -405,6 +406,16 @@ fn app_shell(state: State<ShellState>) -> Element {
         .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .color(theme::token_color(palette, theme::ThemeToken::Text))
         .child(navigation::top_vault_bar(state, palette))
+        .maybe_child(overlay_transition.mounted.then(|| {
+            explorer::search_overlay(
+                state,
+                explorer_state,
+                explorer_query,
+                overlay_transition.interactive,
+                overlay_transition.backdrop_opacity,
+                overlay_transition.content_opacity,
+            )
+        }))
         .child(
             rect()
                 .width(Size::fill())
@@ -423,16 +434,6 @@ fn app_shell(state: State<ShellState>) -> Element {
                 )
                 .child(content),
         )
-        .maybe_child((snapshot.editor.is_none()).then(|| library::create_fab(state)))
-        .maybe_child(overlay_transition.mounted.then(|| {
-            explorer::search_overlay(
-                explorer_state,
-                explorer_query,
-                overlay_transition.interactive,
-                overlay_transition.backdrop_opacity,
-                overlay_transition.content_opacity,
-            )
-        }))
         .a11y_alt(contract.provenance.component.source_name());
 
     if snapshot.menu_open {

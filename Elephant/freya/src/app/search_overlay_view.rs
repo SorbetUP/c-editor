@@ -46,140 +46,136 @@ pub(super) fn render(state: State<ExplorerState>, snapshot: &ExplorerState) -> E
         let score = format!("{}%", (concept.score.clamp(0., 1.) * 100.).round() as u8);
         let mut concept_state = state;
         let concept_for_action = concept.clone();
-        view = view
-            .child(section_title("WIKIS & CONCEPTS", 7.))
-            .child(
-                rect()
-                    .position(Position::new_absolute().left(18.).top(28.))
-                    .width(Size::px(654.))
-                    .height(Size::px(58.))
-                    .padding(Gaps::new(10., 12., 10., 12.))
-                    .horizontal()
-                    .main_align(Alignment::SpaceBetween)
-                    .background(Color::from_argb(18, 37, 99, 235))
-                    .border(
-                        Border::new()
-                            .fill(Color::from_argb(46, 37, 99, 235))
-                            .width(1.),
-                    )
-                    .with_corner_radius(14.)
-                    .layer(Layer::OverlayLevel(SEARCH_CONTENT_LAYER))
-                    .on_mouse_up(move |_| concept_state.write().open_concept(&concept_for_action))
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .height(Size::fill())
-                            .vertical()
-                            .spacing(2.)
-                            .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .child(
-                                label()
-                                    .font_size(14.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(Color::from_rgb(16, 24, 40))
-                                    .text(concept.title.clone()),
-                            )
-                            .child(
-                                label()
-                                    .font_size(12.)
-                                    .color(Color::from_rgb(100, 116, 139))
-                                    .text(format!(
-                                        "{} source chunk{} · {source}",
-                                        evidence_count,
-                                        if evidence_count == 1 { "" } else { "s" }
-                                    )),
-                            ),
-                    )
-                    .child(
-                        label()
-                            .font_size(12.)
-                            .font_weight(FontWeight::BOLD)
-                            .color(Color::from_rgb(37, 99, 235))
-                            .width(Size::px(36.))
-                            .height(Size::px(20.))
-                            .position(Position::new_absolute().right(14.).top(10.))
-                            .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .text(score),
-                    ),
-            );
+        view = view.child(section_title("WIKIS & CONCEPTS", 7.)).child(
+            rect()
+                .position(Position::new_absolute().left(18.).top(28.))
+                .width(Size::px(654.))
+                .height(Size::px(58.))
+                .padding(Gaps::new(10., 12., 10., 12.))
+                .horizontal()
+                .main_align(Alignment::SpaceBetween)
+                .background(Color::from_argb(18, 37, 99, 235))
+                .border(
+                    Border::new()
+                        .fill(Color::from_argb(46, 37, 99, 235))
+                        .width(1.),
+                )
+                .with_corner_radius(14.)
+                .layer(Layer::OverlayLevel(SEARCH_CONTENT_LAYER))
+                .on_mouse_up(move |_| concept_state.write().open_concept(&concept_for_action))
+                .child(
+                    rect()
+                        .width(Size::flex(1.))
+                        .height(Size::fill())
+                        .vertical()
+                        .spacing(2.)
+                        .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
+                        .child(
+                            label()
+                                .font_size(14.)
+                                .font_weight(FontWeight::BOLD)
+                                .color(Color::from_rgb(16, 24, 40))
+                                .text(concept.title.clone()),
+                        )
+                        .child(
+                            label()
+                                .font_size(12.)
+                                .color(Color::from_rgb(100, 116, 139))
+                                .text(format!(
+                                    "{} source chunk{} · {source}",
+                                    evidence_count,
+                                    if evidence_count == 1 { "" } else { "s" }
+                                )),
+                        ),
+                )
+                .child(
+                    label()
+                        .font_size(12.)
+                        .font_weight(FontWeight::BOLD)
+                        .color(Color::from_rgb(37, 99, 235))
+                        .width(Size::px(36.))
+                        .height(Size::px(20.))
+                        .position(Position::new_absolute().right(14.).top(10.))
+                        .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
+                        .text(score),
+                ),
+        );
     }
     if let Some(result) = snapshot.search.results.first() {
         let result = result.clone();
         let mut result_state = state;
         let result_title = highlighted_title(&result.title, &snapshot.search.query);
-        view = view
-            .child(section_title("NOTES & PASSAGES", 94.))
-            .child(
-                rect()
-                    .position(Position::new_absolute().left(18.).top(120.))
-                    .width(Size::px(654.))
-                    .height(Size::px(70.))
-                    .padding(Gaps::new(12., 14., 12., 14.))
-                    .background(Color::from_argb(51, 37, 99, 235))
-                    .with_corner_radius(16.)
-                    .layer(Layer::OverlayLevel(SEARCH_CONTENT_LAYER))
-                    .a11y_alt(format!("Open note {}", result.title))
-                    .on_mouse_up(move |_| result_state.write().open_search_result(0))
-                    .horizontal()
-                    .spacing(12.)
-                    .child(
-                        rect()
-                            .width(Size::px(38.))
-                            .height(Size::px(38.))
-                            .center()
-                            .background(Color::from_argb(87, 255, 255, 255))
-                            .with_corner_radius(14.)
-                            .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .child(svg_icon(Icon::FileText, Color::from_rgb(37, 99, 235), 18.)),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::flex(1.))
-                            .height(Size::fill())
-                            .spacing(4.)
-                            .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .child(result_title)
-                            .child(
-                                label()
-                                    .font_size(12.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(Color::from_rgb(37, 99, 235))
-                                    .text(result.relative_path.clone()),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .position(Position::new_absolute().right(50.).top(12.))
-                            .width(Size::px(86.))
-                            .height(Size::px(22.))
-                            .padding(Gaps::new(0., 9., 0., 9.))
-                            .center()
-                            .background(Color::from_argb(61, 37, 99, 235))
-                            .with_corner_radius(999.)
-                            .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .child(
-                                label()
-                                    .font_size(11.)
-                                    .font_weight(FontWeight::BOLD)
-                                    .color(Color::from_rgb(37, 99, 235))
-                                    .text(match_label(result.match_type)),
-                            ),
-                    )
-                    .child(
-                        rect()
-                            .position(Position::new_absolute().right(14.).top(20.))
-                            .width(Size::px(30.))
-                            .height(Size::px(30.))
-                            .center()
-                            .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
-                            .child(
-                                label()
-                                    .font_size(18.)
-                                    .color(Color::from_rgb(100, 116, 139))
-                                    .text("↗"),
-                            ),
-                    ),
-            );
+        view = view.child(section_title("NOTES & PASSAGES", 94.)).child(
+            rect()
+                .position(Position::new_absolute().left(18.).top(120.))
+                .width(Size::px(654.))
+                .height(Size::px(70.))
+                .padding(Gaps::new(12., 14., 12., 14.))
+                .background(Color::from_argb(51, 37, 99, 235))
+                .with_corner_radius(16.)
+                .layer(Layer::OverlayLevel(SEARCH_CONTENT_LAYER))
+                .a11y_alt(format!("Open note {}", result.title))
+                .on_mouse_up(move |_| result_state.write().open_search_result(0))
+                .horizontal()
+                .spacing(12.)
+                .child(
+                    rect()
+                        .width(Size::px(38.))
+                        .height(Size::px(38.))
+                        .center()
+                        .background(Color::from_argb(87, 255, 255, 255))
+                        .with_corner_radius(14.)
+                        .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
+                        .child(svg_icon(Icon::FileText, Color::from_rgb(37, 99, 235), 18.)),
+                )
+                .child(
+                    rect()
+                        .width(Size::flex(1.))
+                        .height(Size::fill())
+                        .spacing(4.)
+                        .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
+                        .child(result_title)
+                        .child(
+                            label()
+                                .font_size(12.)
+                                .font_weight(FontWeight::BOLD)
+                                .color(Color::from_rgb(37, 99, 235))
+                                .text(result.relative_path.clone()),
+                        ),
+                )
+                .child(
+                    rect()
+                        .position(Position::new_absolute().right(50.).top(12.))
+                        .width(Size::px(86.))
+                        .height(Size::px(22.))
+                        .padding(Gaps::new(0., 9., 0., 9.))
+                        .center()
+                        .background(Color::from_argb(61, 37, 99, 235))
+                        .with_corner_radius(999.)
+                        .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
+                        .child(
+                            label()
+                                .font_size(11.)
+                                .font_weight(FontWeight::BOLD)
+                                .color(Color::from_rgb(37, 99, 235))
+                                .text(match_label(result.match_type)),
+                        ),
+                )
+                .child(
+                    rect()
+                        .position(Position::new_absolute().right(14.).top(20.))
+                        .width(Size::px(30.))
+                        .height(Size::px(30.))
+                        .center()
+                        .layer(Layer::OverlayLevel(SEARCH_TEXT_LAYER))
+                        .child(
+                            label()
+                                .font_size(18.)
+                                .color(Color::from_rgb(100, 116, 139))
+                                .text("↗"),
+                        ),
+                ),
+        );
     }
     view.into_element()
 }

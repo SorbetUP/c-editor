@@ -195,8 +195,14 @@ mod tests {
         let root = std::env::temp_dir().join(format!("freya-shell-preferences-{stamp}"));
         let pinned = [RelativePath::from("Alpha.md")];
 
-        write_shell_preferences(&root, true, SidebarWidth::default(), &default_rail_order(), &pinned)
-            .expect("write shell preferences");
+        write_shell_preferences(
+            &root,
+            true,
+            SidebarWidth::default(),
+            &default_rail_order(),
+            &pinned,
+        )
+        .expect("write shell preferences");
         let loaded = read_shell_preferences(&root).expect("read shell preferences");
 
         assert_eq!(loaded.pinned_paths, vec!["Alpha.md"]);

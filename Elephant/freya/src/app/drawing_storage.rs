@@ -9,8 +9,15 @@ use std::{
 const ASSETS_DIR: &str = ".assets";
 
 pub(super) struct SceneRead {
+    pub(super) path: PathBuf,
+    pub(super) raw: String,
     pub(super) element_count: usize,
     pub(super) preview_size: u64,
+}
+
+pub(super) struct NativeSceneRead {
+    pub(super) path: PathBuf,
+    pub(super) raw: String,
 }
 
 pub(super) struct CreatedScene {
@@ -119,8 +126,43 @@ pub(super) fn read_scene(root: &Path, relative_path: &str) -> Result<SceneRead, 
         ));
     }
     Ok(SceneRead {
+        path: scene_path,
+        raw,
         element_count: elements.len(),
         preview_size: preview_metadata.len(),
+    })
+}
+
+pub(super) fn read_native_scene(
+    root: &Path,
+    relative_path: &str,
+) -> Result<NativeSceneRead, String> {
+    let path = scene_path(root, relative_path)?;
+    let raw = fs::read_to_string(&path)
+        .map_err(|error| format!("Drawing scene unavailable at {}: {error}", path.display()))?;
+    let scene: Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("Drawing scene invalid at {}: {error}", path.display()))?;
+    if scene.get("type").and_then(Value::as_str) != Some("excalidraw") {
+        return Err(format!(
+            "Drawing scene invalid at {}: expected type=excalidraw",
+            path.display()
+        ));
+    }
+    if !scene.get("elements").is_some_and(Value::is_array) {
+        return Err(format!(
+            "Drawing scene invalid at {}: elements must be an array",
+            path.display()
+        ));
+    }
+    Ok(NativeSceneRead { path, raw })
+}
+
+pub(super) fn write_scene(path: &Path, raw: &str) -> Result<(), String> {
+    fs::write(path, raw).map_err(|error| {
+        format!(
+            "Unable to persist Excalidraw scene {}: {error}",
+            path.display()
+        )
     })
 }
 

@@ -1,8 +1,9 @@
 //! Headless Freya acceptance for the converted Vue/Tauri shell.
 //!
-//! The click target is derived from the semantic accessibility label exposed
-//! by the rendered node. This keeps the test tied to the real component
-//! contract while avoiding brittle guessed coordinates.
+//! Click targets are derived from semantic accessibility labels exposed by
+//! rendered controls. When a label is repeated by a surrounding surface, the
+//! smallest matching layout is the actionable control, matching the targeted
+//! helpers used by the direct Library integration suite.
 
 use elephant_freya::app::app_with_vault;
 use freya_testing::TestingRunner;
@@ -21,14 +22,24 @@ fn fixture_root(label: &str) -> PathBuf {
 }
 
 fn center_of_label(test: &TestingRunner, wanted: &str) -> Option<(f64, f64)> {
-    test.find(|node, element| {
-        (element.accessibility().builder.label() == Some(wanted)).then(|| {
-            let area = node.layout().visible_area();
-            (
-                f64::from(area.origin.x + area.size.width / 2.0),
-                f64::from(area.origin.y + area.size.height / 2.0),
-            )
-        })
+    test.find_many(|node, element| {
+        (element.accessibility().builder.label() == Some(wanted)).then_some(node)
+    })
+    .into_iter()
+    .min_by(|left, right| {
+        left.layout()
+            .area
+            .size
+            .area()
+            .partial_cmp(&right.layout().area.size.area())
+            .expect("accessible node areas must be ordered")
+    })
+    .map(|node| {
+        let area = node.layout().area;
+        (
+            f64::from(area.origin.x + area.size.width / 2.0),
+            f64::from(area.origin.y + area.size.height / 2.0),
+        )
     })
 }
 
@@ -53,6 +64,7 @@ fn converted_shell_exposes_source_labels_and_create_note_path() {
 
     let create_center = center_of_label(&test, "Create").expect("Create action is rendered");
     test.click_cursor(create_center);
+    test.sync_and_update();
     assert!(has_label(&test, "Note"));
     assert!(has_label(&test, "Drawing"));
     assert!(has_label(&test, "Folder"));
@@ -69,6 +81,10 @@ fn converted_shell_exposes_source_labels_and_create_note_path() {
     assert_eq!(
         markdown_files, 1,
         "the real vault create path must create one note"
+    );
+    assert!(
+        has_label(&test, "Untitled") || has_label(&test, "NoteEditorHost"),
+        "Create → Note must also navigate to the newly created note"
     );
 
     fs::remove_dir_all(root).expect("remove fixture");

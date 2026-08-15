@@ -38,9 +38,9 @@
     "lint": "NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/eslint --cache .",
     "security:guard": "node build/scripts/verify-security-guardrails.mjs",
     "minify-locales": "node build/scripts/minify-locales.mjs",
-    "start": "pnpm tauri:dev",
+    "start": "pnpm freya:dev",
     "preview": "NODE_PATH=Elephant/node_modules Elephant/node_modules/.bin/vite --config vite.tauri.config.mjs --host 127.0.0.1 --port 1420 --strictPort",
-    "dev": "pnpm tauri:dev",
+    "dev": "pnpm freya:dev",
     "build": "pnpm tauri:web:build",
     "build:unpack": "pnpm tauri:web:build",
     "bundle:report": "node build/scripts/report-renderer-bundle.mjs",
@@ -94,6 +94,7 @@
     "addons:sync": "node build/scripts/sync-elephant-addons.mjs",
     "freya:check": "cargo check --manifest-path Elephant/freya/Cargo.toml",
     "freya:test": "cargo test --manifest-path Elephant/freya/Cargo.toml",
+    "freya:dev": "cargo run --manifest-path Elephant/freya/Cargo.toml",
     "test:vue-to-freya": "node tools/vue-to-freya/test.mjs"
   },
   "dependencies": {

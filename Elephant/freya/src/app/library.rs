@@ -1,48 +1,48 @@
-//! Freya conversion of LibraryToolbar, CreateEntryMenu, LibraryGrid and NoteCard.
+//! Freya conversion of the current Tauri LibraryToolbar, CreateEntryMenu,
+//! LibraryGrid and NoteCard surface.
 
 use freya::prelude::*;
 
 use crate::{
     library_contract::{
-        EntryKind as ContractKind, EntryTitle, EntryType, LibraryEntry, RelativePath, SortMode,
-        ViewMode,
+        EntryKind as ContractKind, EntryOpenTarget, EntryTitle, EntryType, LibraryEntry,
+        RelativePath, SortMode, ViewMode,
     },
     navigation_contract::WorkspaceView,
     theme,
     vault_adapter::{EntryKind, VaultEntry},
 };
 
-use super::{
-    editor_view,
-    navigation_icons::{svg_icon, Icon},
-    route_notice,
-    ShellState,
-};
+use super::{drawing, editor_view, route_notice, ShellState};
 
-#[path = "drawing.rs"]
-mod drawing;
+#[path = "library_icons.rs"]
+mod library_icons;
 
 #[path = "library_actions.rs"]
 mod library_actions;
-use library_actions::{card_action_menu, CardMenuState};
 
-const GRID_CARD_WIDTH: f32 = 317.;
+use library_actions::{
+    card_action_menu, create_note_and_open, load_more_library_entries, rename_library_entry,
+    CardMenuState,
+};
+use library_icons::{svg_icon, Icon as LibraryIcon};
 
 pub(super) fn main_content(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
-    let body = if snapshot.editor.is_some() {
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .padding(Gaps::new(0., 0., 12., 10.))
-            .child(editor_view::note_editor_host(state))
-            .into_element()
+    let showing_library = snapshot.editor.is_none()
+        && snapshot.drawing.is_none()
+        && snapshot.view == WorkspaceView::Notes;
+    let body = if snapshot.drawing.is_some() {
+        drawing::drawing_view(state)
+    } else if snapshot.editor.is_some() {
+        editor_view::note_editor_host(state)
     } else if snapshot.view == WorkspaceView::Notes {
         rect()
             .width(Size::fill())
             .height(Size::fill())
             .child(library_toolbar(state))
             .child(library_grid(state))
+            .child(library_create_button(state))
             .into_element()
     } else if snapshot.search_open {
         route_notice("Search", "Search notes")
@@ -51,18 +51,17 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
     } else {
         route_notice(snapshot.view.source_id(), snapshot.view.source_id())
     };
-    let mut dismiss_menu_state = state;
+
     rect()
         .width(Size::fill())
         .height(Size::fill())
         .background(theme::color(theme::BG))
-        .on_mouse_up(move |_| dismiss_menu_state.write().menu_open = false)
-        .maybe_child(
-            snapshot
-                .error
-                .clone()
-                .map(|error| library_error_notice(&error)),
-        )
+        .padding(if showing_library {
+            Gaps::new_all(0.)
+        } else {
+            Gaps::new(8., 12., 12., 12.)
+        })
+        .maybe_child(snapshot.error.as_deref().map(library_error_notice))
         .child(body)
         .into_element()
 }
@@ -70,23 +69,29 @@ pub(super) fn main_content(state: State<ShellState>) -> Element {
 fn library_error_notice(error: &str) -> Element {
     let accessibility_label = drawing::error_accessibility_label(error);
     rect()
-        .width(Size::fill())
+        .position(Position::new_absolute().left(12.).right(12.).top(80.))
         .padding(Gaps::new_all(10.))
-        .background(theme::color(theme::BG))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::color(theme::SURFACE))
+        .border(
+            Border::new()
+                .fill(theme::color(theme::BORDER_STRONG))
+                .width(1.),
+        )
         .with_corner_radius(8.)
+        .layer(Layer::OverlayLevel(20))
         .a11y_alt(accessibility_label)
         .child(
             label()
-                .color(theme::color(theme::MUTED))
+                .color(theme::color(theme::DANGER))
                 .text(error.to_owned()),
         )
         .into_element()
 }
 
-fn library_toolbar(mut state: State<ShellState>) -> Element {
+fn library_toolbar(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
     let sort_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:sort");
+    let mut sort_state = state;
     let mut sort_enter_state = state;
     let mut sort_leave_state = state;
     let sort = rect()
@@ -96,36 +101,33 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         .background(theme::color(if sort_hovered {
             theme::SOFT
         } else {
-            theme::toolbar_button_background()
+            theme::mix(theme::SURFACE, theme::BG, 0.52)
         }))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
         .with_corner_radius(12.)
-        .border(
-            Border::new()
-                .fill(theme::color(theme::BORDER))
-                .width(1.),
-        )
-        .shadow(Shadow::new().y(8.).blur(22.).color(Color::from_argb(56, 0, 0, 0)))
-        .on_mouse_up(move |_| state.write().library.cycle_sort())
+        .on_mouse_up(move |_| sort_state.write().library.cycle_sort())
         .on_pointer_enter(move |_| sort_enter_state.write().set_hovered_target("toolbar:sort"))
         .on_pointer_leave(move |_| {
             sort_leave_state
                 .write()
                 .clear_hovered_target("toolbar:sort")
         })
-        .a11y_alt(format!("Sort: {}", snapshot.library.sort.as_contract()))
+        .a11y_alt(format!("Sort: {}", sort_label(snapshot.library.sort)))
         .child(svg_icon(
-            match snapshot.library.sort {
-                SortMode::UpdatedNewest => Icon::ArrowDownNarrowWide,
-                SortMode::UpdatedOldest => Icon::ArrowUpNarrowWide,
-                SortMode::TitleAz => Icon::ArrowDownAz,
-                SortMode::TitleZa => Icon::ArrowDownZa,
-            },
+            sort_icon(snapshot.library.sort),
             theme::color(theme::TEXT),
             22.,
         ));
+
     let view_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:view");
+    let mut view_state = state;
     let mut view_enter_state = state;
     let mut view_leave_state = state;
+    let view_label = if snapshot.library.view_mode == ViewMode::Grid {
+        "Show notes as list"
+    } else {
+        "Show notes as grid"
+    };
     let view = rect()
         .width(Size::px(52.))
         .height(Size::px(52.))
@@ -133,105 +135,139 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         .background(theme::color(if view_hovered {
             theme::SOFT
         } else {
-            theme::toolbar_button_background()
+            theme::mix(theme::SURFACE, theme::BG, 0.52)
         }))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
         .with_corner_radius(12.)
-        .border(
-            Border::new()
-                .fill(theme::color(theme::BORDER))
-                .width(1.),
-        )
-        .shadow(Shadow::new().y(8.).blur(22.).color(Color::from_argb(56, 0, 0, 0)))
-        .on_mouse_up(move |_| state.write().library.cycle_view())
+        .on_mouse_up(move |_| view_state.write().library.cycle_view())
         .on_pointer_enter(move |_| view_enter_state.write().set_hovered_target("toolbar:view"))
         .on_pointer_leave(move |_| {
             view_leave_state
                 .write()
                 .clear_hovered_target("toolbar:view")
         })
-        .a11y_alt(if snapshot.library.view_mode == ViewMode::Grid {
-            "Show notes as list"
-        } else {
-            "Show notes as grid"
-        })
+        .a11y_alt(view_label)
         .child(svg_icon(
             if snapshot.library.view_mode == ViewMode::Grid {
-                Icon::List
+                LibraryIcon::List
             } else {
-                Icon::Grid3x3
+                LibraryIcon::Grid3x3
             },
             theme::color(theme::TEXT),
             22.,
         ));
+
     rect()
-        .position(Position::new_absolute().left(0.).top(0.))
+        .position(Position::new_absolute().left(0.).right(0.).top(0.))
         .width(Size::fill())
         .height(Size::px(72.))
         .padding(Gaps::new(10., 12., 10., 12.))
         .horizontal()
-        .main_align(Alignment::SpaceBetween)
         .child(rect().width(Size::fill()))
         .child(rect().horizontal().spacing(14.).child(sort).child(view))
         .into_element()
 }
 
-pub(super) fn create_fab(mut state: State<ShellState>) -> Element {
-    let hovered = state.read().hovered_target.as_deref() == Some("create-fab");
-    let menu_open = state.read().menu_open;
+fn library_create_button(state: State<ShellState>) -> Element {
+    let snapshot = state.read().clone();
+    let hovered = snapshot.hovered_target.as_deref() == Some("toolbar:create");
+    let mut click_state = state;
     let mut enter_state = state;
     let mut leave_state = state;
-    let fab = rect()
+
+    rect()
+        .position(Position::new_absolute().right(20.).bottom(20.))
         .width(Size::px(56.))
         .height(Size::px(56.))
         .center()
         .background(theme::color(if hovered {
-            theme::mix(theme::PRIMARY, theme::SURFACE, 0.92)
+            theme::mix(theme::PRIMARY, (0, 0, 0, 255), 0.88)
         } else {
             theme::PRIMARY
         }))
+        .border(
+            Border::new()
+                .fill(theme::color(theme::mix(
+                    theme::PRIMARY,
+                    theme::BORDER,
+                    0.64,
+                )))
+                .width(1.),
+        )
         .with_corner_radius(11.)
         .layer(Layer::OverlayLevel(10))
         .on_mouse_up(move |_| {
-            let mut shell = state.write();
-            shell.menu_open = !shell.menu_open;
+            let open = click_state.read().menu_open;
+            click_state.write().menu_open = !open;
         })
-        .on_pointer_enter(move |_| enter_state.write().set_hovered_target("create-fab"))
-        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target("create-fab"))
+        .on_pointer_enter(move |_| enter_state.write().set_hovered_target("toolbar:create"))
+        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target("toolbar:create"))
         .a11y_alt("Create")
         .child(svg_icon(
-            Icon::Plus,
-            theme::color(theme::SURFACE),
+            LibraryIcon::Plus,
+            theme::color((255, 255, 255, 255)),
             27.,
-        ));
-    let mut fab_frame = rect()
-        .position(Position::new_absolute().right(16.).bottom(16.))
-        .width(Size::px(64.))
-        .height(Size::px(64.))
-        .center()
-        .with_corner_radius(14.)
-        .layer(Layer::OverlayLevel(9));
-    if menu_open {
-        fab_frame = fab_frame.border(
-            Border::new()
-                .fill(theme::color(theme::PRIMARY))
-                .width(2.),
-        );
-    }
-    fab_frame.child(fab).into_element()
+        ))
+        .into_element()
 }
 
-pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
-    let item = |action, icon, title, description| {
-        let mut state = state;
-        let hover_key = format!("create-menu:{title}");
-        let mut enter_state = state;
-        let mut leave_state = state;
-        let enter_key = hover_key.clone();
-        let leave_key = hover_key.clone();
-        let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+fn sort_label(sort: SortMode) -> &'static str {
+    match sort {
+        SortMode::UpdatedNewest => "Updated newest",
+        SortMode::UpdatedOldest => "Updated oldest",
+        SortMode::TitleAz => "Title A-Z",
+        SortMode::TitleZa => "Title Z-A",
+    }
+}
+
+fn sort_icon(sort: SortMode) -> LibraryIcon {
+    match sort {
+        SortMode::UpdatedNewest => LibraryIcon::ArrowDownNarrowWide,
+        SortMode::UpdatedOldest => LibraryIcon::ArrowUpNarrowWide,
+        SortMode::TitleAz => LibraryIcon::ArrowDownAz,
+        SortMode::TitleZa => LibraryIcon::ArrowDownZa,
+    }
+}
+
+fn run_create_action(mut state: State<ShellState>, action: crate::library_contract::CreateAction) {
+    state.write().menu_open = false;
+    match action {
+        crate::library_contract::CreateAction::Note => {
+            create_note_and_open(state);
+        }
+        crate::library_contract::CreateAction::Drawing => {
+            drawing::request_create(state);
+        }
+        crate::library_contract::CreateAction::Folder => {
+            state.write().create(action);
+        }
+    }
+}
+
+#[derive(PartialEq)]
+struct CreateMenuItem {
+    state: State<ShellState>,
+    action: crate::library_contract::CreateAction,
+    icon: LibraryIcon,
+    title: &'static str,
+    description: &'static str,
+}
+
+impl Component for CreateMenuItem {
+    fn render(&self) -> impl IntoElement {
+        let area = use_state(|| Option::<Area>::None);
+        let mut area_state = area;
+        let action_state = self.state;
+        let action = self.action;
+        let hover_key = format!("create-menu:{}", self.title);
+        let hovered = self.state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+        let move_key = hover_key.clone();
+        let move_area = area;
+        let mut move_state = self.state;
+
         rect()
             .width(Size::fill())
-            .height(Size::px(64.))
+            .height(Size::px(52.))
             .padding(Gaps::new_all(10.))
             .horizontal()
             .spacing(12.)
@@ -241,64 +277,97 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
             } else {
                 theme::SURFACE
             }))
-            .on_mouse_up(move |_| {
-                state.write().menu_open = false;
-                if action == crate::library_contract::CreateAction::Drawing {
-                    drawing::request_create(state);
-                } else if action == crate::library_contract::CreateAction::Note {
-                    create_note_from_library(state);
-                } else {
-                    state.write().create(action);
+            .layer(Layer::OverlayLevel(22))
+            .on_sized(move |event: Event<SizedEventData>| area_state.set(Some(event.area)))
+            .on_global_pointer_press(move |event: Event<PointerEventData>| {
+                let Some(area) = *area.read() else { return };
+                let point = event.global_location();
+                if point.x < f64::from(area.min_x())
+                    || point.x > f64::from(area.max_x())
+                    || point.y < f64::from(area.min_y())
+                    || point.y > f64::from(area.max_y())
+                {
+                    return;
+                }
+                run_create_action(action_state, action);
+            })
+            .on_global_pointer_move(move |event: Event<PointerEventData>| {
+                let Some(area) = *move_area.read() else {
+                    return;
+                };
+                let point = event.global_location();
+                let inside = point.x >= f64::from(area.min_x())
+                    && point.x <= f64::from(area.max_x())
+                    && point.y >= f64::from(area.min_y())
+                    && point.y <= f64::from(area.max_y());
+                let current = move_state.read().hovered_target.clone();
+                if inside && current.as_deref() != Some(move_key.as_str()) {
+                    move_state.write().set_hovered_target(move_key.clone());
+                } else if !inside && current.as_deref() == Some(move_key.as_str()) {
+                    move_state.write().clear_hovered_target(&move_key);
                 }
             })
-            .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
-            .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
-            .a11y_alt(title)
-            .child(svg_icon(icon, theme::color(theme::PRIMARY), 20.))
+            .a11y_alt(self.title)
+            .child(svg_icon(self.icon, theme::color(theme::PRIMARY), 20.))
             .child(
                 rect()
-                    // Keep the compact title/description spacing local to this
-                    // renderer so the library action model stays reusable.
-                    .spacing(6.)
+                    .spacing(2.)
                     .child(
                         label()
                             .font_size(14.)
                             .font_weight(FontWeight::BOLD)
-                            .text(title),
+                            .text(self.title),
                     )
                     .child(
                         label()
                             .font_size(12.)
                             .color(theme::color(theme::MUTED))
-                            .text(description),
+                            .text(self.description),
                     ),
             )
             .into_element()
+    }
+}
+
+pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
+    let item = |action, icon, title, description| {
+        CreateMenuItem {
+            state,
+            action,
+            icon,
+            title,
+            description,
+        }
+        .into_element()
     };
+
     let mut close_state = state;
-    rect()
+    let mut escape_state = state;
+    let backdrop = rect()
         .position(
             Position::new_absolute()
-                .right(20.)
-                .bottom(86.),
+                .left(0.)
+                .right(0.)
+                .top(0.)
+                .bottom(0.),
         )
+        .width(Size::fill())
+        .height(Size::fill())
+        .on_mouse_up(move |_| close_state.write().menu_open = false);
+
+    let popover = rect()
+        .position(Position::new_global().right(20.).bottom(86.))
         .width(Size::px(280.))
-        .height(Size::px(240.))
         .padding(Gaps::new_all(8.))
         .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .border(
+            Border::new()
+                .fill(theme::color(theme::BORDER_STRONG))
+                .width(1.),
+        )
         .with_corner_radius(14.)
-        .shadow(Shadow::new().y(18.).blur(32.).color(Color::from_argb(61, 15, 23, 42)))
-        .layer(Layer::OverlayLevel(10))
-        .on_global_key_down(move |event: Event<KeyboardEventData>| {
-            if event.key == Key::Named(NamedKey::Escape) {
-                close_state.write().menu_open = false;
-            }
-        })
-        // The source menu leaves a short visual inset above its heading. Keep
-        // it as an explicit display-only node so the action list remains
-        // independently reusable and its click semantics stay unchanged.
-        .child(rect().height(Size::px(10.)))
+        .layer(Layer::OverlayLevel(21))
+        .a11y_alt("Create")
         .child(
             label()
                 .padding(Gaps::new(8., 10., 6., 10.))
@@ -307,74 +376,100 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
                 .color(theme::color(theme::MUTED))
                 .text("CREATE"),
         )
-        .child(rect().height(Size::px(11.)))
         .child(item(
             crate::library_contract::CreateAction::Note,
-            Icon::FilePlus,
+            LibraryIcon::FilePlus2,
             "Note",
             "Create a new note",
         ))
         .child(item(
             crate::library_contract::CreateAction::Drawing,
-            Icon::Excalidraw,
+            LibraryIcon::Excalidraw,
             "Drawing",
             "Open a new Excalidraw canvas",
         ))
         .child(item(
             crate::library_contract::CreateAction::Folder,
-            Icon::FolderPlus,
+            LibraryIcon::FolderPlus,
             "Folder",
             "Organize notes in a folder",
-        ))
+        ));
+
+    rect()
+        .position(
+            Position::new_absolute()
+                .left(0.)
+                .right(0.)
+                .top(0.)
+                .bottom(0.),
+        )
+        .width(Size::fill())
+        .height(Size::fill())
+        .layer(Layer::OverlayLevel(20))
+        .on_global_key_down(move |event: Event<KeyboardEventData>| {
+            if event.key == Key::Named(NamedKey::Escape) {
+                escape_state.write().menu_open = false;
+            }
+        })
+        .child(backdrop)
+        .child(popover)
         .into_element()
 }
 
 fn library_grid(state: State<ShellState>) -> Element {
     let snapshot = state.read().clone();
-    let visible_entries = snapshot.library.visible_entries();
-    let fallback_menu_path = visible_entries
-        .iter()
-        .find(|entry| !matches!(entry.effective_kind(), ContractKind::Folder))
-        .map(|entry| entry.path.clone());
-    let entries = visible_entries
+    let visible = snapshot.library.visible_entries();
+    if visible.is_empty() {
+        return rect()
+            .width(Size::fill())
+            .height(Size::fill())
+            .a11y_alt("Empty library")
+            .into_element();
+    }
+
+    let count = visible.len();
+    let entries = visible
         .into_iter()
-        .map(|entry| {
+        .enumerate()
+        .map(|(index, entry)| {
             LibraryCard {
                 entry: entry.clone(),
                 mode: snapshot.library.view_mode,
-                fallback_menu: fallback_menu_path.as_ref() == Some(&entry.path),
+                featured: snapshot.library.view_mode == ViewMode::Grid && index == 0 && count > 3,
                 state,
             }
             .into_element()
         })
         .collect::<Vec<_>>();
-    if entries.is_empty() {
-        return rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .padding(Gaps::new(72., 12., 12., 12.))
-            .a11y_alt("No visible notes")
-            .child(label().font_size(18.).text("No visible notes"))
-            .into_element();
-    }
+
     let surface = if snapshot.library.view_mode == ViewMode::Grid {
         rect()
             .horizontal()
-            .padding(Gaps::new(0., 10., 10., 10.))
             .content(Content::wrap_spacing(10.))
             .spacing(10.)
             .children(entries)
     } else {
-        rect()
-            .padding(Gaps::new(0., 10., 10., 10.))
-            .spacing(8.)
-            .children(entries)
+        rect().spacing(6.).children(entries)
     };
+
+    let mut paging_state = state;
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .padding(Gaps::new(72., 0., 0., 0.))
-        .child(surface)
+        .on_wheel(move |_| {
+            let _ = load_more_library_entries(paging_state);
+        })
+        .child(
+            ScrollView::new()
+                .width(Size::fill())
+                .height(Size::fill())
+                .child(
+                    rect()
+                        .width(Size::fill())
+                        .padding(Gaps::new(72., 10., 10., 10.))
+                        .child(surface),
+                ),
+        )
         .into_element()
 }
 
@@ -382,7 +477,7 @@ fn library_grid(state: State<ShellState>) -> Element {
 struct LibraryCard {
     entry: LibraryEntry,
     mode: ViewMode,
-    fallback_menu: bool,
+    featured: bool,
     state: State<ShellState>,
 }
 
@@ -394,15 +489,13 @@ impl Component for LibraryCard {
     fn render(&self) -> impl IntoElement {
         let card_menu_state = use_state(CardMenuState::default);
         let rename_value = use_state(String::new);
-        let hover_state = use_state(|| false);
         render_library_card(
             &self.entry,
             self.mode,
-            self.fallback_menu,
+            self.featured,
             self.state,
             card_menu_state,
             rename_value,
-            hover_state,
         )
     }
 }
@@ -410,45 +503,58 @@ impl Component for LibraryCard {
 fn render_library_card(
     entry: &LibraryEntry,
     mode: ViewMode,
-    fallback_menu: bool,
+    featured: bool,
     state: State<ShellState>,
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
-    hover_state: State<bool>,
 ) -> Element {
     let path = entry.path.as_str().to_string();
     let is_drawing =
         is_drawing_path(&path) || matches!(entry.effective_kind(), ContractKind::Drawing);
-    let title = display_title(entry.title.as_str(), is_drawing);
     let is_folder = matches!(entry.effective_kind(), ContractKind::Folder);
-    let height = if mode == ViewMode::Grid {
-        theme::CARD_HEIGHT
-    } else {
+    let open_target = state.read().library.open_entry(entry);
+    let title = display_title(entry.title.as_str(), is_drawing);
+    let menu_snapshot = card_menu_state.read().clone();
+    let renaming = menu_snapshot.renaming;
+    let height = if mode == ViewMode::List {
         theme::LIST_CARD_HEIGHT
+    } else if featured && !is_folder {
+        220.
+    } else {
+        theme::CARD_HEIGHT
     };
+
     let hover_key = format!("card:{path}");
-    let hovered = *hover_state.read()
-        || state.read().hovered_target.as_deref() == Some(hover_key.as_str());
-    let card_action_active = state.read().card_action_target.as_deref() == Some(hover_key.as_str());
-    let card_selected = hovered || card_action_active;
-    let show_accessible_menu = card_selected
-        || (fallback_menu && state.read().card_action_target.is_none());
-    let is_pinned = state
-        .read()
-        .library
-        .pinned_paths
-        .iter()
-        .any(|pinned| pinned == &entry.path);
+    let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
     let enter_key = hover_key.clone();
     let leave_key = hover_key.clone();
     let mut enter_state = state;
     let mut leave_state = state;
-    let mut enter_hover_state = hover_state;
-    let mut leave_hover_state = hover_state;
-    let mut state_for_open = state;
-    let path_for_open = path.clone();
-    let menu_snapshot = card_menu_state.read().clone();
-    let card_menu = if menu_snapshot.open {
+
+    let mut trigger_state = card_menu_state;
+    let menu_trigger = rect()
+        .position(Position::new_absolute().top(8.).right(8.))
+        .width(Size::px(30.))
+        .height(Size::px(30.))
+        .center()
+        .a11y_alt(if is_folder {
+            "Folder actions"
+        } else {
+            "Note actions"
+        })
+        .on_mouse_up(move |event: Event<MouseEventData>| {
+            event.stop_propagation();
+            let mut menu = trigger_state.write();
+            menu.open = !menu.open;
+            menu.renaming = false;
+        })
+        .child(svg_icon(
+            LibraryIcon::MoreHorizontal,
+            theme::color(theme::MUTED),
+            20.,
+        ));
+
+    let card_menu = if menu_snapshot.open && !renaming {
         Some(card_action_menu(
             path.clone(),
             title.clone(),
@@ -456,156 +562,58 @@ fn render_library_card(
             state,
             card_menu_state,
             rename_value,
-            menu_snapshot.renaming,
         ))
     } else {
         None
     };
-    let menu_trigger = {
-        let trigger = rect()
-            .position(Position::new_absolute().top(8.).right(-2.))
-            .width(Size::px(30.))
-            .height(Size::px(30.))
-            .center()
-            .background(Color::TRANSPARENT)
-            .with_corner_radius(6.);
-        let icon = svg_icon(Icon::MoreHorizontal, theme::color(theme::MUTED), 18.);
-        if show_accessible_menu {
-            let mut trigger_state = card_menu_state;
-            Some(
-                trigger
-                    .a11y_alt(if is_folder {
-                        "Folder actions"
-                    } else {
-                        "Note actions"
-                    })
-                    .on_mouse_up(move |event: Event<MouseEventData>| {
-                        event.stop_propagation();
-                        let mut menu = trigger_state.write();
-                        menu.open = !menu.open;
-                        menu.renaming = false;
-                    })
-                    .child(icon),
-            )
-        } else {
-            Some(trigger.child(icon))
-        }
-    };
-    let pin_trigger = if !is_folder && (card_selected || is_pinned) {
-        let mut pin_state = state;
-        let mut pin_menu_state = card_menu_state;
-        let path_for_pin = entry.path.clone();
-        Some(
-            rect()
-                .position(Position::new_absolute().top(8.).right(34.))
-                .width(Size::px(30.))
-                .height(Size::px(30.))
-                .center()
-                .background(Color::TRANSPARENT)
-                .with_corner_radius(6.)
-                .a11y_alt(if is_pinned { "Unpin entry" } else { "Pin entry" })
-                .on_mouse_up(move |event: Event<MouseEventData>| {
-                    event.stop_propagation();
-                    pin_state.write().toggle_pinned(path_for_pin.clone());
-                    let mut menu = pin_menu_state.write();
-                    menu.open = false;
-                    menu.renaming = false;
-                })
-                .child(svg_icon(Icon::Pin, theme::color(theme::MUTED), 18.)),
-        )
-    } else {
-        None
-    };
-    let title_icon = if is_folder {
-        Icon::Folder
-    } else {
-        Icon::FileText
-    };
-    let preview = if is_folder {
-        let children = entry
-            .children_preview
-            .iter()
-            .map(|child| {
-                rect()
-                    .width(Size::fill())
-                    .height(Size::px(40.))
-                    .padding(Gaps::new(7., 8., 7., 8.))
-                    .horizontal()
-                    .cross_align(Alignment::Center)
-                    .spacing(6.)
-                    .background(theme::color(theme::card_preview_background()))
-                    .border(
-                        Border::new()
-                            .fill(theme::color(theme::mix(
-                                theme::BORDER,
-                                theme::SURFACE,
-                                0.70,
-                            )))
-                            .width(1.),
-                    )
-                    .with_corner_radius(8.)
-                    .child(svg_icon(
-                        Icon::FileText,
-                        theme::color(theme::MUTED),
-                        15.,
-                    ))
-                    .child(
-                        label()
-                            .font_size(13.)
-                            .color(theme::color(theme::MUTED))
-                            .text(child.title.as_str().to_owned()),
-                    )
-                    .into_element()
-            })
-            .collect::<Vec<_>>();
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .main_align(Alignment::End)
-            .padding(Gaps::new(0., 0., 2., 0.))
-            .spacing(4.)
-            .children(children)
+
+    let title_row = card_title_row(
+        &title,
+        &path,
+        mode,
+        is_folder,
+        is_drawing,
+        state,
+        card_menu_state,
+        rename_value,
+        renaming,
+    );
+
+    let body = if mode == ViewMode::List {
+        rect().height(Size::px(0.)).into_element()
+    } else if is_folder {
+        folder_preview(entry)
     } else if is_drawing {
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .padding(Gaps::new(6., 0., 0., 0.))
-            .child(
-                label()
-                    .font_size(16.)
-                    .color(theme::color(theme::MUTED))
-                    .text("Excalidraw preview unavailable in native Freya"),
-            )
+        drawing_card_body(&title, featured)
     } else {
-        rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .padding(Gaps::new(6., 0., 0., 0.))
-            .child(
-                label()
-                    .font_size(16.)
-                    .color(theme::color(theme::TEXT))
-                    .text(entry.excerpt.clone()),
-            )
+        note_card_body(entry)
     };
+
     let mut menu_state_for_secondary = card_menu_state;
+    let mut state_for_open = state;
+    let mut click_menu_state = card_menu_state;
+    let click_rename_value = rename_value;
+
     rect()
         .width(if mode == ViewMode::Grid {
-            Size::px(GRID_CARD_WIDTH)
+            Size::px(240.)
         } else {
             Size::fill()
         })
-        .min_width(if mode == ViewMode::Grid {
-            Size::px(240.)
-        } else {
-            Size::px(0.)
-        })
         .height(Size::px(height))
-        .padding(Gaps::new_all(10.))
-        .background(theme::color(theme::card_background()))
+        .padding(if mode == ViewMode::Grid {
+            Gaps::new_all(10.)
+        } else {
+            Gaps::new(8., 10., 8., 10.)
+        })
+        .background(theme::color(theme::mix(
+            theme::SURFACE,
+            theme::BG,
+            0.34,
+        )))
         .border(
             Border::new()
-                .fill(theme::color(if card_selected {
+                .fill(theme::color(if hovered {
                     theme::BORDER_STRONG
                 } else {
                     theme::BORDER
@@ -613,18 +621,8 @@ fn render_library_card(
                 .width(1.),
         )
         .with_corner_radius(10.)
-        .on_pointer_enter(move |_| {
-            *enter_hover_state.write() = true;
-            enter_state.write().set_hovered_target(enter_key.clone());
-            enter_state.write().set_card_action_target(enter_key.clone());
-        })
-        .on_pointer_leave(move |_| {
-            *leave_hover_state.write() = false;
-            // Keep the last card active while an overlay takes focus. The
-            // source library keeps its card actions mounted across search
-            // open/close; a later card enter replaces this target naturally.
-            leave_state.write().clear_hovered_target(&leave_key);
-        })
+        .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
+        .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
         .on_secondary_down(move |_| {
             let mut menu = menu_state_for_secondary.write();
             menu.open = true;
@@ -634,93 +632,273 @@ fn render_library_card(
             if event.button == Some(MouseButton::Right) {
                 return;
             }
-            let mut menu = card_menu_state.write();
+            if renaming {
+                let mut menu = click_menu_state.write();
+                menu.open = false;
+                menu.renaming = false;
+                drop(menu);
+                let mut value = click_rename_value;
+                value.set(String::new());
+                return;
+            }
+
+            let mut menu = click_menu_state.write();
             menu.open = false;
             menu.renaming = false;
             drop(menu);
-            if is_drawing {
-                drawing::open_existing(state_for_open, &path_for_open);
-            } else if is_folder {
-                state_for_open.write().open_directory(path_for_open.clone());
-            } else {
-                open_note_from_library(state_for_open, &path_for_open);
+
+            match &open_target {
+                EntryOpenTarget::Drawing(target) => {
+                    drawing::open_existing(state_for_open, target.as_str());
+                }
+                EntryOpenTarget::Folder(target) => {
+                    state_for_open.write().open_directory(target.as_str().to_string());
+                }
+                EntryOpenTarget::Note(target) => {
+                    let vault_entry = {
+                        let snapshot = state_for_open.read();
+                        snapshot
+                            .page
+                            .as_ref()
+                            .and_then(|page| {
+                                page.entries
+                                    .iter()
+                                    .find(|entry| entry.path == target.as_str())
+                            })
+                            .cloned()
+                    };
+                    if let Some(vault_entry) = vault_entry {
+                        state_for_open.write().open_note(&vault_entry);
+                    } else {
+                        eprintln!(
+                            "[freya][library] action:failure action=open path={} reason=missing_page_entry",
+                            target.as_str()
+                        );
+                        state_for_open.write().error = Some(format!(
+                            "Library entry is no longer present in the current directory: {}",
+                            target.as_str()
+                        ));
+                    }
+                }
+                EntryOpenTarget::Ignored => {}
             }
         })
-        .a11y_alt(title.clone())
-        .maybe_child(pin_trigger)
-        .maybe_child(menu_trigger)
+        .a11y_alt(title)
+        .child(menu_trigger)
         .maybe_child(card_menu)
-        .child(
-            rect()
-                .height(Size::px(30.))
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(8.)
-                .child(svg_icon(
-                    title_icon,
-                    theme::color(theme::TEXT),
-                    22.,
-                ))
-                .child(
-                    label()
-                        .font_size(20.)
-                        .font_weight(FontWeight::BOLD)
-                        .text(title.clone()),
-                ),
-        )
-        .child(if mode == ViewMode::Grid {
-            preview.into_element()
-        } else {
-            rect().height(Size::px(0.)).into_element()
-        })
+        .child(title_row)
+        .child(body)
         .into_element()
 }
 
-fn create_note_from_library(mut state: State<ShellState>) {
-    let (vault, directory) = {
-        let snapshot = state.read();
-        (
-            snapshot.vault.clone(),
-            snapshot.library.current_path.as_str().to_string(),
-        )
+#[allow(clippy::too_many_arguments)]
+fn card_title_row(
+    title: &str,
+    path: &str,
+    mode: ViewMode,
+    is_folder: bool,
+    is_drawing: bool,
+    state: State<ShellState>,
+    card_menu_state: State<CardMenuState>,
+    rename_value: State<String>,
+    renaming: bool,
+) -> Element {
+    let icon = if is_folder {
+        LibraryIcon::Folder
+    } else if is_drawing {
+        LibraryIcon::PenLine
+    } else {
+        LibraryIcon::FileText
     };
-    let Some(vault) = vault else {
-        state.write().error = Some("No vault selected.".to_string());
-        return;
+    let icon_size = if mode == ViewMode::Grid { 22. } else { 20. };
+    let title_size = if mode == ViewMode::Grid { 20. } else { 17. };
+
+    let copy = if renaming {
+        let mut rename_state = state;
+        let path_for_submit = path.to_string();
+        let previous_title = title.to_string();
+        let mut submit_menu_state = card_menu_state;
+        let mut submit_value_state = rename_value;
+        let mut escape_menu_state = card_menu_state;
+        let mut escape_value_state = rename_value;
+
+        rect()
+            .width(Size::fill())
+            .a11y_alt(format!("Rename {title}"))
+            .on_mouse_up(|event: Event<MouseEventData>| event.stop_propagation())
+            .on_global_key_down(move |event: Event<KeyboardEventData>| {
+                if event.key == Key::Named(NamedKey::Escape) {
+                    let mut menu = escape_menu_state.write();
+                    menu.open = false;
+                    menu.renaming = false;
+                    drop(menu);
+                    escape_value_state.set(String::new());
+                }
+            })
+            .child(
+                rect()
+                    .width(Size::fill())
+                    .padding(Gaps::new(4., 6., 4., 6.))
+                    .background(theme::color(theme::SURFACE))
+                    .border(Border::new().fill(theme::color(theme::PRIMARY)).width(1.))
+                    .with_corner_radius(7.)
+                    .child(
+                        Input::new(rename_value)
+                            .width(Size::fill())
+                            .auto_focus(true)
+                            .on_submit(move |next_title: String| {
+                                let next_title = next_title.trim().to_string();
+                                if !next_title.is_empty() && next_title != previous_title {
+                                    let _ = rename_library_entry(
+                                        &mut rename_state,
+                                        &path_for_submit,
+                                        &next_title,
+                                    );
+                                }
+                                let mut menu = submit_menu_state.write();
+                                menu.open = false;
+                                menu.renaming = false;
+                                drop(menu);
+                                submit_value_state.set(String::new());
+                            }),
+                    ),
+            )
+            .into_element()
+    } else {
+        label()
+            .font_size(title_size)
+            .font_weight(FontWeight::BOLD)
+            .text(title.to_string())
+            .into_element()
     };
 
-    eprintln!(
-        "[freya][library] action:start action=Note directory={directory}"
-    );
-    match vault.create_note(Some(directory.clone()), None, None) {
-        Ok(entry) => {
-            let mut next = state.write();
-            next.reload_directory(&directory);
-            next.open_note(&entry);
-            eprintln!(
-                "[freya][library] action:complete action=Note path={}",
-                entry.path
-            );
-        }
-        Err(error) => {
-            eprintln!(
-                "[freya][library] action:failure action=Note directory={directory} error={error}"
-            );
-            state.write().error = Some(error.to_string());
-        }
-    }
+    rect()
+        .width(Size::fill())
+        .horizontal()
+        .spacing(8.)
+        .child(svg_icon(icon, theme::color(theme::TEXT), icon_size))
+        .child(copy)
+        .into_element()
 }
 
-fn open_note_from_library(mut state: State<ShellState>, path: &str) {
-    let vault = state.read().vault.clone();
-    let Some(vault) = vault else {
-        state.write().error = Some("No vault selected.".to_string());
-        return;
+fn folder_preview(entry: &LibraryEntry) -> Element {
+    let rows = entry
+        .children_preview
+        .iter()
+        .take(3)
+        .map(|child| {
+            let icon = match &child.entry_type {
+                EntryType::Folder => LibraryIcon::Folder,
+                EntryType::Drawing => LibraryIcon::PenLine,
+                _ => LibraryIcon::FileText,
+            };
+            rect()
+                .width(Size::fill())
+                .horizontal()
+                .spacing(6.)
+                .child(svg_icon(icon, theme::color(theme::MUTED), 15.))
+                .child(
+                    label()
+                        .font_size(13.)
+                        .color(theme::color(theme::MUTED))
+                        .text(preview_title(child.title.as_str())),
+                )
+                .into_element()
+        })
+        .collect::<Vec<_>>();
+
+    let preview = if rows.is_empty() {
+        rect()
+            .width(Size::fill())
+            .height(Size::px(42.))
+            .padding(Gaps::new(7., 8., 7., 8.))
+            .center()
+            .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.55)))
+            .border(
+                Border::new()
+                    .fill(theme::color(theme::mix(theme::BORDER, theme::BG, 0.70)))
+                    .width(1.),
+            )
+            .with_corner_radius(8.)
+            .child(
+                label()
+                    .font_size(13.)
+                    .color(theme::color(theme::MUTED))
+                    .text("No items yet"),
+            )
+            .into_element()
+    } else {
+        rect()
+            .width(Size::fill())
+            .padding(Gaps::new(7., 8., 7., 8.))
+            .spacing(4.)
+            .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.55)))
+            .border(
+                Border::new()
+                    .fill(theme::color(theme::mix(theme::BORDER, theme::BG, 0.70)))
+                    .width(1.),
+            )
+            .with_corner_radius(8.)
+            .children(rows)
+            .into_element()
     };
-    match vault.find_entry(path) {
-        Ok(entry) => state.write().open_note(&entry),
-        Err(error) => state.write().error = Some(error.to_string()),
-    }
+
+    rect()
+        .height(Size::fill())
+        .padding(Gaps::new(10., 0., 0., 0.))
+        .child(preview)
+        .into_element()
+}
+
+fn drawing_card_body(title: &str, featured: bool) -> Element {
+    rect()
+        .width(Size::fill())
+        .height(Size::px(if featured { 156. } else { 112. }))
+        .padding(Gaps::new(10., 0., 8., 0.))
+        .center()
+        .background(theme::color((255, 255, 255, 255)))
+        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .with_corner_radius(8.)
+        .a11y_alt(format!("{title} drawing"))
+        .child(svg_icon(
+            LibraryIcon::Excalidraw,
+            theme::color(theme::PRIMARY),
+            42.,
+        ))
+        .into_element()
+}
+
+fn note_card_body(entry: &LibraryEntry) -> Element {
+    let tags = entry
+        .tags
+        .iter()
+        .map(|tag| {
+            label()
+                .font_size(12.)
+                .color(theme::color(theme::MUTED))
+                .text(format!("#{tag}"))
+                .into_element()
+        })
+        .collect::<Vec<_>>();
+
+    rect()
+        .height(Size::fill())
+        .padding(Gaps::new(10., 0., 0., 0.))
+        .spacing(8.)
+        .child(
+            label()
+                .color(theme::color(theme::MUTED))
+                .text(entry.excerpt.clone()),
+        )
+        .maybe_child((!tags.is_empty()).then(|| {
+            rect()
+                .horizontal()
+                .content(Content::wrap_spacing(6.))
+                .spacing(6.)
+                .children(tags)
+                .into_element()
+        }))
+        .into_element()
 }
 
 pub(super) fn to_library_entry(entry: &VaultEntry) -> LibraryEntry {
@@ -772,6 +950,15 @@ pub(super) fn to_library_entry(entry: &VaultEntry) -> LibraryEntry {
     )
 }
 
+fn preview_title(title: &str) -> String {
+    title
+        .strip_suffix(".md")
+        .or_else(|| title.strip_suffix(".excalidraw"))
+        .or_else(|| title.strip_suffix(".excalidraw.png"))
+        .unwrap_or(title)
+        .to_string()
+}
+
 fn is_drawing_path(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     lower.ends_with(".excalidraw") || lower.ends_with(".excalidraw.png")
@@ -786,4 +973,25 @@ fn display_title(title: &str, drawing: bool) -> String {
         .or_else(|| title.strip_suffix(".excalidraw.png"))
         .unwrap_or(title)
         .to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_titles_match_the_vue_card_extension_cleanup() {
+        assert_eq!(preview_title("Note.md"), "Note");
+        assert_eq!(preview_title("Sketch.excalidraw"), "Sketch");
+        assert_eq!(preview_title("Sketch.excalidraw.png"), "Sketch");
+        assert_eq!(preview_title("Folder"), "Folder");
+    }
+
+    #[test]
+    fn toolbar_sort_labels_follow_the_tauri_cycle() {
+        assert_eq!(sort_label(SortMode::UpdatedNewest), "Updated newest");
+        assert_eq!(sort_label(SortMode::UpdatedOldest), "Updated oldest");
+        assert_eq!(sort_label(SortMode::TitleAz), "Title A-Z");
+        assert_eq!(sort_label(SortMode::TitleZa), "Title Z-A");
+    }
 }
