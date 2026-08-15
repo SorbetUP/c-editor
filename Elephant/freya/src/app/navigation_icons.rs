@@ -103,7 +103,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn lucide_sources_keep_the_expected_svg_contract() {
+    fn icon_sources_keep_the_expected_svg_contract() {
         for icon in [
             Icon::Search,
             Icon::PanelLeftClose,
@@ -127,12 +127,16 @@ mod tests {
             Icon::FolderPlus,
             Icon::FileText,
             Icon::X,
-            Icon::Excalidraw,
         ] {
             let svg = std::str::from_utf8(source(icon)).expect("Lucide source is UTF-8");
             assert!(svg.contains("viewBox=\"0 0 24 24\""));
             assert!(svg.contains("stroke=\"currentColor\""));
             assert!(svg.contains("stroke-linecap=\"round\""));
         }
+
+        let excalidraw = std::str::from_utf8(source(Icon::Excalidraw))
+            .expect("shared Excalidraw source is UTF-8");
+        assert!(excalidraw.contains("viewBox=\"0 0 64 64\""));
+        assert!(excalidraw.contains("fill=\"#6C63FF\""));
     }
 }
