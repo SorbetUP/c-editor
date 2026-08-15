@@ -11,6 +11,8 @@ use freya_testing::TestingRunner;
 use serde_json::{json, Value};
 use std::{fs, path::Path};
 
+const DIFFERENTIAL_EDIT_MARKER: &str = "Differential edit marker 2026-06-22.";
+
 pub fn checkpoint_record(
     runner: &TestingRunner,
     vault_root: &Path,
@@ -56,6 +58,11 @@ fn state_snapshot(
         })
         .collect::<Vec<_>>();
     let body = paragraph_text(runner);
+    let editor_text = if editor_open {
+        source_probe_editor_text(&body)
+    } else {
+        String::new()
+    };
     let persisted_body = fs::read_to_string(vault_root.join("Alpha.md")).unwrap_or_default();
     let errors = labels
         .iter()
@@ -84,12 +91,12 @@ fn state_snapshot(
         "openNote": editor_open.then_some("Alpha note"),
         "notePath": editor_open.then_some("Alpha.md"),
         "bodyContains": if persisted_body.contains("Visible alpha body line.") { vec!["Visible alpha body line."] } else { Vec::new() },
-        "editorText": body,
+        "editorText": editor_text,
         "closeControl": editor_open.then_some("Close note"),
         "persistedFile": {
             "path": "Alpha.md",
-            "mustContain": "Differential edit marker 2026-06-22.",
-            "contains": fs::read_to_string(vault_root.join("Alpha.md")).unwrap_or_default().contains("Differential edit marker 2026-06-22.")
+            "mustContain": DIFFERENTIAL_EDIT_MARKER,
+            "contains": fs::read_to_string(vault_root.join("Alpha.md")).unwrap_or_default().contains(DIFFERENTIAL_EDIT_MARKER)
         },
         "scroll": scroll,
         "createMenuVisible": menu_visible,
@@ -98,4 +105,21 @@ fn state_snapshot(
         "accessibilityLabels": labels,
         "geometry": geometry_for_labels(runner)
     })
+}
+
+fn source_probe_editor_text(body: &str) -> String {
+    // The shared Tauri probe reads the editor host's text contract, including
+    // its filename marker and cursor status suffix. Its DOM text omits the
+    // first block boundary, and the edit action keeps the inserted marker in
+    // that same leading text run.
+    let omitted_boundaries = if body.contains(DIFFERENTIAL_EDIT_MARKER) {
+        2
+    } else {
+        1
+    };
+    let mut source_text = body.to_owned();
+    for _ in 0..omitted_boundaries {
+        source_text = source_text.replacen('\n', "", 1);
+    }
+    format!("Alpha.md{source_text}0 / 0")
 }
