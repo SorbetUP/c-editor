@@ -96,7 +96,13 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         } else {
             theme::toolbar_button_background()
         }))
-        .with_corner_radius(10.)
+        .with_corner_radius(12.)
+        .border(
+            Border::new()
+                .fill(theme::color(theme::BORDER))
+                .width(1.),
+        )
+        .shadow(Shadow::new().y(8.).blur(22.).color(Color::from_argb(56, 0, 0, 0)))
         .on_mouse_up(move |_| state.write().library.cycle_sort())
         .on_pointer_enter(move |_| sort_enter_state.write().set_hovered_target("toolbar:sort"))
         .on_pointer_leave(move |_| {
@@ -127,7 +133,13 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         } else {
             theme::toolbar_button_background()
         }))
-        .with_corner_radius(10.)
+        .with_corner_radius(12.)
+        .border(
+            Border::new()
+                .fill(theme::color(theme::BORDER))
+                .width(1.),
+        )
+        .shadow(Shadow::new().y(8.).blur(22.).color(Color::from_argb(56, 0, 0, 0)))
         .on_mouse_up(move |_| state.write().library.cycle_view())
         .on_pointer_enter(move |_| view_enter_state.write().set_hovered_target("toolbar:view"))
         .on_pointer_leave(move |_| {
@@ -153,11 +165,11 @@ fn library_toolbar(mut state: State<ShellState>) -> Element {
         .position(Position::new_absolute().left(0.).top(0.))
         .width(Size::fill())
         .height(Size::px(72.))
-        .padding(Gaps::new(8., 12., 8., 12.))
+        .padding(Gaps::new(10., 12., 10., 12.))
         .horizontal()
         .main_align(Alignment::SpaceBetween)
         .child(rect().width(Size::fill()))
-        .child(rect().horizontal().spacing(10.).child(sort).child(view))
+        .child(rect().horizontal().spacing(14.).child(sort).child(view))
         .into_element()
 }
 

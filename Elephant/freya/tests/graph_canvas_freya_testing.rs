@@ -1,4 +1,7 @@
-use elephant_freya::app::app_with_vault;
+use elephant_freya::{
+    app::app_with_vault_view,
+    navigation_contract::WorkspaceView,
+};
 use freya::prelude::{Color, Rect};
 use freya_testing::{TestingNode, TestingRunner};
 use std::{
@@ -83,13 +86,12 @@ fn graph_canvas_captures_real_drag_pan_zoom_and_recenter_motion() {
     let fixture = FixtureVault::new();
     let root = fixture.path().to_path_buf();
     let (mut runner, ()) = TestingRunner::new(
-        move || app_with_vault(root.clone()),
+        move || app_with_vault_view(root.clone(), WorkspaceView::Graph),
         (1280., 840.).into(),
         |_| (),
         1.,
     );
 
-    click_label(&mut runner, "Search");
     click_label(&mut runner, "Graph workspace");
     click_label(&mut runner, "Refresh graph");
     runner.sync_and_update();

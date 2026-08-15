@@ -6,7 +6,7 @@
 //! the real Freya accessibility/layout tree and drive the same pointer path a
 //! user drives; no state is mutated directly by this test.
 
-use elephant_freya::app::app_with_vault;
+use elephant_freya::{app::app_with_vault, theme};
 use freya::{
     elements::image::Image,
     prelude::{Color, Fill, Rect, Size2D},
@@ -244,9 +244,9 @@ fn source_navigation_geometry_labels_and_order_are_exact_at_shared_viewport() {
         has_background(
             &runner,
             "Alpha",
-            Fill::Color(Color::from_rgb(255, 255, 255)),
+            Fill::Color(theme::color(theme::card_background())),
         ),
-        "the real Library card must use the light source surface token"
+        "the real Library card must use the source color-mix surface token"
     );
 
     let all_notes = require_label(&runner, "All notes");

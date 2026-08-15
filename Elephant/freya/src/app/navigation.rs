@@ -195,6 +195,13 @@ pub(super) fn icon_rail(
         .a11y_alt("Workspace navigation")
         .child(nav)
         .child(bottom)
+        .child(
+            rect()
+                .position(Position::new_absolute().top(0.).right(0.))
+                .width(Size::px(1.))
+                .height(Size::fill())
+                .background(theme::token_color(palette, theme::ThemeToken::Border)),
+        )
         .maybe_child(
             state
                 .read()
@@ -415,6 +422,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .height(Size::px(theme::SIDEBAR_ALL_NOTES_HEIGHT))
         .padding(Gaps::new(0., 12., 0., 12.))
         .horizontal()
+        .spacing(10.)
         .cross_align(Alignment::Center)
         .background(theme::color(if all_notes_hovered {
             theme::mix(palette.primary, palette.soft, 0.24)
@@ -433,12 +441,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             theme::token_color(palette, theme::ThemeToken::Text),
             18.,
         ))
-        .child(
-            label()
-                .padding(Gaps::new(0., 0., 0., 10.))
-                .font_size(14.)
-                .text("All notes"),
-        );
+        .child(label().font_size(14.).text("All notes"));
 
     let entries = snapshot
         .page

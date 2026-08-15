@@ -554,7 +554,11 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         .width(Size::fill())
         .theme_colors(
             InputColorsThemePartial::new()
-                .color(theme::color(theme::TEXT))
+                .color(if input_value.is_empty() {
+                    Color::TRANSPARENT
+                } else {
+                    theme::color(theme::TEXT)
+                })
                 .placeholder_color(theme::color(theme::MUTED))
                 .background(Color::TRANSPARENT)
                 .focus_background(Color::TRANSPARENT)
@@ -612,7 +616,7 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         .font_size(22.)
         .font_weight(FontWeight::BOLD)
         .layer(Layer::OverlayLevel(super::search_overlay_view::SEARCH_PANEL_LAYER))
-        .background(Color::from_rgb(246, 248, 252))
+        .background(Color::TRANSPARENT)
         .with_corner_radius(22.)
         .child(svg_icon(Icon::Search, Color::from_rgb(26, 35, 53), 22.))
         .child(search_input)
@@ -630,10 +634,9 @@ pub fn search_overlay(state: State<ExplorerState>, query: State<String>) -> Elem
         } else {
             Size::px(282.)
         })
-        // Freya composites child text through the modal background; keeping
-        // the shell opaque preserves the same readable foreground that the
-        // Vue glass shell gets from its backdrop-filter.
-        .background(Color::from_rgb(246, 248, 252))
+        // The shell owns the translucent glass surface; the bar stays
+        // transparent so the same surface covers both empty and result states.
+        .background(Color::from_argb(96, 246, 248, 252))
         .color(theme::color(theme::TEXT))
         .with_corner_radius(28.)
         .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))

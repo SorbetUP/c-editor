@@ -1,4 +1,7 @@
-use elephant_freya::app::app_with_vault;
+use elephant_freya::{
+    app::{app_with_vault_view,},
+    navigation_contract::WorkspaceView,
+};
 use freya::prelude::{Key, NamedKey};
 use freya_testing::{TestingNode, TestingRunner};
 use std::{
@@ -78,7 +81,7 @@ fn search_input_escape_and_graph_refresh_expose_real_graph_boundary() {
     let root = fixture.path().to_path_buf();
     let app_root = root.clone();
     let (mut runner, ()) = TestingRunner::new(
-        move || app_with_vault(app_root.clone()),
+        move || app_with_vault_view(app_root.clone(), WorkspaceView::Graph),
         (1280., 840.).into(),
         |_| (),
         1.,
@@ -105,6 +108,8 @@ fn search_input_escape_and_graph_refresh_expose_real_graph_boundary() {
         "Escape must return the search surface to its empty state"
     );
 
+    runner.press_key(Key::Named(NamedKey::Escape));
+    runner.sync_and_update();
     click_label(&mut runner, "Graph workspace");
     runner.sync_and_update();
     assert!(

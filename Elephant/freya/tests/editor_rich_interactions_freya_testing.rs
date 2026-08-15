@@ -98,6 +98,14 @@ fn send_modified_key(runner: &mut TestingRunner, key: Key, modifiers: Modifiers)
     runner.sync_and_update();
 }
 
+fn save_note(runner: &mut TestingRunner) {
+    send_modified_key(
+        runner,
+        Key::Character("s".to_string()),
+        Modifiers::ctrl_or_meta(),
+    );
+}
+
 fn paragraph_texts(runner: &TestingRunner, label: &str) -> Vec<String> {
     labeled_nodes(runner, label)
         .into_iter()
@@ -163,13 +171,13 @@ fn task_marker_click_toggles_the_real_muya_task_and_persists() {
 
     open_note(&mut runner);
     click_label(&mut runner, "Task unchecked");
-    click_label(&mut runner, "Save");
+    assert_eq!(paragraph_texts(&runner, "Paragraph"), vec!["ship it"]);
+    click_label(&mut runner, "Close note");
 
     assert_eq!(
         fs::read_to_string(note_path).expect("task click must save the real note"),
         "- [x] ship it"
     );
-    assert_eq!(paragraph_texts(&runner, "Paragraph"), vec!["ship it"]);
 }
 
 #[test]
@@ -242,7 +250,7 @@ fn clipboard_paste_uses_freya_clipboard_and_preserves_muya_rich_markup() {
         span.text.contains("pastedpasted")
             && span.text_style_data.font_weight == Some(FontWeight::BOLD)
     }));
-    click_label(&mut runner, "Save");
+    save_note(&mut runner);
     assert_eq!(fs::read_to_string(note_path).unwrap(), "**pastedpasted**");
 }
 
@@ -286,7 +294,7 @@ fn ime_preedit_is_sent_through_the_real_muya_composition_group() {
     });
     runner.sync_and_update();
     assert_eq!(paragraph_texts(&runner, "Paragraph"), vec!["Aé"]);
-    click_label(&mut runner, "Save");
+    save_note(&mut runner);
     assert_eq!(fs::read_to_string(note_path).unwrap(), "Aé");
 
     let cancel_fixture = FixtureVault::new("A");
@@ -317,6 +325,6 @@ fn ime_preedit_is_sent_through_the_real_muya_composition_group() {
     });
     cancel_runner.sync_and_update();
     assert_eq!(paragraph_texts(&cancel_runner, "Paragraph"), vec!["A"]);
-    click_label(&mut cancel_runner, "Save");
+    save_note(&mut cancel_runner);
     assert_eq!(fs::read_to_string(cancel_note_path).unwrap(), "A");
 }

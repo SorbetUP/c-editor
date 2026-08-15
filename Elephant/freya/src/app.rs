@@ -260,6 +260,25 @@ pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
     app_shell(state)
 }
 
+/// Runtime entry point for hosts that already resolved a workspace view.
+///
+/// The normal shell starts in Notes, while add-on/host navigation can select
+/// another registered view before mounting the same production shell. Keeping
+/// that selection at the state boundary makes the Explorer and graph routes
+/// testable without adding a test-only renderer or hidden UI control.
+pub fn app_with_vault_view(
+    root: impl Into<PathBuf>,
+    view: WorkspaceView,
+) -> impl IntoElement {
+    let root = root.into();
+    let state = use_state(move || {
+        let mut state = shell_runtime::load_from_root(root.clone());
+        state.view = view.clone();
+        state
+    });
+    app_shell(state)
+}
+
 /// Owns the sidebar's hook lifecycle independently from the root shell.
 ///
 /// `sidebar_nav` uses `use_a11y()`. The sidebar is mounted only after a vault

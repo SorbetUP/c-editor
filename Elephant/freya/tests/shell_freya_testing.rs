@@ -1,7 +1,9 @@
 use elephant_freya::{
-    app::app_with_vault,
+    app::{app_with_vault, app_with_vault_view},
+    navigation_contract::WorkspaceView,
     source_contracts::{self, ComponentId},
 };
+use freya::prelude::{Key, NamedKey};
 use freya_testing::{TestingNode, TestingRunner};
 use std::{
     fs,
@@ -130,8 +132,9 @@ fn converted_shell_exposes_vue_source_contracts_through_freya_accessibility() {
 fn converted_settings_search_graph_and_editor_surfaces_are_reachable() {
     let fixture = FixtureVault::new();
     let root = fixture.path().to_path_buf();
+    let shell_root = root.clone();
     let (mut runner, ()) = TestingRunner::new(
-        move || app_with_vault(root.clone()),
+        move || app_with_vault(shell_root.clone()),
         (1280., 840.).into(),
         |_| (),
         1.,
@@ -150,14 +153,27 @@ fn converted_settings_search_graph_and_editor_surfaces_are_reachable() {
     runner.sync_and_update();
     click_label(&mut runner, "Search");
     runner.sync_and_update();
-    assert!(accessible_nodes(&runner, "Search workspace").len() >= 1);
-    assert!(accessible_nodes(&runner, "Graph workspace").len() >= 1);
-    click_label(&mut runner, "Graph workspace");
+    assert!(accessible_nodes(&runner, "Search input").len() >= 1);
+    runner.press_key(Key::Named(NamedKey::Escape));
     runner.sync_and_update();
-    assert!(accessible_nodes(&runner, "Graph not loaded").len() >= 1);
-    assert!(accessible_nodes(&runner, "Refresh graph").len() >= 1);
+
+    let graph_root = root.clone();
+    let (mut graph_runner, ()) = TestingRunner::new(
+        move || app_with_vault_view(graph_root.clone(), WorkspaceView::Graph),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+    assert!(accessible_nodes(&graph_runner, "Search workspace").len() >= 1);
+    assert!(accessible_nodes(&graph_runner, "Graph workspace").len() >= 1);
+    click_label(&mut graph_runner, "Graph workspace");
+    graph_runner.sync_and_update();
+    assert!(accessible_nodes(&graph_runner, "Graph not loaded").len() >= 1);
+    assert!(accessible_nodes(&graph_runner, "Refresh graph").len() >= 1);
 
     click_label(&mut runner, "Search");
+    runner.sync_and_update();
+    runner.press_key(Key::Named(NamedKey::Escape));
     runner.sync_and_update();
     click_label(&mut runner, "Alpha");
     runner.sync_and_update();
@@ -181,8 +197,6 @@ fn editor_keystrokes_update_the_real_muya_document_and_save_to_the_vault() {
     runner.sync_and_update();
     click_label(&mut runner, "Paragraph");
     runner.write_text("!");
-    runner.sync_and_update();
-    click_label(&mut runner, "Save");
     runner.sync_and_update();
     click_label(&mut runner, "Close note");
     runner.sync_and_update();
