@@ -590,15 +590,18 @@ pub fn search_overlay(
             let mut submit_state = state;
             move |value: String| submit_state.write().submit_or_open_search(value)
         });
-    let search_input = rect()
+    let mut search_input = rect()
         // Keep the input identity stable while the debounced search result
         // state changes. Re-keying on the result query remounts the native
         // input and moves the caret back to the start, which is observable
         // during the real search flow even though the functional query is
         // still correct.
         .key(("search-input-host", "search"))
-        .width(Size::fill())
-        .a11y_alt("Search input")
+        .width(Size::fill());
+    if interactive {
+        search_input = search_input.a11y_alt("Search input");
+    }
+    let search_input = search_input
         .a11y_builder({
             let accessibility_value = input_value.clone();
             move |node| node.set_value(accessibility_value)
