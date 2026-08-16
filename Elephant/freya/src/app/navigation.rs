@@ -1,6 +1,7 @@
 //! Freya conversion of AppShell's TopVaultBar, IconRail and SidebarNav.
 
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 
 use freya::prelude::*;
 
@@ -590,6 +591,7 @@ fn activate_rail_action(mut state: State<ShellState>, item_id: &str) {
 }
 
 fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    let vault_item_areas = Arc::new(Mutex::new(std::collections::HashMap::<String, Area>::new()));
     let snapshot = state.read().clone();
     let vault_name = snapshot
         .vault
@@ -650,7 +652,11 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
             let id = vault.id.clone();
             let name = vault.name.clone();
             let is_active = active_id.as_deref() == Some(vault.id.as_str());
-            let mut switch_state = state;
+            let area_id = id.clone();
+            let press_id = id.clone();
+            let item_areas = Arc::clone(&vault_item_areas);
+            let press_areas = Arc::clone(&vault_item_areas);
+            let mut press_state = state;
             panel = panel.child(
                 rect()
                     .width(Size::fill())
@@ -668,7 +674,37 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
                     ))
                     .with_corner_radius(6.)
                     .a11y_alt(name.clone())
-                    .on_mouse_up(move |_| switch_state.write().activate_vault(&id))
+                    .on_sized(move |event: Event<SizedEventData>| {
+                        if let Ok(mut areas) = item_areas.lock() {
+                            areas.insert(area_id.clone(), event.area);
+                        }
+                    })
+                    // Freya does not consistently bubble mouse-up from a
+                    // text descendant to its accessible row. Keep the
+                    // semantic row target, but route the real pointer press
+                    // through the measured row so icon and text clicks share
+                    // the same domain action.
+                    .on_global_pointer_press(move |event: Event<PointerEventData>| {
+                        if !event.is_primary() {
+                            return;
+                        }
+                        let Ok(areas) = press_areas.lock() else {
+                            return;
+                        };
+                        let Some(area) = areas.get(&press_id).copied() else {
+                            return;
+                        };
+                        let point = event.global_location();
+                        if point.x < f64::from(area.min_x())
+                            || point.x > f64::from(area.max_x())
+                            || point.y < f64::from(area.min_y())
+                            || point.y > f64::from(area.max_y())
+                        {
+                            return;
+                        }
+                        eprintln!("[freya][vault] action=switch-control-press id={press_id}");
+                        press_state.write().activate_vault(&press_id);
+                    })
                     .child(svg_icon(
                         Icon::Vault,
                         theme::token_color(

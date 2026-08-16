@@ -62,6 +62,18 @@ describe('Rust editor addon runtime', () => {
     expect(renderer).toContain("data-elephant-editor-kind")
     expect(runtime).toContain("host.provide('editor.runtime'")
     expect(runtime).toContain("node.classList.contains('ag-fence-code')")
-    expect(codeExecution).toContain("runtime?.engine === 'rust'")
+    expect(codeExecution).toContain("['rust', 'muya-js'].includes(runtime.engine)")
+  })
+
+  it('keeps the code addon compatible with both published Muya runtimes', () => {
+    const codeExecution = read('addons/official/code-execution/main.js')
+    expect(codeExecution).toContain("['rust', 'muya-js'].includes(runtime.engine)")
+    expect(codeExecution).toContain("queryBlocks?.({ kind: 'code_block' })")
+  })
+
+  it('keeps the pinned addon materialization patch reproducible in CI', () => {
+    const syncScript = read('build/scripts/sync-elephant-addons.mjs')
+    expect(syncScript).toContain('applyHostCompatibilityPatches')
+    expect(syncScript).toContain("runtime && ['rust', 'muya-js'].includes(runtime.engine)")
   })
 })

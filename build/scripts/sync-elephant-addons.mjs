@@ -66,6 +66,25 @@ const ensureLink = (linkName, target) => {
   }
 }
 
+const applyHostCompatibilityPatches = () => {
+  // The pinned addon package predates the production JavaScript Muya runtime
+  // resource. Both runtimes expose the same queryBlocks/watch contract, so
+  // keep the compatibility decision explicit and reproducible at the point
+  // where the pinned package is materialized. This is deliberately guarded by
+  // an exact source match: an upstream addon change must be reviewed instead
+  // of being silently rewritten.
+  const codeExecutionPath = path.join(cacheRoot, 'official', 'code-execution', 'main.js')
+  const source = fs.readFileSync(codeExecutionPath, 'utf8')
+  const legacy = "this.activeRuntime = runtime?.engine === 'rust' ? runtime : null"
+  const compatible = "this.activeRuntime = runtime && ['rust', 'muya-js'].includes(runtime.engine) ? runtime : null"
+  if (source.includes("['rust', 'muya-js'].includes(runtime.engine)")) return
+  if (!source.includes(legacy)) {
+    throw new Error(`Unsupported code-execution addon source; expected runtime guard in ${codeExecutionPath}`)
+  }
+  fs.writeFileSync(codeExecutionPath, source.replace(legacy, compatible), 'utf8')
+  console.log('[addons] applied code-execution Muya runtime compatibility patch')
+}
+
 const materializeNativeServices = () => {
   const skippedExplicitly = process.env.ELEPHANT_SKIP_NATIVE_ADDON_BUILD === '1'
   if (skippedExplicitly) {
@@ -116,5 +135,6 @@ const materializeNativeServices = () => {
 
 ensureLink('addons', cacheRoot)
 ensureLink('packs', path.join(cacheRoot, 'packs'))
+applyHostCompatibilityPatches()
 materializeNativeServices()
 console.log(`[addons] materialized Elephant-Addons ${pinnedRef}`)

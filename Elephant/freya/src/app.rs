@@ -5,6 +5,7 @@
 
 mod calendar_view;
 mod chat_view;
+mod code_execution;
 mod drawing;
 mod editor_view;
 mod explorer;
@@ -75,6 +76,7 @@ pub(super) struct ShellState {
     chat: chat_view::ChatState,
     models: models_view::ModelsState,
     sync: crate::sync_adapter::SyncState,
+    code_execution: code_execution::CodeExecutionState,
 }
 
 impl ShellState {
@@ -111,6 +113,7 @@ impl ShellState {
             chat: chat_view::ChatState::default(),
             models: models_view::ModelsState::default(),
             sync: crate::sync_adapter::SyncState::default(),
+            code_execution: code_execution::CodeExecutionState::default(),
         }
     }
 
@@ -203,6 +206,7 @@ impl ShellState {
     }
 
     pub(super) fn activate_vault(&mut self, id: &str) {
+        eprintln!("[freya][vault] action=switch-request id={id}");
         let mut registry = self.vault_registry.clone();
         let Ok(descriptor) = registry.activate(id) else {
             self.error = Some(format!("Unknown vault ID: {id}"));

@@ -163,3 +163,33 @@ a été exécutée mais échoue encore sur `.elephant-physical-code-run` avec
 `Create menu is incomplete` (`excalidrawLogo.visible: false`) avant le parcours
 complet. Les preuves fenêtre Freya native, acceptance packagée, restart
 inter-runtime et comparaison visuelle stricte restent à établir.
+
+## Mise à jour fonctionnelle — 2026-08-16 (suite)
+
+Le parcours code est maintenant implémenté avant son habillage : le bloc garde
+son éditeur Muya éditable et délègue Copy/Run au service officiel versionné,
+avec sortie, code de sortie et erreur visibles. Le sélecteur de coffres utilise
+également le chemin de pointer press mesuré lorsque le texte ne remonte pas
+vers la ligne accessible ; le changement de coffre et la persistance du
+registre sont couverts par un test réel.
+
+Preuves supplémentaires :
+
+```text
+cargo test --manifest-path Elephant/freya/Cargo.toml --test code_execution_freya_testing -- --test-threads=1 : 1 passed
+cargo test --manifest-path Elephant/freya/Cargo.toml --test vault_registry_freya_testing -- --test-threads=1 : 1 passed
+Freya integration loop (toutes les suites sauf differential_freya_capture) : PASS
+pnpm test:desktop:acceptance : PASS sur le build Tauri dev final, 1216 logs
+```
+
+La compatibilité `muya-js` du paquet officiel épinglé est appliquée par
+`build/scripts/sync-elephant-addons.mjs` avec une garde de source exacte ; elle
+est donc rejouée en CI fraîche et ne dépend pas du cache local ignoré.
+
+La capture native Tauri a produit des écrans réels, mais son parcours
+différentiel reste **NOT PROVEN** : après les actions de recherche et de
+navigation, le runner n’a pas trouvé `[data-testid="muya-runtime-editor"]` au
+moment d’éditer la note et a bloqué les actions suivantes. Le parcours Freya
+correspondant passe avec 14 actions et ses PNG sont conservés sous
+`/private/tmp/codex-freya-differential-final/freya/`. Cela ne permet pas encore
+de déclarer l’égalité pixel ou la parité complète Tauri/Freya.

@@ -5,6 +5,7 @@
 //! real `EditorDocument`; the chrome never substitutes a display-only buffer.
 
 use freya::{
+    clipboard::Clipboard,
     prelude::*,
     text_edit::{use_editable, EditableConfig, EditableEvent, EditorLine, TextEditor, UseEditable},
 };
@@ -1516,6 +1517,164 @@ fn render_block_children(
         .into_element()
 }
 
+fn render_code_block(
+    mut state: State<ShellState>,
+    document: &Document,
+    node_id: NodeId,
+    language: Option<&str>,
+    autosave_generation: State<u64>,
+    palette: theme::ThemePalette,
+    text_scale: f32,
+) -> Element {
+    let mut nodes = Vec::new();
+    editable_text_nodes(document, node_id, &mut nodes);
+    let code = nodes
+        .iter()
+        .map(|(_, value)| value.as_str())
+        .collect::<String>();
+    let language = language.unwrap_or("text").to_owned();
+    let execution = state.read().code_execution.clone();
+    let running = execution.running && execution.block_id == Some(node_id);
+    let has_output = execution.block_id == Some(node_id)
+        && (!execution.output.is_empty() || execution.error.is_some());
+
+    let copy_code = code.clone();
+    let copy = action_button(
+        state,
+        "copy-code-block",
+        "Copy",
+        "Copy code block",
+        !copy_code.is_empty(),
+        false,
+        None,
+        62.,
+        true,
+        palette,
+        move |_| {
+            if let Err(error) = Clipboard::set(copy_code.clone()) {
+                state.write().error = Some(format!("Unable to copy code block: {error:?}"));
+            } else {
+                eprintln!("[freya][editor] action=copy-code-block node={node_id:?}");
+            }
+        },
+    );
+    let run_code = code.clone();
+    let run_language = language.clone();
+    let run = action_button(
+        state,
+        "run-code-block",
+        if running { "Running…" } else { "Run" },
+        if running {
+            "Code block is running"
+        } else {
+            "Run code block"
+        },
+        !running && !run_code.is_empty(),
+        running,
+        Some(palette.primary),
+        72.,
+        true,
+        palette,
+        move |_| {
+            let Some(root) = state.read().vault.as_ref().map(|vault| vault.root().to_path_buf()) else {
+                state.write().error = Some("Cannot run code without an active vault.".to_owned());
+                return;
+            };
+            {
+                let mut shell = state.write();
+                shell.error = None;
+                shell.code_execution = super::code_execution::CodeExecutionState {
+                    block_id: Some(node_id),
+                    language: run_language.clone(),
+                    running: true,
+                    output: format!("Running {run_language}…"),
+                    exit_code: None,
+                    error: None,
+                };
+            }
+            let execution_state = state;
+            let language_for_execution = run_language.clone();
+            let code_for_execution = run_code.clone();
+            spawn(async move {
+                let result = super::code_execution::execute(&root, &language_for_execution, &code_for_execution);
+                let mut execution_state = execution_state;
+                let mut shell = execution_state.write();
+                shell.code_execution.running = false;
+                match result {
+                    Ok(result) => {
+                        shell.code_execution.output = if result.output.is_empty() {
+                            format!("Exited with code {}", result.exit_code)
+                        } else {
+                            result.output
+                        };
+                        shell.code_execution.exit_code = Some(result.exit_code);
+                        eprintln!("[freya][editor] action=run-code-block-complete node={node_id:?}");
+                    }
+                    Err(error) => {
+                        eprintln!("[freya][editor] action=run-code-block-failure node={node_id:?} error={error}");
+                        shell.code_execution.error = Some(error.clone());
+                        shell.code_execution.output.clear();
+                        shell.code_execution.exit_code = Some("error".to_owned());
+                    }
+                }
+            });
+        },
+    );
+
+    let controls = rect()
+        .width(Size::fill())
+        .horizontal()
+        .main_align(Alignment::SpaceBetween)
+        .cross_align(Alignment::Center)
+        .child(
+            label()
+                .font_family(CODE_FONT)
+                .font_size(11. * text_scale)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(palette.muted))
+                .text(language),
+        )
+        .child(rect().horizontal().spacing(6.).child(copy).child(run));
+    let mut frame = rect()
+        .width(Size::fill())
+        .spacing(8.)
+        .padding(Gaps::new_all(12.))
+        .background(theme::color(palette.soft))
+        .border(Border::new().fill(theme::color(palette.border)).width(1.))
+        .with_corner_radius(8.)
+        .child(controls)
+        .child(editable_block(
+            state,
+            autosave_generation,
+            node_id,
+            "Code block",
+            BlockTextStyle {
+                font_size: 14.,
+                line_height: 1.45,
+                code: true,
+                ..BlockTextStyle::default()
+            },
+            palette,
+            text_scale,
+        ));
+    if has_output {
+        let output = execution.error.unwrap_or(execution.output);
+        frame = frame.child(
+            label()
+                .font_family(CODE_FONT)
+                .font_size(12. * text_scale)
+                .color(theme::color(if execution.exit_code.as_deref() == Some("0") {
+                    palette.text
+                } else {
+                    palette.danger
+                }))
+                .a11y_alt("Code execution output")
+                .text(output),
+        );
+    }
+    frame.a11y_alt("Code block").into_element()
+}
+
 fn render_block(
     state: State<ShellState>,
     document: &Document,
@@ -1590,44 +1749,15 @@ fn render_block(
             palette,
             text_scale,
         ),
-        NodeKind::Block(BlockKind::CodeBlock { language, .. }) => {
-            let mut children = Vec::new();
-            if let Some(language) = language.as_deref().filter(|value| !value.is_empty()) {
-                children.push(
-                    label()
-                        .font_family(CODE_FONT)
-                        .font_size(11. * text_scale)
-                        .font_weight(FontWeight::BOLD)
-                        .color(theme::color(palette.muted))
-                        .text(language.to_string())
-                        .into_element(),
-                );
-            }
-            children.push(editable_block(
-                state,
-                autosave_generation,
-                node_id,
-                "Code block",
-                BlockTextStyle {
-                    font_size: 14.,
-                    line_height: 1.45,
-                    code: true,
-                    ..BlockTextStyle::default()
-                },
-                palette,
-                text_scale,
-            ));
-            rect()
-                .width(Size::fill())
-                .spacing(8.)
-                .padding(Gaps::new_all(12.))
-                .background(theme::color(palette.soft))
-                .border(Border::new().fill(theme::color(palette.border)).width(1.))
-                .with_corner_radius(8.)
-                .children(children)
-                .a11y_alt("Code block")
-                .into_element()
-        }
+        NodeKind::Block(BlockKind::CodeBlock { language, .. }) => render_code_block(
+            state,
+            document,
+            node_id,
+            language.as_deref().filter(|value| !value.is_empty()),
+            autosave_generation,
+            palette,
+            text_scale,
+        ),
         NodeKind::Block(BlockKind::ThematicBreak) => rect()
             .width(Size::fill())
             .height(Size::px(1.))

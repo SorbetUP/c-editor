@@ -21,6 +21,7 @@ impl ShellState {
             view.source_id()
         );
         self.editor = None;
+        self.code_execution = Default::default();
         self.drawing = None;
         self.drawing_path = None;
         self.menu_open = false;
@@ -73,6 +74,7 @@ impl ShellState {
     fn open_directory_with_history(&mut self, path: String, record: bool) {
         self.view = WorkspaceView::Notes;
         self.editor = None;
+        self.code_execution = Default::default();
         self.editor_tag_draft = None;
         self.library.current_path = RelativePath::from(path.as_str());
         self.reload_directory(&path);
@@ -125,6 +127,7 @@ impl ShellState {
         match EditorDocument::load(&path) {
             Ok(document) => {
                 self.editor = Some(document);
+                self.code_execution = Default::default();
                 self.drawing = None;
                 self.drawing_path = None;
                 self.editor_tag_draft = None;

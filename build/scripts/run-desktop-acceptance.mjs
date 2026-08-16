@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -53,11 +53,16 @@ const startChild = async() => {
   child.stderr.on('data', (chunk) => collect('[tauri-app:error] ', chunk))
   const deadline = Date.now() + 120000
   while (Date.now() < deadline) {
-    const match = output.slice(outputOffset).match(/ELEPHANT_ACCEPTANCE_TAURI_PORT=(\d+)/)
-    if (match) {
-      endpoint = `http://127.0.0.1:${Number(match[1])}`
-      return endpoint
-    }
+    const startupOutput = output.slice(outputOffset)
+    const match = startupOutput.match(/ELEPHANT_ACCEPTANCE_TAURI_PORT=(\d+)/)
+    if (match) endpoint = `http://127.0.0.1:${Number(match[1])}`
+    // build_dev.sh starts Tauri while its Vite beforeDevCommand is still
+    // compiling Muya WASM. The first renderer can report ready before Vite
+    // finishes and is then reloaded; wait for the stable post-build renderer
+    // marker before sending commands so an install is never lost in flight.
+    const viteReadyAt = startupOutput.search(/VITE v\S+\s+ready in\s+/)
+    const rendererReadyAt = startupOutput.lastIndexOf('[acceptance-tauri] renderer:ready')
+    if (endpoint && viteReadyAt >= 0 && rendererReadyAt > viteReadyAt) return endpoint
     if (child.exitCode !== null) throw new Error(`Tauri exited before acceptance server started (${child.exitCode})`)
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 250))
   }
@@ -269,9 +274,9 @@ try {
     await command('waitUntilGone', '[data-entry-rename-input]', 5000)
     const committedRename = await command('readDom', '.en-note-card.is-folder')
     const listView = await command('readDom', '.en-library-grid')
-    await command('click', '[aria-label="List view"]')
+    await command('click', '[aria-label="Show notes as list"]')
     const compactListView = await command('readDom', '.en-library-grid')
-    await command('click', '[aria-label="Grid view"]')
+    await command('click', '[aria-label="Show notes as grid"]')
     if (!committedRename.text.includes('Acceptance renamed folder') || !compactListView.attributes.class?.includes('list')) {
       throw new Error(`Inline folder rename or list view failed: ${JSON.stringify({ committedRename, listView, compactListView })}`)
     }
@@ -611,14 +616,15 @@ try {
   await command('press', '.en-create-button-primary', 'Escape')
   await command('waitUntilGone', '.en-create-menu-popover', 10000)
   const listBefore = await command('readDom', '.en-library-grid')
-  await command('click', '[aria-label="List view"]')
+  await command('click', '[aria-label="Show notes as list"]')
   const listView = await command('readDom', '.en-library-grid')
-  await command('click', '[aria-label="Grid view"]')
-  await command('click', '[aria-label="Title A-Z"]')
+  await command('click', '[aria-label="Show notes as grid"]')
+  await command('click', '[aria-label="Sort: Updated newest"]')
+  await command('click', '[aria-label="Sort: Updated oldest"]')
   const sortedLibrary = await command('readDom', '.en-library-grid')
-  const sortControl = await command('readDom', '[aria-label="Title A-Z"]')
+  const sortControl = await command('readDom', '[aria-label="Sort: Title A-Z"]')
   const railVault = await command('readDom', '.en-rail-bottom .en-rail-vault-wrap')
-  if (!listView.attributes.class?.includes('list') || !sortedLibrary.exists || sortControl.attributes['aria-pressed'] !== 'true' || !railVault.exists) throw new Error(`Library view/sort/rail round-trip failed: ${JSON.stringify({ listBefore, listView, sortedLibrary, sortControl, railVault })}`)
+  if (!listView.attributes.class?.includes('list') || !sortedLibrary.exists || sortControl.attributes['data-sort'] !== 'title-az' || !railVault.exists) throw new Error(`Library view/sort/rail round-trip failed: ${JSON.stringify({ listBefore, listView, sortedLibrary, sortControl, railVault })}`)
   const navigationCycles = []
   for (let cycle = 1; cycle <= 3; cycle += 1) {
     await command('click', '.en-rail-sidebar-toggle')
@@ -695,8 +701,11 @@ try {
   const restartedState = await command('readState')
   const restartedNotes = await command('listNotes')
   const restartedNote = await command('readNote', 'Acceptance.md')
-  if (restartedState.activeVault !== vaultRoot || !restartedNotes.some((entry) => entry.path === 'Acceptance.md') || !restartedNote.content.includes('real Tauri command runner')) {
-    throw new Error(`Vault/content did not persist after restart: ${JSON.stringify({ restartedState, restartedNotes, restartedNote })}`)
+  const restartVaultMatches = realpathSync(String(restartedState.activeVault || '')) === realpathSync(vaultRoot)
+  const restartNoteListed = restartedNotes.some((entry) => entry.path === 'Acceptance.md')
+  const restartContentPersisted = restartedNote.content.includes('real Tauri command runner')
+  if (!restartVaultMatches || !restartNoteListed || !restartContentPersisted) {
+    throw new Error(`Vault/content did not persist after restart: ${JSON.stringify({ restartVaultMatches, restartNoteListed, restartContentPersisted, restartedState, restartedNotes, restartedNote })}`)
   }
   const restartPersistence = { health: restartedHealth, capabilities: restartedCapabilities, state: restartedState, notes: restartedNotes, note: restartedNote }
   const packagedRun = Boolean(process.env.ELEPHANT_ACCEPTANCE_APP_PATH)
