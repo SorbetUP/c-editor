@@ -21,6 +21,7 @@ mod shell_gestures;
 mod shell_history;
 mod shell_preferences;
 mod shell_runtime;
+mod sync_view;
 mod vault_picker;
 mod visual_transition;
 mod wiki_view;
@@ -35,6 +36,7 @@ use crate::{
     source_contracts::{self, ComponentId},
     theme,
     vault_adapter::{PageRequest, VaultAdapter, VaultPage},
+    vault_registry::VaultRegistry,
 };
 
 use shell_gestures::{RailDragState, SidebarResizeState};
@@ -46,6 +48,7 @@ pub(super) struct ShellState {
     sidebar_visible: bool,
     sidebar_width: SidebarWidth,
     vault: Option<VaultAdapter>,
+    vault_registry: VaultRegistry,
     page: Option<VaultPage>,
     library: LibraryState,
     menu_open: bool,
@@ -54,12 +57,14 @@ pub(super) struct ShellState {
     vault_menu_open: bool,
     search_open: bool,
     settings_open: bool,
+    settings_target_section: Option<String>,
     editor: Option<EditorDocument>,
     editor_tag_draft: Option<String>,
     error: Option<String>,
     navigation_history: Vec<NavigationTarget>,
     navigation_index: usize,
     rail_order: Vec<String>,
+    settings_revision: u64,
     rail_drag: Option<RailDragState>,
     rail_drop_target: Option<String>,
     sidebar_resize: Option<SidebarResizeState>,
@@ -69,6 +74,7 @@ pub(super) struct ShellState {
     calendar: calendar_view::CalendarState,
     chat: chat_view::ChatState,
     models: models_view::ModelsState,
+    sync: crate::sync_adapter::SyncState,
 }
 
 impl ShellState {
@@ -78,6 +84,7 @@ impl ShellState {
             sidebar_visible: true,
             sidebar_width: SidebarWidth::default(),
             vault: None,
+            vault_registry: VaultRegistry::default(),
             page: None,
             library: LibraryState::default(),
             menu_open: false,
@@ -86,12 +93,14 @@ impl ShellState {
             vault_menu_open: false,
             search_open: false,
             settings_open: false,
+            settings_target_section: None,
             editor: None,
             editor_tag_draft: None,
             error: None,
             navigation_history: Vec::new(),
             navigation_index: 0,
             rail_order: shell_preferences::default_rail_order(),
+            settings_revision: 0,
             rail_drag: None,
             rail_drop_target: None,
             sidebar_resize: None,
@@ -101,6 +110,7 @@ impl ShellState {
             calendar: calendar_view::CalendarState::default(),
             chat: chat_view::ChatState::default(),
             models: models_view::ModelsState::default(),
+            sync: crate::sync_adapter::SyncState::default(),
         }
     }
 
@@ -108,23 +118,30 @@ impl ShellState {
         // Keep the environment override for deterministic tests and developer
         // workflows, but it is no longer required for normal application use.
         if let Some(raw_root) = env::var_os("ELEPHANT_FREYA_VAULT") {
-            return shell_runtime::load_from_root(PathBuf::from(raw_root));
+            return Self::load_root_with_registry(PathBuf::from(raw_root));
         }
 
-        match vault_picker::remembered_vault() {
-            Ok(Some(root)) => {
-                let loaded = shell_runtime::load_from_root(root);
-                if loaded.vault.is_some() {
-                    loaded
-                } else {
-                    let mut state = Self::empty();
-                    state.error = loaded.error;
-                    state
-                }
-            }
-            Ok(None) => Self::empty(),
+        let registry = match VaultRegistry::load() {
+            Ok(registry) => registry,
             Err(error) => {
                 let mut state = Self::empty();
+                state.error = Some(format!("Unable to load the vault registry: {error}"));
+                return state;
+            }
+        };
+        if let Some(root) = registry.active().map(|vault| PathBuf::from(&vault.path)) {
+            return Self::load_root_with_registry(root);
+        }
+        match vault_picker::remembered_vault() {
+            Ok(Some(root)) => Self::load_root_with_registry(root),
+            Ok(None) => {
+                let mut state = Self::empty();
+                state.vault_registry = registry;
+                state
+            }
+            Err(error) => {
+                let mut state = Self::empty();
+                state.vault_registry = registry;
                 state.error = Some(format!(
                     "Unable to restore the previously selected vault: {error}"
                 ));
@@ -133,10 +150,39 @@ impl ShellState {
         }
     }
 
+    fn load_root_with_registry(root: PathBuf) -> Self {
+        let mut registry = match VaultRegistry::load() {
+            Ok(registry) => registry,
+            Err(error) => {
+                let mut state = Self::empty();
+                state.error = Some(format!("Unable to load the vault registry: {error}"));
+                return state;
+            }
+        };
+        let mut loaded = shell_runtime::load_from_root(root);
+        if let Some(canonical_root) = loaded.vault.as_ref().map(|vault| vault.root().to_path_buf()) {
+            if let Err(error) = registry.add_or_activate(&canonical_root) {
+                loaded.error = Some(format!("Unable to register the active vault: {error}"));
+            } else if let Err(error) = registry.persist() {
+                eprintln!("[freya][vault-registry] action=persist-failure error={error}");
+            }
+            loaded.vault_registry = registry;
+        }
+        loaded
+    }
+
     fn open_vault(&mut self, root: PathBuf) {
         eprintln!("[freya][vault] action:open-start path={}", root.display());
         let mut next = shell_runtime::select_root(root);
         if let Some(canonical_root) = next.vault.as_ref().map(|vault| vault.root().to_path_buf()) {
+            let mut registry = self.vault_registry.clone();
+            if let Err(error) = registry.add_or_activate(&canonical_root) {
+                next.error = Some(format!("Vault opened, but it could not be registered: {error}"));
+            } else if let Err(error) = registry.persist() {
+                eprintln!("[freya][vault-registry] action=persist-failure error={error}");
+                next.error = Some(format!("Vault opened, but its registry could not be saved: {error}"));
+            }
+            next.vault_registry = registry;
             if let Err(error) = vault_picker::remember_vault(&canonical_root) {
                 eprintln!("[freya][vault] action:remember-failure error={error}");
                 next.error = Some(format!(
@@ -154,6 +200,73 @@ impl ShellState {
             );
         }
         *self = next;
+    }
+
+    pub(super) fn activate_vault(&mut self, id: &str) {
+        let mut registry = self.vault_registry.clone();
+        let Ok(descriptor) = registry.activate(id) else {
+            self.error = Some(format!("Unknown vault ID: {id}"));
+            return;
+        };
+        eprintln!("[freya][vault] action=switch-start id={} path={}", descriptor.id, descriptor.path);
+        let mut next = shell_runtime::load_from_root(PathBuf::from(&descriptor.path));
+        if next.vault.is_none() {
+            self.error = next.error;
+            eprintln!("[freya][vault] action=switch-failure id={}", descriptor.id);
+            return;
+        }
+        if let Err(error) = registry.persist() {
+            next.error = Some(format!("Vault switched, but its registry could not be saved: {error}"));
+        }
+        let root = next.vault.as_ref().map(|vault| vault.root().to_path_buf());
+        next.vault_registry = registry;
+        if let Some(root) = root {
+            let _ = vault_picker::remember_vault(&root);
+        }
+        *self = next;
+        eprintln!("[freya][vault] action=switch-complete id={}", id);
+    }
+
+    pub(super) fn remove_vault(&mut self, id: &str) {
+        let was_active = self.vault_registry.active_vault_id.as_deref() == Some(id);
+        let mut registry = self.vault_registry.clone();
+        if let Err(error) = registry.remove(id) {
+            self.error = Some(error);
+            return;
+        }
+        if let Err(error) = registry.persist() {
+            self.error = Some(error);
+            return;
+        }
+        if was_active {
+            if let Some(next) = registry.active().cloned() {
+                let mut loaded = shell_runtime::load_from_root(PathBuf::from(&next.path));
+                loaded.vault_registry = registry;
+                *self = loaded;
+            } else {
+                let mut empty = Self::empty();
+                empty.vault_registry = registry;
+                *self = empty;
+            }
+        } else {
+            self.vault_registry = registry;
+        }
+    }
+
+    pub(super) fn rename_vault(&mut self, id: &str, name: &str) {
+        if let Err(error) = self.vault_registry.set_name(id, name) {
+            self.error = Some(error);
+        } else if let Err(error) = self.vault_registry.persist() {
+            self.error = Some(error);
+        }
+    }
+
+    pub(super) fn set_vault_icon(&mut self, id: &str, icon: &str) {
+        if let Err(error) = self.vault_registry.set_icon(id, icon) {
+            self.error = Some(error);
+        } else if let Err(error) = self.vault_registry.persist() {
+            self.error = Some(error);
+        }
     }
 
     fn reload_directory(&mut self, relative_path: &str) {
@@ -243,6 +356,10 @@ impl ShellState {
                 .iter()
                 .any(|pinned| pinned == &path_for_log)
         );
+    }
+
+    pub(super) fn mark_settings_changed(&mut self) {
+        self.settings_revision = self.settings_revision.saturating_add(1);
     }
 
     fn create(&mut self, action: crate::library_contract::CreateAction) {
@@ -335,7 +452,7 @@ pub fn app() -> impl IntoElement {
 /// adapter while injecting a clean fixture root.
 pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
     let root = root.into();
-    let state = use_state(move || shell_runtime::load_from_root(root.clone()));
+    let state = use_state(move || ShellState::load_root_with_registry(root.clone()));
     app_shell(state)
 }
 
@@ -348,7 +465,7 @@ pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
 pub fn app_with_vault_view(root: impl Into<PathBuf>, view: WorkspaceView) -> impl IntoElement {
     let root = root.into();
     let state = use_state(move || {
-        let mut state = shell_runtime::load_from_root(root.clone());
+        let mut state = ShellState::load_root_with_registry(root.clone());
         state.view = view.clone();
         state
     });
@@ -374,8 +491,8 @@ impl Component for SidebarNavHost {
     }
 }
 
-fn app_shell(state: State<ShellState>) -> Element {
-    let settings_state = use_state(settings::SettingsViewState::default);
+fn app_shell(mut state: State<ShellState>) -> Element {
+    let mut settings_state = use_state(settings::SettingsViewState::default);
     let settings_effects = settings_state.read().effects();
     let palette = settings_effects.palette();
     let mut explorer_state = use_state(explorer::ExplorerState::new);
@@ -401,6 +518,12 @@ fn app_shell(state: State<ShellState>) -> Element {
         // after the close transition has finished. Keep the same lifecycle
         // boundary in the functional explorer state.
         explorer_state.write().finish_close();
+    }
+    if let Some(section) = snapshot.settings_target_section.as_deref() {
+        if settings_state.read().settings.active_section != section {
+            settings_state.write().select_section(section);
+        }
+        state.write().settings_target_section = None;
     }
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state, state)

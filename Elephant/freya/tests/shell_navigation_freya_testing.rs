@@ -55,6 +55,13 @@ fn accessible_nodes(runner: &TestingRunner, label: &str) -> Vec<TestingNode> {
     })
 }
 
+fn library_nodes(runner: &TestingRunner, label: &str) -> Vec<TestingNode> {
+    accessible_nodes(runner, label)
+        .into_iter()
+        .filter(|node| node.layout().area.size.area() > 10_000.)
+        .collect()
+}
+
 fn require_labeled_node(runner: &TestingRunner, label: &str) -> TestingNode {
     accessible_nodes(runner, label)
         .into_iter()
@@ -71,7 +78,18 @@ fn center(node: &TestingNode) -> (f64, f64) {
 }
 
 fn click_label(runner: &mut TestingRunner, label: &str) {
-    runner.click_cursor(center(&require_labeled_node(runner, label)));
+    let node = accessible_nodes(runner, label)
+        .into_iter()
+        .max_by(|left, right| {
+            left.layout()
+                .area
+                .size
+                .area()
+                .partial_cmp(&right.layout().area.size.area())
+                .expect("navigation node areas must be ordered")
+        })
+        .unwrap_or_else(|| panic!("no Freya node has accessible label {label:?}"));
+    runner.click_cursor(center(&node));
 }
 
 fn rect_opacity(runner: &TestingRunner, label: &str) -> Option<f32> {
@@ -104,19 +122,19 @@ fn navigation_history_updates_visible_controls_and_round_trips_back_forward() {
 
     click_label(&mut runner, "Projects");
     runner.sync_and_update();
-    assert!(accessible_nodes(&runner, "Plan").len() >= 1);
+    assert!(library_nodes(&runner, "Plan").len() >= 1);
     assert_eq!(rect_opacity(&runner, "Retour"), Some(1.0));
 
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
-    assert!(accessible_nodes(&runner, "Alpha").len() >= 1);
-    assert!(accessible_nodes(&runner, "Plan").is_empty());
+    assert!(library_nodes(&runner, "Alpha").len() >= 1);
+    assert!(library_nodes(&runner, "Plan").is_empty());
     assert_eq!(rect_opacity(&runner, "Avancer"), Some(1.0));
 
     click_label(&mut runner, "Avancer");
     runner.sync_and_update();
-    assert!(accessible_nodes(&runner, "Plan").len() >= 1);
-    assert!(accessible_nodes(&runner, "Alpha").is_empty());
+    assert!(library_nodes(&runner, "Plan").len() >= 1);
+    assert!(library_nodes(&runner, "Alpha").is_empty());
 }
 
 #[test]

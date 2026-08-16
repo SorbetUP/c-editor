@@ -61,7 +61,6 @@ fn require_labeled_node(runner: &TestingRunner, label: &str) -> TestingNode {
 fn click_label(runner: &mut TestingRunner, label: &str) {
     let node = require_labeled_node(runner, label);
     let area = node.layout().area;
-    eprintln!("click label={label:?} area={:?}", area);
     let center = (
         ((area.min_x() + area.max_x()) / 2.) as f64,
         ((area.min_y() + area.max_y()) / 2.) as f64,
@@ -165,6 +164,10 @@ fn converted_settings_search_graph_and_editor_surfaces_are_reachable() {
     assert!(accessible_nodes(&runner, "Refresh graph").len() >= 1);
 
     click_label(&mut runner, "Search");
+    runner.sync_and_update();
+    runner.press_key(freya::prelude::Key::Named(
+        freya::prelude::NamedKey::Escape,
+    ));
     runner.sync_and_update();
     click_label(&mut runner, "Alpha");
     runner.sync_and_update();

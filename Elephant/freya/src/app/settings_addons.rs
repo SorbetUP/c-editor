@@ -82,9 +82,8 @@ fn addon_row(
     let name = addon.manifest.name.clone();
     let enabled = addon.enabled;
     let runtime_status = match id.as_str() {
-        "elephant.graph" | "elephant.wiki" | "elephant.calendar" | "elephant.dashboard" => {
-            "Native Freya surface available"
-        }
+        "elephant.graph" | "elephant.wiki" | "elephant.calendar" | "elephant.dashboard"
+        | "elephant.sync" => "Native Freya surface available",
         _ => "JavaScript worker runtime is not connected in Freya",
     };
     let toggle_state = settings_state;

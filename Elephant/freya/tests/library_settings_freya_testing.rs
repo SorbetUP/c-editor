@@ -254,7 +254,11 @@ fn hover_library_card(runner: &mut TestingRunner, label: &str) {
 fn focused_rename_input(runner: &TestingRunner, current_title: &str) -> TestingNode {
     accessible_nodes(runner, current_title)
         .into_iter()
-        .min_by(|left, right| {
+        .filter(|node| {
+            let area = node.layout().area;
+            area.max_y() - area.min_y() < 50.
+        })
+        .max_by(|left, right| {
             left.layout()
                 .area
                 .size
@@ -622,4 +626,54 @@ fn malformed_canonical_preferences_are_visible_through_the_settings_error_surfac
         fs::read_to_string(profile.preferences_path()).unwrap(),
         "{ not valid preferences"
     );
+}
+
+#[test]
+fn folder_sidebar_visibility_round_trips_through_the_real_workspace_metadata() {
+    let fixture = FixtureVault::new();
+    let workspace_dir = fixture.path().join(".elephantnote/config");
+    fs::create_dir_all(&workspace_dir).expect("create workspace metadata directory");
+    fs::write(
+        workspace_dir.join("workspace.json"),
+        r#"{
+          "version": 1,
+          "sidebar": [{"path": "Folder", "title": "Folder", "type": "folder"}]
+        }"#,
+    )
+    .expect("seed workspace sidebar metadata");
+
+    let root = fixture.path().clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    let sidebar_nodes = |runner: &TestingRunner, label: &str| {
+        let nodes = accessible_nodes(runner, label);
+        nodes
+            .into_iter()
+            .filter(|node| {
+                let size = node.layout().area.size;
+                size.width >= 200. && size.height <= 40.
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sidebar_nodes(&runner, "Folder").len(), 1);
+    assert_eq!(sidebar_nodes(&runner, "Empty Folder").len(), 0);
+
+    hover_library_card(&mut runner, "Folder");
+    click_action_for_card(&mut runner, "Folder", "Folder actions");
+    runner.sync_and_update();
+    click_smallest_label(&mut runner, "Hide from sidebar");
+    runner.sync_and_update();
+    runner.sync_and_update();
+
+    let workspace: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(workspace_dir.join("workspace.json")).expect("read workspace"),
+    )
+    .expect("workspace remains valid JSON");
+    assert!(workspace["sidebar"].as_array().unwrap().is_empty());
+    assert_eq!(sidebar_nodes(&runner, "Folder").len(), 0);
 }

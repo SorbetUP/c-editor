@@ -284,6 +284,7 @@ pub(super) fn integer_stepper(
 
 pub(super) fn theme_variant(
     state: State<SettingsViewState>,
+    shell_state: State<super::super::super::ShellState>,
     label_text: &'static str,
     description: &'static str,
     theme_id: &'static str,
@@ -292,6 +293,7 @@ pub(super) fn theme_variant(
     let palette = state.read().effects().palette();
     let preview = theme::palette_for(theme_id);
     let mut state = state;
+    let mut shell_state = shell_state;
     rect()
         .width(Size::fill())
         .height(Size::px(86.))
@@ -317,7 +319,8 @@ pub(super) fn theme_variant(
         .on_mouse_up(move |_| {
             state
                 .write()
-                .set_text_preference("theme", theme_id.to_owned())
+                .set_text_preference("theme", theme_id.to_owned());
+            shell_state.write().mark_settings_changed();
         })
         .child(
             rect()
@@ -370,6 +373,7 @@ pub(super) fn theme_variant(
 
 pub(super) fn navigation_visibility(
     state: State<SettingsViewState>,
+    shell_state: State<super::super::super::ShellState>,
     label_text: &'static str,
     item_id: &'static str,
     hidden_ids: Vec<String>,
@@ -383,6 +387,7 @@ pub(super) fn navigation_visibility(
         format!("Show {label_text} in navigation")
     };
     let mut state = state;
+    let mut shell_state = shell_state;
     settings_row!(palette)
         .child(row_copy(
             label_text,
@@ -411,9 +416,10 @@ pub(super) fn navigation_visibility(
                 ))
                 .with_corner_radius(99.)
                 .a11y_alt(accessibility_label)
-                .on_press(move |event: Event<PressEventData>| {
+                .on_mouse_up(move |event: Event<MouseEventData>| {
                     event.stop_propagation();
                     state.write().toggle_rail_hidden(item_id);
+                    shell_state.write().mark_settings_changed();
                 })
                 .child(
                     rect()

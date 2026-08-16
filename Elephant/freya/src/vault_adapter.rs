@@ -20,10 +20,10 @@
 //!   pagination semantics and move/delete path behavior.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::Value;
-use std::fmt;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
+use std::{collections::HashSet, fmt};
 
 mod relative_path;
 mod search_index;
@@ -342,6 +342,106 @@ impl VaultAdapter {
 
     pub fn root(&self) -> &Path {
         Path::new(&self.descriptor.path)
+    }
+
+    /// Read the same workspace attachment list consumed by the Tauri
+    /// `SidebarNav` store. Notes remain visible at the root; folders only
+    /// appear there when the workspace explicitly attaches them.
+    pub fn sidebar_attached_paths(&self) -> AdapterResult<HashSet<String>> {
+        let workspace = self.read_workspace_metadata()?;
+        Ok(workspace
+            .get("sidebar")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.get("path").and_then(Value::as_str))
+            .map(|path| path.replace('\\', "/"))
+            .filter(|path| !path.is_empty())
+            .collect())
+    }
+
+    pub fn has_workspace_metadata(&self) -> bool {
+        self.workspace_metadata_path().is_file()
+    }
+
+    /// Toggle an entry in the production workspace attachment list. This is
+    /// the filesystem equivalent of the Vue store's attach/detach bridge and
+    /// preserves unrelated workspace keys such as Freya shell preferences.
+    pub fn set_sidebar_visibility(
+        &self,
+        relative_path: &str,
+        title: &str,
+        entry_type: &str,
+        visible: bool,
+    ) -> AdapterResult<()> {
+        let relative_path = self.validate_visible_path(relative_path, false)?;
+        let mut workspace = self.read_workspace_metadata()?;
+        let sidebar = workspace
+            .as_object_mut()
+            .ok_or_else(|| AdapterError::new("Workspace metadata must be a JSON object."))?
+            .entry("sidebar")
+            .or_insert_with(|| json!([]));
+        let sidebar = sidebar
+            .as_array_mut()
+            .ok_or_else(|| AdapterError::new("Workspace sidebar must be a JSON array."))?;
+        if visible {
+            if !sidebar.iter().any(|item| {
+                item.get("path").and_then(Value::as_str) == Some(relative_path.as_str())
+            }) {
+                sidebar.push(json!({
+                    "path": relative_path,
+                    "title": title,
+                    "type": entry_type,
+                }));
+            }
+        } else {
+            sidebar.retain(|item| {
+                item.get("path").and_then(Value::as_str) != Some(relative_path.as_str())
+            });
+        }
+        self.write_workspace_metadata(&workspace)
+    }
+
+    fn workspace_metadata_path(&self) -> std::path::PathBuf {
+        vault_layout::config_file(self.root(), vault_layout::WORKSPACE_FILE)
+    }
+
+    fn read_workspace_metadata(&self) -> AdapterResult<Value> {
+        let path = self.workspace_metadata_path();
+        if !path.exists() {
+            return Ok(json!({ "version": 1, "sidebar": [] }));
+        }
+        let raw = fs::read_to_string(&path).map_err(|error| {
+            AdapterError::new(format!(
+                "Unable to read workspace metadata {}: {error}",
+                path.display()
+            ))
+        })?;
+        let value: Value = serde_json::from_str(&raw).map_err(|error| {
+            AdapterError::new(format!(
+                "Unable to parse workspace metadata {}: {error}",
+                path.display()
+            ))
+        })?;
+        if !value.is_object() {
+            return Err(AdapterError::new(format!(
+                "Workspace metadata must be a JSON object: {}",
+                path.display()
+            )));
+        }
+        Ok(value)
+    }
+
+    fn write_workspace_metadata(&self, value: &Value) -> AdapterResult<()> {
+        let path = self.workspace_metadata_path();
+        let parent = path
+            .parent()
+            .ok_or_else(|| AdapterError::new("Workspace metadata has no parent directory."))?;
+        fs::create_dir_all(parent)?;
+        let temporary = path.with_extension("json.tmp");
+        fs::write(&temporary, serde_json::to_vec_pretty(value)?)?;
+        fs::rename(&temporary, &path)?;
+        Ok(())
     }
 
     pub fn list(&self, request: PageRequest) -> AdapterResult<VaultPage> {
@@ -934,5 +1034,43 @@ mod tests {
         assert_eq!(kind.as_str(), "calendar-event");
         let value = serde_json::to_value(&kind).expect("serialize kind");
         assert_eq!(value, Value::String("calendar-event".to_string()));
+    }
+
+    #[test]
+    fn sidebar_visibility_preserves_workspace_metadata_and_round_trips() {
+        let root = temp_root("sidebar-visibility");
+        fs::create_dir_all(root.join("Folder")).expect("create folder");
+        fs::create_dir_all(root.join(".elephantnote/config")).expect("create config directory");
+        fs::write(
+            root.join(".elephantnote/config/workspace.json"),
+            r#"{"version":1,"freyaShell":{"keep":true},"sidebar":[]}"#,
+        )
+        .expect("seed workspace metadata");
+        let adapter = VaultAdapter::open(&root).expect("open adapter");
+
+        adapter
+            .set_sidebar_visibility("Folder", "Folder", "folder", true)
+            .expect("attach folder");
+        assert_eq!(
+            adapter.sidebar_attached_paths().expect("read sidebar"),
+            HashSet::from(["Folder".to_string()])
+        );
+        let attached: Value = serde_json::from_str(
+            &fs::read_to_string(root.join(".elephantnote/config/workspace.json"))
+                .expect("read attached workspace"),
+        )
+        .expect("attached workspace is valid JSON");
+        assert_eq!(attached["freyaShell"]["keep"], Value::Bool(true));
+        assert_eq!(attached["sidebar"][0]["path"], Value::String("Folder".into()));
+
+        adapter
+            .set_sidebar_visibility("Folder", "Folder", "folder", false)
+            .expect("detach folder");
+        assert!(adapter
+            .sidebar_attached_paths()
+            .expect("read detached sidebar")
+            .is_empty());
+
+        fs::remove_dir_all(root).expect("remove fixture");
     }
 }

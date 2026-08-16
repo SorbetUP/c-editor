@@ -874,7 +874,13 @@ mod contract_tests {
     fn toggling_pinned_entry_updates_order_and_is_reversible() {
         let mut state = LibraryState::default();
         state.entries = vec![
-            entry("note", None, "Alpha", "Alpha.md", "2026-01-01T00:00:00.000Z"),
+            entry(
+                "note",
+                None,
+                "Alpha",
+                "Alpha.md",
+                "2026-01-01T00:00:00.000Z",
+            ),
             entry("note", None, "Beta", "Beta.md", "2026-01-02T00:00:00.000Z"),
         ];
         state.toggle_pinned(RelativePath::from("Alpha.md"));
@@ -888,7 +894,13 @@ mod contract_tests {
     fn newly_pinned_entries_follow_the_same_most_recent_order_as_tauri() {
         let mut state = LibraryState::default();
         state.entries = vec![
-            entry("note", None, "Alpha", "Alpha.md", "2026-01-01T00:00:00.000Z"),
+            entry(
+                "note",
+                None,
+                "Alpha",
+                "Alpha.md",
+                "2026-01-01T00:00:00.000Z",
+            ),
             entry("note", None, "Beta", "Beta.md", "2026-01-02T00:00:00.000Z"),
         ];
 
@@ -897,7 +909,10 @@ mod contract_tests {
 
         assert_eq!(
             state.pinned_paths,
-            vec![RelativePath::from("Alpha.md"), RelativePath::from("Beta.md")]
+            vec![
+                RelativePath::from("Alpha.md"),
+                RelativePath::from("Beta.md")
+            ]
         );
     }
 

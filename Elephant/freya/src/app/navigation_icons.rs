@@ -41,6 +41,7 @@ pub(super) enum Icon {
     GitFork,
     Database,
     LayoutDashboard,
+    RefreshCw,
 }
 
 const SEARCH: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>"#;
@@ -75,6 +76,7 @@ const MESSAGE_CIRCLE: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="ht
 const GIT_FORK: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M6 9v1a5 5 0 0 0 5 5h2a5 5 0 0 0 5-5V9"/></svg>"#;
 const DATABASE: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/></svg>"#;
 const LAYOUT_DASHBOARD: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>"#;
+const REFRESH_CW: &[u8] = br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-15.3-6.4L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15.3 6.4L21 16"/><path d="M21 21v-5h-5"/></svg>"#;
 
 pub(super) fn svg_icon(icon: Icon, color: Color, size: f32) -> Element {
     SvgViewer::new(source(icon))
@@ -120,6 +122,7 @@ fn source(icon: Icon) -> &'static [u8] {
         Icon::GitFork => GIT_FORK,
         Icon::Database => DATABASE,
         Icon::LayoutDashboard => LAYOUT_DASHBOARD,
+        Icon::RefreshCw => REFRESH_CW,
     }
 }
 
@@ -159,6 +162,7 @@ mod tests {
             Icon::GitFork,
             Icon::Database,
             Icon::LayoutDashboard,
+            Icon::RefreshCw,
         ] {
             let svg = std::str::from_utf8(source(icon)).expect("Lucide source is UTF-8");
             assert!(svg.contains("viewBox=\"0 0 24 24\""));

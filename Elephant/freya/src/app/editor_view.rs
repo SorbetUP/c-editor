@@ -25,6 +25,8 @@ use super::{route_notice, ShellState};
 
 #[path = "editor_interactions.rs"]
 mod editor_interactions;
+#[path = "editor_tag_interactions.rs"]
+mod editor_tag_interactions;
 
 const CONTENT_MAX: f32 = 780.;
 const BODY_SIZE: f32 = 16.;
@@ -183,6 +185,7 @@ impl Component for EditableInlineBlock {
             .a11y_id(a11y_id)
             .width(Size::fill())
             .holder(holder.read().clone())
+            .a11y_focusable(true)
             .cursor_index(cursor_index)
             .highlights(highlights.map(|selection| vec![selection]))
             .spans_iter(spans.into_iter())
@@ -347,6 +350,43 @@ fn action_button(
     button.into_element()
 }
 
+fn submit_tag_edit(
+    mut state: State<ShellState>,
+    current_tags: Vec<String>,
+    title: String,
+    mut draft: State<String>,
+    mut editing_index: State<Option<usize>>,
+    mut form_open: State<bool>,
+) {
+    let tag = draft.read().trim().to_owned();
+    if tag.is_empty() {
+        *form_open.write() = false;
+        *draft.write() = String::new();
+        *editing_index.write() = None;
+        return;
+    }
+    let mut next_tags = current_tags;
+    if let Some(index) = *editing_index.read() {
+        if index < next_tags.len() {
+            next_tags[index] = tag;
+        } else {
+            next_tags.push(tag);
+        }
+    } else if !next_tags.iter().any(|current| current == &tag) {
+        next_tags.push(tag);
+    }
+    let result = editor_tag_interactions::persist_tags(state.clone(), &next_tags, &title);
+    match result {
+        Ok(()) => {
+            *form_open.write() = false;
+            *draft.write() = String::new();
+            *editing_index.write() = None;
+            eprintln!("[freya][editor] action=update-tags status=complete");
+        }
+        Err(error) => state.write().error = Some(error),
+    }
+}
+
 fn passive_chip(
     state: State<ShellState>,
     interaction_id: &'static str,
@@ -391,6 +431,74 @@ fn passive_chip(
         .into_element()
 }
 
+fn editable_tag_chip(
+    state: State<ShellState>,
+    interaction_id: &'static str,
+    index: usize,
+    text: String,
+    current_tags: Vec<String>,
+    title: String,
+    palette: theme::ThemePalette,
+    form_open: State<bool>,
+    draft: State<String>,
+    editing_index: State<Option<usize>>,
+) -> Element {
+    let hover_key = format!("editor-hover:{interaction_id}");
+    let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
+    let mut enter_state = state;
+    let enter_key = hover_key;
+    let mut leave_state = state;
+    let mut open_state = form_open;
+    let mut draft_state = draft;
+    let mut editing_state = editing_index;
+    let delete_state = state;
+    let delete_tags = current_tags;
+    let delete_title = title;
+    rect()
+        .height(Size::px(30.))
+        .padding(Gaps::new(0., 8., 0., 8.))
+        .center()
+        .background(theme::color(if hovered {
+            palette.soft
+        } else {
+            palette.surface
+        }))
+        .border(Border::new().fill(theme::color(palette.border)).width(1.))
+        .with_corner_radius(8.)
+        .on_pointer_enter(move |_| {
+            enter_state.write().set_hovered_target(enter_key.clone());
+        })
+        .on_pointer_leave(move |_| {
+            leave_state.write().hovered_target = None;
+        })
+        .on_mouse_up(move |event: Event<MouseEventData>| {
+            event.stop_propagation();
+            if event.button == Some(MouseButton::Right) {
+                editor_tag_interactions::delete_tag(
+                    delete_state,
+                    &delete_tags,
+                    &delete_title,
+                    index,
+                );
+                return;
+            }
+            *open_state.write() = true;
+            *draft_state.write() = delete_tags.get(index).cloned().unwrap_or_default();
+            *editing_state.write() = Some(index);
+        })
+        .child(
+            label()
+                .font_family(UI_FONT)
+                .font_size(14.)
+                .color(theme::color(palette.text))
+                .text(text.clone()),
+        )
+        // Preserve the Tauri chip's accessible name (`#tag`) while the
+        // pointer handlers provide the edit/delete gestures.
+        .a11y_alt(text)
+        .into_element()
+}
+
 fn render_note_editor_host(mut state: State<ShellState>) -> Element {
     // Hooks are intentionally unconditional. Conditional sub-UI is rendered
     // after every hook has been registered, matching Freya's hook rules.
@@ -399,6 +507,16 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
     let link_value = use_state(String::new);
     let text_scale = use_state(|| 1.0_f32);
     let editor_dark_mode = use_state(|| false);
+    let tag_form_open = use_state(|| false);
+    let tag_draft = use_state(String::new);
+    let tag_edit_index = use_state(|| None::<usize>);
+    let tag_input_a11y_id = use_a11y();
+    let tag_should_focus = *tag_form_open.read();
+    use_side_effect(move || {
+        if tag_should_focus {
+            tag_input_a11y_id.request_focus();
+        }
+    });
 
     let generation_for_effect = autosave_generation;
     let state_for_effect = state;
@@ -503,6 +621,23 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .unwrap_or("Untitled")
         .to_string();
     let title = document_title(&markdown, &fallback_title);
+    let editor_path_key = editor
+        .path()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let title_value = use_state(|| title.clone());
+    let title_a11y_id = use_a11y();
+    let mut title_sync_state = title_value;
+    let title_path_state = use_state(|| editor_path_key.clone());
+    let mut title_path_sync_state = title_path_state;
+    let rendered_title = title.clone();
+    let rendered_path = editor_path_key.clone();
+    use_side_effect(move || {
+        if title_path_sync_state.read().as_str() != rendered_path.as_str() {
+            title_path_sync_state.set(rendered_path.clone());
+            title_sync_state.set(rendered_title.clone());
+        }
+    });
     let relative_path = editor_relative_path(&snapshot, editor.path());
     let library_entry = relative_path.as_deref().and_then(|path| {
         snapshot
@@ -529,6 +664,152 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             .any(|candidate| candidate.as_str() == path)
     });
     let has_selection = !editor_snapshot.selection.is_collapsed();
+
+    let title_for_submit = title.clone();
+    let title_for_save_original = title.clone();
+    let title_for_close_original = title.clone();
+    let mut title_state = title_value;
+    let title_input = Input::new(title_value)
+        .width(Size::fill())
+        .a11y_id(title_a11y_id)
+        .on_submit(move |next_title: String| {
+            let next_title = next_title.trim().to_owned();
+            if next_title.is_empty() {
+                title_state.set(title_for_submit.clone());
+                return;
+            }
+            let result = {
+                let mut shell = state.write();
+                shell
+                    .editor
+                    .as_mut()
+                    .ok_or_else(|| "cannot rename without an open note".to_string())
+                    .and_then(|editor| {
+                        editor
+                            .rename_title(&next_title)
+                            .map_err(|error| error.to_string())
+                            .and_then(|_| editor.save().map_err(|error| error.to_string()))
+                    })
+            };
+            match result {
+                Ok(()) => {
+                    title_state.set(next_title);
+                    eprintln!("[freya][editor] action=rename-title status=complete");
+                }
+                Err(error) => state.write().error = Some(error),
+            }
+        });
+
+    let add_tag = {
+        let mut open = tag_form_open;
+        let mut draft = tag_draft;
+        let mut editing = tag_edit_index;
+        action_button(
+            state,
+            "add-tag",
+            "+",
+            "Add tag",
+            true,
+            *tag_form_open.read(),
+            Some(palette.primary),
+            TOPBAR_ACTION,
+            true,
+            palette,
+            move |_| {
+                *open.write() = true;
+                *draft.write() = String::new();
+                *editing.write() = None;
+            },
+        )
+    };
+    let tag_form = if *tag_form_open.read() {
+        let mut open = tag_form_open;
+        let mut draft = tag_draft;
+        let mut editing = tag_edit_index;
+        let submit_state = state;
+        let submit_tags = tags.clone();
+        let submit_title = title.clone();
+        let cancel = action_button(
+            state,
+            "cancel-tag",
+            "×",
+            "Cancel tag",
+            true,
+            false,
+            None,
+            26.,
+            true,
+            palette,
+            move |_| {
+                *open.write() = false;
+                *draft.write() = String::new();
+                *editing.write() = None;
+            },
+        );
+        let save_state = state;
+        let save_tags = submit_tags.clone();
+        let save_title = submit_title.clone();
+        let save = action_button(
+            state,
+            "save-tag",
+            "✓",
+            "Save",
+            true,
+            false,
+            Some(palette.primary),
+            26.,
+            true,
+            palette,
+            move |_| {
+                submit_tag_edit(
+                    save_state,
+                    save_tags.clone(),
+                    save_title.clone(),
+                    tag_draft,
+                    tag_edit_index,
+                    tag_form_open,
+                );
+            },
+        );
+        let submit_state = submit_state;
+        let submit_tags = submit_tags;
+        let submit_title = submit_title;
+        Some(
+            rect()
+                .height(Size::px(30.))
+                .horizontal()
+                .spacing(4.)
+                .a11y_alt("Tag editor")
+                .child(
+                    rect()
+                        .width(Size::px(110.))
+                        .a11y_alt("Tag")
+                        .on_mouse_up(move |_| tag_input_a11y_id.request_focus())
+                        .child(
+                            Input::new(tag_draft)
+                                .width(Size::fill())
+                                .a11y_id(tag_input_a11y_id)
+                                .auto_focus(true)
+                                .placeholder("Tag")
+                                .on_submit(move |_| {
+                                    submit_tag_edit(
+                                        submit_state,
+                                        submit_tags.clone(),
+                                        submit_title.clone(),
+                                        tag_draft,
+                                        tag_edit_index,
+                                        tag_form_open,
+                                    );
+                                }),
+                        ),
+                )
+                .child(save)
+                .child(cancel)
+                .into_element(),
+        )
+    } else {
+        None
+    };
 
     let undo = action_button(
         state,
@@ -572,6 +853,8 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             finish_toolbar_result(state, autosave_generation, "redo", result);
         },
     );
+    let title_for_save = title_value;
+    let fallback_title_for_save = fallback_title.clone();
     let save = action_button(
         state,
         "save",
@@ -584,12 +867,25 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         true,
         palette,
         move |_| {
+            let requested_title = title_for_save.read().trim().to_owned();
+            let requested_title = if requested_title.is_empty() {
+                fallback_title_for_save.clone()
+            } else {
+                requested_title
+            };
             let result = state
                 .write()
                 .editor
                 .as_mut()
                 .ok_or_else(|| "cannot save without an open note".to_string())
-                .and_then(|editor| editor.save().map_err(|error| error.to_string()));
+                .and_then(|editor| {
+                    if requested_title != title_for_save_original {
+                        editor
+                            .rename_title(&requested_title)
+                            .map_err(|error| error.to_string())?;
+                    }
+                    editor.save().map_err(|error| error.to_string())
+                });
             if let Err(error) = result {
                 state.write().error = Some(error);
             }
@@ -612,21 +908,11 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
                 return;
             };
             let mut shell = state.write();
-            if shell
-                .library
-                .pinned_paths
-                .iter()
-                .any(|candidate| candidate.as_str() == path)
-            {
-                shell
-                    .library
-                    .pinned_paths
-                    .retain(|candidate| candidate.as_str() != path);
-            } else {
-                shell.library.pinned_paths.push(RelativePath::new(path));
-            }
+            shell.toggle_pinned(RelativePath::new(path));
         },
     );
+    let title_for_close = title_value;
+    let fallback_title_for_close = fallback_title.clone();
     let close = action_button(
         state,
         "close",
@@ -643,7 +929,20 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
                 let mut shell = state.write();
                 let result = shell.editor.as_mut().map_or_else(
                     || Err("cannot close without an open note".to_string()),
-                    |editor| editor.close().map_err(|error| error.to_string()),
+                    |editor| {
+                        let requested_title = title_for_close.read().trim().to_owned();
+                        let requested_title = if requested_title.is_empty() {
+                            fallback_title_for_close.clone()
+                        } else {
+                            requested_title
+                        };
+                        if requested_title != title_for_close_original {
+                            editor
+                                .rename_title(&requested_title)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        editor.close().map_err(|error| error.to_string())
+                    },
                 );
                 if result.is_ok() {
                     shell.editor = None;
@@ -874,7 +1173,7 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         }))
         .horizontal()
         .spacing(8.)
-        .center()
+        .cross_align(Alignment::Center)
         .padding(Gaps::new(0., 12., 0., 12.))
         .background(theme::color(palette.bg))
         .a11y_alt(if compact {
@@ -883,31 +1182,38 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             "Editor topbar"
         })
         .child(
-            rect().width(Size::fill()).child(
-                label()
-                    .font_family(UI_FONT)
-                    .font_size(if compact { 19. } else { 28. })
-                    .line_height(1.2)
-                    .font_weight(FontWeight::BOLD)
-                    .color(theme::color(palette.text))
-                    .max_lines(1)
-                    .text(title),
-            ),
+            rect()
+                .width(Size::flex(1.))
+                .a11y_alt("Note title")
+                .on_mouse_up(move |_| title_a11y_id.request_focus())
+                .child(title_input),
         );
+    let mut topbar_actions = rect()
+        .width(Size::px(340.))
+        .height(Size::fill())
+        .horizontal()
+        .spacing(8.)
+        .main_align(Alignment::End)
+        .cross_align(Alignment::Center);
     if let Some(date) = date {
-        topbar = topbar.child(passive_chip(state, "date", date, palette, true));
+        topbar_actions = topbar_actions.child(passive_chip(state, "date", date, palette, true));
     }
     for (index, tag) in tags.iter().take(2).enumerate() {
-        topbar = topbar.child(passive_chip(
+        topbar_actions = topbar_actions.child(editable_tag_chip(
             state,
             if index == 0 { "tag-1" } else { "tag-2" },
+            index,
             format!("#{tag}"),
+            tags.clone(),
+            title.clone(),
             palette,
-            false,
+            tag_form_open,
+            tag_draft,
+            tag_edit_index,
         ));
     }
     if tags.len() > 2 {
-        topbar = topbar.child(passive_chip(
+        topbar_actions = topbar_actions.child(passive_chip(
             state,
             "tag-more",
             format!("+{}", tags.len() - 2),
@@ -915,12 +1221,18 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             true,
         ));
     }
-    topbar = topbar
+    if let Some(tag_form) = tag_form {
+        topbar_actions = topbar_actions.child(tag_form);
+    } else {
+        topbar_actions = topbar_actions.child(add_tag);
+    }
+    topbar_actions = topbar_actions
         .child(undo)
         .child(redo)
         .child(save)
         .child(pin)
         .child(close);
+    topbar = topbar.child(topbar_actions);
 
     let toolbar = rect()
         .width(Size::fill())

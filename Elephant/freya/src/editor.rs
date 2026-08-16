@@ -431,10 +431,48 @@ impl EditorDocument {
     /// Applies inline-code Markdown through Muya's real paste transaction so the
     /// resulting `CodeSpan` remains part of the editable document and history.
     pub fn apply_inline_code(&mut self) -> Result<EditorUpdate, String> {
+        let before_selection = self.session.snapshot().selection;
         let selected = self.selected_text()?;
         let markdown = inline_code_markdown(&selected);
-        self.paste_markdown(markdown)
-            .map_err(|error| error.to_string())
+        let source_parent = self
+            .session
+            .document()
+            .node(before_selection.anchor.node)
+            .and_then(|node| node.parent);
+        let source_index = source_parent.and_then(|parent| {
+            self.session
+                .document()
+                .child_index(parent, before_selection.anchor.node)
+        });
+        let pasted = self
+            .paste_markdown(markdown)
+            .map_err(|error| error.to_string())?;
+
+        let code_node = source_parent
+            .and_then(|parent| {
+                nearest_code_span(
+                    self.session.document(),
+                    parent,
+                    &selected,
+                    source_index,
+                )
+            })
+            .or_else(|| find_code_span(self.session.document(), &selected));
+        let Some(code_node) = code_node else {
+            return Ok(pasted);
+        };
+        let Some((text_node, offset_utf16)) = last_text_endpoint(self.session.document(), code_node)
+        else {
+            return Ok(pasted);
+        };
+        let update = self
+            .set_selection(Selection::collapsed(SelectionPoint {
+                node: text_node,
+                offset_utf16,
+            }))
+            .map_err(|error| error.to_string())?;
+        self.focus_target = Some(update.selection.focus.node);
+        Ok(update)
     }
 
     /// Wraps the current real selection in a Markdown link. The destination is
@@ -568,6 +606,41 @@ impl EditorDocument {
             .map(|update| self.record_mutation(before, update))
     }
 
+    /// Updates the note title through the same markdown document contract as
+    /// the Tauri `NoteEditorHeader`: the title metadata and displayed H1 are
+    /// changed together, while the body and real file path remain intact.
+    pub fn rename_title(&mut self, title: &str) -> Result<EditorUpdate, EditorError> {
+        let before = self.serialize();
+        let next = rename_markdown_title(&before, title);
+        if next == before {
+            return Ok(self.snapshot());
+        }
+        self.session = EditorSession::from_markdown(&next);
+        self.focus_target = None;
+        self.composition_selection = None;
+        let update = self.session.snapshot();
+        Ok(self.record_mutation(before, update))
+    }
+
+    /// Replaces the note's canonical frontmatter tags without changing its
+    /// displayed title, body, or file path.
+    pub fn update_tags(
+        &mut self,
+        tags: &[String],
+        title: &str,
+    ) -> Result<EditorUpdate, EditorError> {
+        let before = self.serialize();
+        let next = update_markdown_tags(&before, tags, title);
+        if next == before {
+            return Ok(self.snapshot());
+        }
+        self.session = EditorSession::from_markdown(&next);
+        self.focus_target = None;
+        self.composition_selection = None;
+        let update = self.session.snapshot();
+        Ok(self.record_mutation(before, update))
+    }
+
     pub fn save(&mut self) -> Result<(), EditorError> {
         let path = self.path.clone().ok_or(EditorError::MissingPath)?;
         let revision = self.session.revision();
@@ -645,6 +718,135 @@ fn io_error(path: &Path, error: io::Error) -> EditorError {
     EditorError::Io {
         path: path.to_path_buf(),
         message: error.to_string(),
+    }
+}
+
+fn rename_markdown_title(markdown: &str, next_title: &str) -> String {
+    let trailing_newline = markdown.ends_with('\n');
+    let title = next_title.trim();
+    let title = if title.is_empty() { "Untitled" } else { title };
+    let displayed_title = format!("# {title}");
+    let mut lines = markdown.lines().map(str::to_owned).collect::<Vec<_>>();
+    let mut body_start = 0;
+    let mut has_frontmatter = false;
+
+    if lines.first().is_some_and(|line| line == "---") {
+        has_frontmatter = true;
+        body_start = lines
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(index, line)| (line == "---").then_some(index + 1))
+            .unwrap_or(0);
+        let mut replaced_title = false;
+        for line in lines.iter_mut().take(body_start) {
+            if line.trim_start().starts_with("title:") {
+                *line = format!("title: {title}");
+                replaced_title = true;
+                break;
+            }
+        }
+        if !replaced_title && body_start > 0 {
+            lines.insert(1, format!("title: {title}"));
+            body_start += 1;
+        }
+    }
+
+    let heading_index = lines
+        .iter()
+        .enumerate()
+        .skip(body_start)
+        .find_map(|(index, line)| {
+            line.strip_prefix("# ")
+                .filter(|value| !value.is_empty())
+                .map(|_| index)
+        });
+    if let Some(index) = heading_index {
+        lines[index] = displayed_title;
+    } else if has_frontmatter {
+        lines.insert(body_start, displayed_title);
+    } else {
+        lines.insert(0, displayed_title);
+    }
+
+    let mut renamed = lines.join("\n");
+    if trailing_newline && !renamed.ends_with('\n') {
+        renamed.push('\n');
+    }
+    renamed
+}
+
+fn update_markdown_tags(markdown: &str, tags: &[String], title: &str) -> String {
+    let mut normalized = Vec::new();
+    for tag in tags {
+        let tag = tag
+            .trim()
+            .trim_matches(['"', '\''])
+            .trim_start_matches('#')
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !tag.is_empty() && !normalized.iter().any(|current| current == &tag) {
+            normalized.push(tag);
+        }
+    }
+    let tags_line = format!(
+        "tags: [{}]",
+        normalized
+            .iter()
+            .map(|tag| format!("\"{}\"", tag.replace('"', "\\\"")))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    let mut lines = markdown.lines().map(str::to_owned).collect::<Vec<_>>();
+    if lines.first().is_some_and(|line| line == "---") {
+        let end = lines
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find_map(|(index, line)| (line == "---").then_some(index));
+        if let Some(end) = end {
+            if let Some(index) = lines
+                .iter()
+                .enumerate()
+                .take(end)
+                .find_map(|(index, line)| line.trim_start().starts_with("tags:").then_some(index))
+            {
+                lines[index] = tags_line;
+            } else {
+                let insert_at = lines
+                    .iter()
+                    .enumerate()
+                    .take(end)
+                    .find_map(|(index, line)| {
+                        ["title:", "type:", "createdAt:", "updatedAt:"]
+                            .iter()
+                            .any(|prefix| line.trim_start().starts_with(prefix))
+                            .then_some(index + 1)
+                    })
+                    .unwrap_or(1);
+                lines.insert(insert_at, tags_line);
+            }
+            return lines.join("\n");
+        }
+    }
+
+    let normalized_title = title.trim();
+    let mut frontmatter = vec!["---".to_string()];
+    if !normalized_title.is_empty() {
+        frontmatter.push(format!(
+            "title: \"{}\"",
+            normalized_title.replace('"', "\\\"")
+        ));
+    }
+    frontmatter.push("type: \"note\"".to_string());
+    frontmatter.push(tags_line);
+    frontmatter.push("---".to_string());
+    let body = markdown.trim();
+    if body.is_empty() {
+        frontmatter.join("\n")
+    } else {
+        format!("{}\n\n{}", frontmatter.join("\n"), body)
     }
 }
 
@@ -744,6 +946,45 @@ fn last_text_endpoint(
         .iter()
         .rev()
         .find_map(|child| last_text_endpoint(document, *child))
+}
+
+fn nearest_code_span(
+    document: &muya_core::Document,
+    parent: muya_core::NodeId,
+    value: &str,
+    source_index: Option<usize>,
+) -> Option<muya_core::NodeId> {
+    let children = &document.node(parent)?.children;
+    children
+        .iter()
+        .enumerate()
+        .filter_map(|(index, child)| {
+            let node = document.node(*child)?;
+            matches!(
+                &node.kind,
+                NodeKind::Inline(InlineKind::CodeSpan { code }) if code == value
+            )
+            .then_some((*child, index))
+        })
+        .min_by_key(|(_, index)| {
+            source_index
+                .map(|source| source.abs_diff(*index))
+                .unwrap_or(usize::MAX)
+        })
+        .map(|(node, _)| node)
+}
+
+fn find_code_span(
+    document: &muya_core::Document,
+    value: &str,
+) -> Option<muya_core::NodeId> {
+    document.nodes.values().find_map(|node| {
+        matches!(
+            &node.kind,
+            NodeKind::Inline(InlineKind::CodeSpan { code }) if code == value
+        )
+        .then_some(node.id)
+    })
 }
 
 fn selected_inline_markdown(
@@ -1105,5 +1346,45 @@ mod tests {
             .dispatch(before.revision, EditorAction::InsertText("X".into()))
             .expect("the edit after selection must use the unchanged revision");
         assert_eq!(inserted.markdown, "aXlpha");
+    }
+
+    #[test]
+    fn rename_title_updates_frontmatter_and_displayed_heading_only() {
+        let markdown = "---\ntitle: Old\ntags: [rust]\n---\n# Old\n\nKeep this body.";
+        let renamed = rename_markdown_title(markdown, "New title");
+        assert!(renamed.contains("title: New title"));
+        assert!(renamed.contains("# New title"));
+        assert!(renamed.contains("Keep this body."));
+        assert!(renamed.contains("tags: [rust]"));
+        assert!(!renamed.contains("# Old"));
+    }
+
+    #[test]
+    fn rename_title_replaces_plain_document_heading_without_losing_body() {
+        let renamed = rename_markdown_title("# Old\n\nKeep this body.", "New title");
+        assert_eq!(renamed, "# New title\n\nKeep this body.");
+    }
+
+    #[test]
+    fn update_tags_uses_tauri_frontmatter_serialization_and_deduplicates() {
+        let markdown = "---\ntags: [old]\n---\n# Note\n\nBody";
+        let tags = vec![
+            "old".to_string(),
+            " #new-tag ".to_string(),
+            "new-tag".to_string(),
+        ];
+        let updated = update_markdown_tags(markdown, &tags, "Note");
+        assert!(updated.contains("tags: [\"old\", \"new-tag\"]"));
+        assert!(updated.contains("# Note"));
+        assert!(updated.contains("Body"));
+    }
+
+    #[test]
+    fn update_tags_adds_note_frontmatter_for_legacy_markdown() {
+        let updated = update_markdown_tags("# Note\n\nBody", &["work".to_string()], "Note");
+        assert!(updated.starts_with("---\n"));
+        assert!(updated.contains("type: \"note\""));
+        assert!(updated.contains("tags: [\"work\"]"));
+        assert!(updated.contains("# Note"));
     }
 }

@@ -256,6 +256,7 @@ impl Component for SettingsPanelComponent {
                 search_state.write().settings.set_query(&query);
             });
 
+        let mut escape_shell_state = self.shell_state;
         rect()
             .width(Size::fill())
             .height(Size::fill())
@@ -264,6 +265,11 @@ impl Component for SettingsPanelComponent {
             .color(theme::token_color(palette, theme::ThemeToken::Text))
             .center()
             .a11y_alt("Settings backdrop")
+            .on_global_key_down(move |event: Event<KeyboardEventData>| {
+                if event.key == Key::Named(NamedKey::Escape) {
+                    escape_shell_state.write().settings_open = false;
+                }
+            })
             .child(
                 rect()
                     .width(Size::fill())
@@ -278,7 +284,11 @@ impl Component for SettingsPanelComponent {
                     )
                     .with_corner_radius(22.)
                     .a11y_alt("ElephantNote settings")
-                    .child(settings_controls::settings_header(search, palette))
+                    .child(settings_controls::settings_header(
+                        search,
+                        self.shell_state,
+                        palette,
+                    ))
                     .child(
                         rect()
                             .width(Size::fill())

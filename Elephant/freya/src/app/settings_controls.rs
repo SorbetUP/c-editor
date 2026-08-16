@@ -22,8 +22,12 @@ mod settings_search;
 #[path = "settings_surface.rs"]
 mod settings_surface;
 
-pub(super) fn settings_header(search: Input, palette: theme::ThemePalette) -> Element {
-    settings_navigation::settings_header(search, palette)
+pub(super) fn settings_header(
+    search: Input,
+    shell_state: State<super::super::ShellState>,
+    palette: theme::ThemePalette,
+) -> Element {
+    settings_navigation::settings_header(search, shell_state, palette)
 }
 
 pub(super) fn section_navigation(
@@ -90,21 +94,36 @@ pub(super) fn integer_stepper(
 
 pub(super) fn theme_variant(
     state: State<SettingsViewState>,
+    shell_state: State<super::super::ShellState>,
     label_text: &'static str,
     description: &'static str,
     theme_id: &'static str,
     active: bool,
 ) -> Element {
-    settings_preference_controls::theme_variant(state, label_text, description, theme_id, active)
+    settings_preference_controls::theme_variant(
+        state,
+        shell_state,
+        label_text,
+        description,
+        theme_id,
+        active,
+    )
 }
 
 pub(super) fn navigation_visibility(
     state: State<SettingsViewState>,
+    shell_state: State<super::super::ShellState>,
     label_text: &'static str,
     item_id: &'static str,
     hidden_ids: Vec<String>,
 ) -> Element {
-    settings_preference_controls::navigation_visibility(state, label_text, item_id, hidden_ids)
+    settings_preference_controls::navigation_visibility(
+        state,
+        shell_state,
+        label_text,
+        item_id,
+        hidden_ids,
+    )
 }
 
 pub(super) fn search_results_content(
@@ -156,7 +175,9 @@ pub(super) fn section_content(
         content.child(settings_surface::surface_state(surface, palette))
     } else {
         let entries = match active_section {
-            "appearance" => settings_appearance_controls::appearance_settings(state),
+        "appearance" => {
+            settings_appearance_controls::appearance_settings(state, shell_state)
+        }
             "editor" => settings_editor_controls::editor_settings(state),
             "vaults" => vec![settings_surface::vault_settings(
                 state,

@@ -9,7 +9,10 @@ use crate::{
 
 use super::super::SettingsViewState;
 
-pub(super) fn appearance_settings(state: State<SettingsViewState>) -> Vec<Element> {
+pub(super) fn appearance_settings(
+    state: State<SettingsViewState>,
+    shell_state: State<super::super::super::ShellState>,
+) -> Vec<Element> {
     let snapshot = state.read().clone();
     let current_theme = snapshot.runtime.text_value("theme");
     let active_family = THEME_FAMILIES
@@ -19,9 +22,10 @@ pub(super) fn appearance_settings(state: State<SettingsViewState>) -> Vec<Elemen
     let dark = current_theme == active_family.dark;
 
     let mut controls = vec![
-        color_mode(state, active_family.light, active_family.dark, dark),
+        color_mode(state, shell_state, active_family.light, active_family.dark, dark),
         theme_selector(
             state,
+            shell_state,
             &current_theme,
             dark,
             snapshot.settings.theme_expanded,
@@ -31,6 +35,7 @@ pub(super) fn appearance_settings(state: State<SettingsViewState>) -> Vec<Elemen
     for item in CORE_ICON_RAIL_ITEMS {
         controls.push(super::navigation_visibility(
             state,
+            shell_state,
             item.label,
             item.id,
             snapshot.runtime.string_list_value("iconRailHidden"),
@@ -50,6 +55,7 @@ pub(super) fn appearance_settings(state: State<SettingsViewState>) -> Vec<Elemen
 
 fn color_mode(
     state: State<SettingsViewState>,
+    shell_state: State<super::super::super::ShellState>,
     light_theme: &'static str,
     dark_theme: &'static str,
     dark: bool,
@@ -57,6 +63,8 @@ fn color_mode(
     let palette = state.read().effects().palette();
     let mut light_state = state;
     let mut dark_state = state;
+    let mut light_shell = shell_state;
+    let mut dark_shell = shell_state;
     rect()
         .width(Size::fill())
         .height(Size::px(68.))
@@ -97,11 +105,13 @@ fn color_mode(
                     light_state
                         .write()
                         .set_text_preference("theme", light_theme.to_owned());
+                    light_shell.write().mark_settings_changed();
                 }))
                 .child(mode_button("Dark", dark, palette, move || {
                     dark_state
                         .write()
                         .set_text_preference("theme", dark_theme.to_owned());
+                    dark_shell.write().mark_settings_changed();
                 })),
         )
         .into_element()
@@ -109,6 +119,7 @@ fn color_mode(
 
 fn theme_selector(
     state: State<SettingsViewState>,
+    shell_state: State<super::super::super::ShellState>,
     current_theme: &str,
     dark: bool,
     expanded: bool,
@@ -165,6 +176,7 @@ fn theme_selector(
                 let theme_id = if dark { family.dark } else { family.light };
                 row = row.child(rect().width(Size::fill()).child(super::theme_variant(
                     state,
+                    shell_state,
                     family.name,
                     family.description,
                     theme_id,

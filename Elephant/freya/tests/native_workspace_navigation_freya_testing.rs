@@ -28,6 +28,8 @@ impl FixtureVault {
             .expect("create addon package directory");
         fs::create_dir_all(root.join(".elephantnote/addons/packages/elephant.open-models"))
             .expect("create addon package directory");
+        fs::create_dir_all(root.join(".elephantnote/addons/packages/elephant.sync"))
+            .expect("create addon package directory");
         fs::create_dir_all(root.join(".elephantnote/models")).expect("create models directory");
         fs::write(
             root.join(".elephantnote/models/tiny.gguf"),
@@ -83,6 +85,15 @@ impl FixtureVault {
                             "name": "Models",
                             "version": "1.0.0",
                             "runtime": { "type": "javascript-worker", "entry": "main.js" }
+                        },
+                        "enabled": true
+                    },
+                    "elephant.sync": {
+                        "manifest": {
+                            "id": "elephant.sync",
+                            "name": "Sync",
+                            "version": "1.2.0",
+                            "runtime": { "type": "javascript-worker", "entry": "main.service.js" }
                         },
                         "enabled": true
                     }
@@ -210,4 +221,12 @@ fn enabled_official_workspace_views_are_real_clickable_native_routes() {
             > 0.
     );
     runner.render_to_file(&evidence.join("models.png"));
+
+    click(&mut runner, "Sync");
+    runner.sync_and_update();
+    assert!(node(&runner, "Sync workspace").layout().area.size.width > 0.);
+    click(&mut runner, "Scan the active vault for Sync");
+    runner.sync_and_update();
+    assert!(node(&runner, "Sync result").layout().area.size.width > 0.);
+    runner.render_to_file(&evidence.join("sync.png"));
 }

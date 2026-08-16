@@ -60,6 +60,7 @@ pub enum NativeViewIcon {
     Dashboard,
     Graph,
     Models,
+    Sync,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -102,6 +103,7 @@ fn native_view_for(addon: &InstalledAddon) -> Option<NativeView> {
         ),
         "elephant.ai-chat" => ("Chat", WorkspaceView::Chat, NativeViewIcon::Chat),
         "elephant.open-models" => ("Models", WorkspaceView::Models, NativeViewIcon::Models),
+        "elephant.sync" => ("Sync", WorkspaceView::Sync, NativeViewIcon::Sync),
         "elephant.dashboard" => (
             "Dashboard",
             WorkspaceView::Dashboard,

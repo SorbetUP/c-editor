@@ -44,7 +44,7 @@ pub const SEARCH_RAIL_DESCRIPTION: &str = "Open global search.";
 
 /// The workspace IDs that the vault store accepts in `WORKSPACE_VIEWS`.
 pub const VAULT_STORE_WORKSPACE_VIEWS: &[&str] = &[
-    "notes", "wiki", "chat", "canvas", "graph", "calendar", "models",
+    "notes", "wiki", "chat", "canvas", "graph", "calendar", "models", "sync",
 ];
 
 /// The core set AppShell keeps when an add-on view is closed.
@@ -83,6 +83,7 @@ pub enum WorkspaceView {
     Graph,
     Calendar,
     Models,
+    Sync,
     Addon(String),
 }
 
@@ -97,6 +98,7 @@ impl WorkspaceView {
             "graph" => Self::Graph,
             "calendar" => Self::Calendar,
             "models" => Self::Models,
+            "sync" => Self::Sync,
             id => Self::Addon(id.to_owned()),
         }
     }
@@ -111,6 +113,7 @@ impl WorkspaceView {
             Self::Graph => "graph",
             Self::Calendar => "calendar",
             Self::Models => "models",
+            Self::Sync => "sync",
             Self::Addon(id) => id,
         }
     }
@@ -624,7 +627,7 @@ mod tests {
         assert_eq!(SIDEBAR_WIDTH_STORAGE_KEY, "elephantnote:sidebarWidth");
         assert_eq!(WORKSPACE_NAVIGATION_LABEL, "Workspace navigation");
         assert_eq!(SEARCH_NOTES_LABEL, "Search notes");
-        assert_eq!(VAULT_STORE_WORKSPACE_VIEWS.len(), 7);
+        assert_eq!(VAULT_STORE_WORKSPACE_VIEWS.len(), 8);
         assert_eq!(
             APP_SHELL_CORE_WORKSPACE_VIEWS,
             &["notes", "dashboard", "canvas"]

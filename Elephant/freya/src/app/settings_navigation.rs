@@ -2,11 +2,19 @@
 
 use freya::prelude::*;
 
-use crate::{settings_contract::CORE_SECTIONS, theme};
+use crate::{
+    app::navigation_icons::{svg_icon, Icon},
+    settings_contract::CORE_SECTIONS,
+    theme,
+};
 
 use super::super::SettingsViewState;
 
-pub(super) fn settings_header(search: Input, palette: theme::ThemePalette) -> Element {
+pub(super) fn settings_header(
+    search: Input,
+    mut shell_state: State<super::super::super::ShellState>,
+    palette: theme::ThemePalette,
+) -> Element {
     rect()
         .width(Size::fill())
         .height(Size::px(64.))
@@ -23,20 +31,40 @@ pub(super) fn settings_header(search: Input, palette: theme::ThemePalette) -> El
         )
         .child(
             rect()
-                .width(Size::percent(44.))
-                .max_width(Size::px(350.))
-                .height(Size::px(36.))
-                .padding(Gaps::new(0., 10., 0., 10.))
-                .background(theme::token_color(palette, theme::ThemeToken::Bg))
-                .border(
-                    Border::new()
-                        .fill(theme::token_color(palette, theme::ThemeToken::Border))
-                        .width(1.),
-                )
-                .with_corner_radius(10.)
+                .horizontal()
+                .spacing(10.)
                 .cross_align(Alignment::Center)
-                .a11y_alt("Search all settings")
-                .child(search),
+                .child(
+                    rect()
+                        .width(Size::percent(44.))
+                        .max_width(Size::px(350.))
+                        .height(Size::px(36.))
+                        .padding(Gaps::new(0., 10., 0., 10.))
+                        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+                        .border(
+                            Border::new()
+                                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                                .width(1.),
+                        )
+                        .with_corner_radius(10.)
+                        .cross_align(Alignment::Center)
+                        .a11y_alt("Search all settings")
+                        .child(search),
+                )
+                .child(
+                    rect()
+                        .width(Size::px(32.))
+                        .height(Size::px(32.))
+                        .center()
+                        .with_corner_radius(8.)
+                        .a11y_alt("Close settings")
+                        .on_mouse_up(move |_| shell_state.write().settings_open = false)
+                        .child(svg_icon(
+                            Icon::X,
+                            theme::token_color(palette, theme::ThemeToken::Muted),
+                            17.,
+                        )),
+                ),
         )
         .into_element()
 }

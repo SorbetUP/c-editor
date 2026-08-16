@@ -14,8 +14,8 @@ use crate::{
 };
 
 use super::{
-    calendar_view, chat_view, drawing, editor_view, models_view, route_notice, wiki_view,
-    ShellState,
+    calendar_view, chat_view, drawing, editor_view, models_view, route_notice, sync_view,
+    wiki_view, ShellState,
 };
 
 #[path = "library_icons.rs"]
@@ -31,6 +31,8 @@ use library_actions::{
 use library_icons::{svg_icon, Icon as LibraryIcon};
 
 const LIBRARY_DRAG_THRESHOLD: f64 = 4.;
+const GRID_GAP: f32 = 10.;
+const GRID_MIN_CARD_WIDTH: f32 = 240.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct LibraryCardDrag {
@@ -91,6 +93,10 @@ impl LibraryCardDrag {
         self.moved && self.source.as_deref() == Some(path)
     }
 
+    pub(super) fn has_moved(&self) -> bool {
+        self.moved
+    }
+
     pub(super) fn finish(&mut self) -> Option<(String, String)> {
         let result = if self.moved && self.target_allowed {
             self.source.clone().zip(self.target.clone())
@@ -137,6 +143,8 @@ pub(super) fn main_content(
         chat_view::workspace(state, palette)
     } else if snapshot.view == WorkspaceView::Models {
         models_view::workspace(state, palette)
+    } else if snapshot.view == WorkspaceView::Sync {
+        sync_view::workspace(state, palette)
     } else if snapshot.search_open {
         route_notice("Search", "Search notes")
     } else if snapshot.settings_open {
@@ -256,8 +264,14 @@ fn library_toolbar(state: State<ShellState>) -> Element {
         .height(Size::px(72.))
         .padding(Gaps::new(10., 12., 10., 12.))
         .horizontal()
-        .child(rect().width(Size::fill()))
-        .child(rect().horizontal().spacing(14.).child(sort).child(view))
+        .child(
+            rect()
+                .position(Position::new_absolute().right(0.).top(0.))
+                .horizontal()
+                .spacing(14.)
+                .child(sort)
+                .child(view),
+        )
         .into_element()
 }
 
@@ -602,6 +616,22 @@ fn library_grid(state: State<ShellState>) -> Element {
         .into_element()
 }
 
+fn grid_card_width_for_parent(available: f32) -> f32 {
+    let available = available.max(0.);
+    if available <= GRID_MIN_CARD_WIDTH {
+        return available;
+    }
+
+    let columns = ((available + GRID_GAP) / (GRID_MIN_CARD_WIDTH + GRID_GAP))
+        .floor()
+        .max(1.);
+    ((available - GRID_GAP * (columns - 1.)) / columns).max(0.)
+}
+
+fn grid_card_width() -> Size {
+    Size::func(|context| Some(grid_card_width_for_parent(context.available_parent)))
+}
+
 #[derive(PartialEq)]
 struct LibraryCard {
     entry: LibraryEntry,
@@ -618,7 +648,14 @@ impl Component for LibraryCard {
     fn render(&self) -> impl IntoElement {
         let card_menu_state = use_state(CardMenuState::default);
         let rename_value = use_state(String::new);
+        let rename_a11y_id = use_a11y();
         let card_area = use_state(|| None::<Area>);
+        let should_focus_rename = card_menu_state.read().renaming;
+        use_side_effect(move || {
+            if should_focus_rename {
+                rename_a11y_id.request_focus();
+            }
+        });
         render_library_card(
             &self.entry,
             self.mode,
@@ -626,6 +663,7 @@ impl Component for LibraryCard {
             self.state,
             card_menu_state,
             rename_value,
+            rename_a11y_id,
             card_area,
         )
     }
@@ -638,6 +676,7 @@ fn render_library_card(
     state: State<ShellState>,
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
+    rename_a11y_id: AccessibilityId,
     card_area: State<Option<Area>>,
 ) -> Element {
     let path = entry.path.as_str().to_string();
@@ -667,6 +706,7 @@ fn render_library_card(
     let mut leave_state = state;
     let drag_source_path = path.clone();
     let mut drag_start_state = state;
+    let drag_start_area = card_area;
     let drag_target_path = path.clone();
     let drag_leave_path = path.clone();
     let mut drag_enter_state = state;
@@ -674,6 +714,9 @@ fn render_library_card(
     let mut card_area_state = card_area;
     let drag_move_path = path.clone();
     let mut drag_move_state = state;
+    let mut hover_move_state = state;
+    let hover_move_key = hover_key.clone();
+    let hover_move_area = card_area;
 
     let mut trigger_state = card_menu_state;
     let menu_trigger = rect()
@@ -720,6 +763,7 @@ fn render_library_card(
         state,
         card_menu_state,
         rename_value,
+        rename_a11y_id,
         renaming,
     );
 
@@ -736,11 +780,10 @@ fn render_library_card(
     let mut menu_state_for_secondary = card_menu_state;
     let mut state_for_open = state;
     let mut click_menu_state = card_menu_state;
-    let click_rename_value = rename_value;
 
     rect()
         .width(if mode == ViewMode::Grid {
-            Size::px(240.)
+            grid_card_width()
         } else {
             Size::fill()
         })
@@ -773,9 +816,19 @@ fn render_library_card(
         })
         .on_pointer_enter(move |_| enter_state.write().set_hovered_target(enter_key.clone()))
         .on_pointer_leave(move |_| leave_state.write().clear_hovered_target(&leave_key))
-        .on_mouse_down(move |event: Event<MouseEventData>| {
-            if event.button == Some(MouseButton::Left) {
-                let location = event.global_location;
+        .on_global_pointer_down(move |event: Event<PointerEventData>| {
+            if event.button() == Some(MouseButton::Left) {
+                let location = event.global_location();
+                let Some(area) = *drag_start_area.read() else {
+                    return;
+                };
+                if location.x < f64::from(area.min_x())
+                    || location.x > f64::from(area.max_x())
+                    || location.y < f64::from(area.min_y())
+                    || location.y > f64::from(area.max_y())
+                {
+                    return;
+                }
                 drag_start_state.write().library_drag.begin(
                     &drag_source_path,
                     is_folder,
@@ -796,7 +849,7 @@ fn render_library_card(
                 .library_drag
                 .leave_target(&drag_leave_path);
         })
-        .on_global_pointer_move(move |event: Event<PointerEventData>| {
+        .on_capture_global_pointer_move(move |event: Event<PointerEventData>| {
             let Some(area) = *card_area.read() else {
                 return;
             };
@@ -817,6 +870,31 @@ fn render_library_card(
                     .leave_target(&drag_move_path);
             }
         })
+        .on_global_pointer_move(move |event: Event<PointerEventData>| {
+            let Some(area) = *hover_move_area.read() else {
+                return;
+            };
+            let point = event.global_location();
+            let inside = point.x >= f64::from(area.min_x())
+                && point.x <= f64::from(area.max_x())
+                && point.y >= f64::from(area.min_y())
+                && point.y <= f64::from(area.max_y());
+            if inside {
+                if hover_move_state.read().hovered_target.as_deref()
+                    != Some(hover_move_key.as_str())
+                {
+                    hover_move_state
+                        .write()
+                        .set_hovered_target(hover_move_key.clone());
+                }
+            } else if hover_move_state.read().hovered_target.as_deref()
+                == Some(hover_move_key.as_str())
+            {
+                hover_move_state
+                    .write()
+                    .clear_hovered_target(&hover_move_key);
+            }
+        })
         .on_secondary_down(move |_| {
             let mut menu = menu_state_for_secondary.write();
             menu.open = true;
@@ -826,13 +904,11 @@ fn render_library_card(
             if event.button == Some(MouseButton::Right) {
                 return;
             }
-            if renaming {
-                let mut menu = click_menu_state.write();
-                menu.open = false;
-                menu.renaming = false;
-                drop(menu);
-                let mut value = click_rename_value;
-                value.set(String::new());
+            let menu_snapshot = click_menu_state.read().clone();
+            if menu_snapshot.open
+                || menu_snapshot.renaming
+                || state_for_open.read().library_drag.has_moved()
+            {
                 return;
             }
 
@@ -895,6 +971,7 @@ fn card_title_row(
     state: State<ShellState>,
     card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
+    rename_a11y_id: AccessibilityId,
     renaming: bool,
 ) -> Element {
     let icon = if is_folder {
@@ -919,7 +996,14 @@ fn card_title_row(
         rect()
             .width(Size::fill())
             .a11y_alt(format!("Rename {title}"))
-            .on_mouse_up(|event: Event<MouseEventData>| event.stop_propagation())
+            .on_mouse_down(move |event: Event<MouseEventData>| {
+                event.stop_propagation();
+                rename_a11y_id.request_focus();
+            })
+            .on_mouse_up(move |event: Event<MouseEventData>| {
+                event.stop_propagation();
+                rename_a11y_id.request_focus();
+            })
             .on_global_key_down(move |event: Event<KeyboardEventData>| {
                 if event.key == Key::Named(NamedKey::Escape) {
                     let mut menu = escape_menu_state.write();
@@ -939,6 +1023,7 @@ fn card_title_row(
                     .child(
                         Input::new(rename_value)
                             .width(Size::fill())
+                            .a11y_id(rename_a11y_id)
                             .auto_focus(true)
                             .on_submit(move |next_title: String| {
                                 let next_title = next_title.trim().to_string();
@@ -1187,5 +1272,12 @@ mod tests {
         assert_eq!(sort_label(SortMode::UpdatedOldest), "Updated oldest");
         assert_eq!(sort_label(SortMode::TitleAz), "Title A-Z");
         assert_eq!(sort_label(SortMode::TitleZa), "Title Z-A");
+    }
+
+    #[test]
+    fn grid_card_width_matches_tauri_auto_fill_columns() {
+        assert!((grid_card_width_for_parent(972.) - 317.33334).abs() < 0.01);
+        assert!((grid_card_width_for_parent(600.) - 295.).abs() < 0.01);
+        assert!((grid_card_width_for_parent(230.) - 230.).abs() < 0.01);
     }
 }

@@ -56,6 +56,21 @@ fn first_editable_inline(editor: &EditorDocument) -> (muya_core::NodeId, u32) {
     (inline.id, value.encode_utf16().count() as u32)
 }
 
+fn first_code_span(editor: &EditorDocument) -> (muya_core::NodeId, u32) {
+    editor
+        .session()
+        .document()
+        .nodes
+        .values()
+        .find_map(|node| match &node.kind {
+            NodeKind::Inline(InlineKind::CodeSpan { code }) => {
+                Some((node.id, code.encode_utf16().count() as u32))
+            }
+            _ => None,
+        })
+        .expect("fixture must contain generated code span")
+}
+
 fn select_all(editor: &mut EditorDocument) {
     let (node, end) = first_editable_inline(editor);
     editor
@@ -113,13 +128,14 @@ fn inline_code_toolbar_action_stays_editable_and_persists() {
         .expect("apply real inline-code transaction");
     assert_eq!(editor.serialize(), "`alpha`");
 
-    let (code_node, end) = first_editable_inline(&editor);
-    editor
-        .set_selection(Selection::collapsed(SelectionPoint {
+    let (code_node, end) = first_code_span(&editor);
+    assert_eq!(
+        editor.session().snapshot().selection,
+        Selection::collapsed(SelectionPoint {
             node: code_node,
             offset_utf16: end,
-        }))
-        .expect("move caret into generated code span");
+        })
+    );
     editor
         .dispatch_text("!")
         .expect("generated code span must remain editable");

@@ -88,12 +88,24 @@ fn require_label(runner: &TestingRunner, label: &str) -> TestingNode {
 }
 
 fn click_label(runner: &mut TestingRunner, label: &str) {
-    let area = require_label(runner, label).layout().area;
-    runner.click_cursor((
-        f64::from(area.origin.x + area.size.width / 2.),
-        f64::from(area.origin.y + area.size.height / 2.),
-    ));
-    runner.sync_and_update();
+    for _ in 0..12 {
+        let area = require_label(runner, label).layout().visible_area();
+        if area.origin.x >= 0.
+            && area.origin.y >= 0.
+            && area.origin.x + area.size.width <= 1280.
+            && area.origin.y + area.size.height <= 840.
+        {
+            runner.click_cursor((
+                f64::from(area.origin.x + area.size.width / 2.),
+                f64::from(area.origin.y + area.size.height / 2.),
+            ));
+            runner.sync_and_update();
+            return;
+        }
+        runner.scroll((900., 700.), (0., -600.));
+        runner.sync_and_update();
+    }
+    panic!("Freya node {label:?} exists but cannot be scrolled into view");
 }
 
 fn background(runner: &TestingRunner, label: &str) -> Fill {
@@ -122,7 +134,7 @@ fn source_theme_starts_light_toggles_the_shell_and_survives_restart() {
     );
 
     click_label(&mut runner, "Settings");
-    click_label(&mut runner, "Dark");
+    click_label(&mut runner, "Use Dark color mode");
     assert_eq!(
         background(&runner, "AppShell.vue"),
         Fill::Color(theme::color((15, 20, 29, 255))),

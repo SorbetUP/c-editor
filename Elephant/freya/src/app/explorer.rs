@@ -567,7 +567,11 @@ pub fn search_overlay(
 ) -> Element {
     let input_value = query.read().clone();
     let snapshot = state.read().clone();
-    if !interactive || snapshot.surface == ExplorerSurface::Graph {
+    // Search is a shell-level overlay and must remain available when the
+    // current workspace is Graph. The source SearchModal can be opened from
+    // every route; filtering it out for the Graph surface made the rail
+    // action mutate state without exposing the actual search controls.
+    if !interactive {
         return rect()
             .position(Position::new_global())
             .width(Size::fill())

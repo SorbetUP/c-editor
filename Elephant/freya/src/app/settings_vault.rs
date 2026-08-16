@@ -40,6 +40,83 @@ pub(crate) fn vault_settings(
         .on_press(move |_| choose_vault(choose_state))
         .child(label().text("Open another vault"));
 
+    let mut registry_rows = rect()
+        .width(Size::fill())
+        .height(Size::px(
+            shell.vault_registry.vaults.len() as f32 * 58.,
+        ))
+        .spacing(8.)
+        .a11y_alt("Registered vaults");
+    for vault in &shell.vault_registry.vaults {
+        let id = vault.id.clone();
+        let name = vault.name.clone();
+        let is_active = shell
+            .vault_registry
+            .active_vault_id
+            .as_deref()
+            == Some(vault.id.as_str());
+        let mut activate_state = shell_state;
+        let mut remove_state = shell_state;
+        let activate_name = name.clone();
+        let activate = (!is_active).then(|| {
+            rect()
+                .width(Size::px(88.))
+                .padding(Gaps::new(5., 8., 5., 8.))
+                .with_corner_radius(7.)
+                .a11y_alt(format!("Activate {activate_name}"))
+                .on_press(move |_| activate_state.write().activate_vault(&id))
+                .child(label().text("Activate"))
+                .into_element()
+        });
+        let remove_id = vault.id.clone();
+        let remove_name = vault.name.clone();
+        let remove = rect()
+            .width(Size::px(88.))
+            .padding(Gaps::new(5., 8., 5., 8.))
+            .with_corner_radius(7.)
+            .a11y_alt(format!("Remove {remove_name} from list"))
+            .on_press(move |_| remove_state.write().remove_vault(&remove_id))
+            .child(label().text("Remove"));
+        registry_rows = registry_rows.child(
+            rect()
+                .width(Size::fill())
+                .height(Size::px(58.))
+                .padding(Gaps::new(8., 10., 8., 10.))
+                .horizontal()
+                .cross_align(Alignment::Center)
+                .main_align(Alignment::SpaceBetween)
+                .background(theme::token_color(
+                    palette,
+                    if is_active {
+                        theme::ThemeToken::Soft
+                    } else {
+                        theme::ThemeToken::Surface
+                    },
+                ))
+                .with_corner_radius(8.)
+                .a11y_alt(format!("Vault {name}"))
+                .child(
+                    rect()
+                        .expanded()
+                        .spacing(2.)
+                        .child(label().font_weight(FontWeight::BOLD).text(name))
+                        .child(
+                            label()
+                                .font_size(10.)
+                                .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                                .text(vault.path.clone()),
+                        ),
+                )
+                .child(
+                    rect()
+                        .horizontal()
+                        .spacing(5.)
+                        .maybe_child(activate)
+                        .child(remove),
+                ),
+        );
+    }
+
     let trash_summary = if trash.loading {
         "Reading trash…".to_owned()
     } else if let Some(error) = trash.error.as_deref() {
@@ -181,6 +258,7 @@ pub(crate) fn vault_settings(
                 )
                 .with_corner_radius(12.)
                 .spacing(11.)
+                .child(registry_rows)
                 .child(body)
                 .child(choose),
         )

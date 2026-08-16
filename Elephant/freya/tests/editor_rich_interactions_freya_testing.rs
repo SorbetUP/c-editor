@@ -9,7 +9,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Clone)]
@@ -197,6 +197,9 @@ fn table_tab_moves_the_real_muya_selection_to_the_next_cell() {
     runner.click_cursor(cells[0].layout().area.center().to_f64());
     runner.press_key(Key::Named(NamedKey::Tab));
     runner.sync_and_update();
+    // Table navigation requests focus on the next native paragraph; give the
+    // headless event loop one frame to apply that accessibility transition.
+    runner.poll_n(Duration::from_millis(1), 2);
     runner.write_text("X");
 
     assert_eq!(paragraph_texts(&runner, "Table cell"), vec!["C", "XD"]);

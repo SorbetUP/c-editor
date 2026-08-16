@@ -32,12 +32,23 @@ pub(super) fn card_action_menu(
     let mut rename_value_state = rename_value;
     let mut delete_menu_state = card_menu_state;
     let mut delete_state = state;
+    let mut sidebar_menu_state = card_menu_state;
+    let mut sidebar_state = state;
     let path_for_delete = path;
     let rename_title = title;
+    let sidebar_path = path_for_delete.clone();
+    let sidebar_title = rename_title.clone();
+    let sidebar_attached = is_folder
+        && state
+            .read()
+            .vault
+            .as_ref()
+            .and_then(|vault| vault.sidebar_attached_paths().ok())
+            .is_some_and(|paths| paths.contains(sidebar_path.as_str()));
 
     rect()
         .position(Position::new_absolute().top(42.).right(8.))
-        .width(Size::px(78.))
+        .width(Size::px(if is_folder { 112. } else { 78. }))
         .height(Size::px(42.))
         .horizontal()
         .spacing(4.)
@@ -92,7 +103,72 @@ pub(super) fn card_action_menu(
                     20.,
                 )),
         )
+        .maybe_child(is_folder.then(|| {
+            rect()
+                .key(("sidebar-action", sidebar_attached))
+                .width(Size::px(32.))
+                .height(Size::px(32.))
+                .center()
+                .with_corner_radius(8.)
+                .a11y_alt(if sidebar_attached {
+                    "Hide from sidebar"
+                } else {
+                    "Show in sidebar"
+                })
+                .on_mouse_up(move |event: Event<MouseEventData>| {
+                    event.stop_propagation();
+                    if toggle_sidebar_visibility(
+                        &mut sidebar_state,
+                        &sidebar_path,
+                        &sidebar_title,
+                        sidebar_attached,
+                    ) {
+                        let mut menu = sidebar_menu_state.write();
+                        menu.open = false;
+                        menu.renaming = false;
+                    }
+                })
+                .child(svg_icon(
+                    if sidebar_attached {
+                        LibraryIcon::PanelLeftClose
+                    } else {
+                        LibraryIcon::PanelLeftOpen
+                    },
+                    theme::color(theme::MUTED),
+                    20.,
+                ))
+                .into_element()
+        }))
         .into_element()
+}
+
+fn toggle_sidebar_visibility(
+    state: &mut State<ShellState>,
+    path: &str,
+    title: &str,
+    attached: bool,
+) -> bool {
+    let Some(vault) = state.read().vault.clone() else {
+        state.write().error = Some("No vault selected.".to_owned());
+        return false;
+    };
+    let next = !attached;
+    eprintln!(
+        "[freya][sidebar] action={} path={}",
+        if next { "attach" } else { "detach" },
+        path
+    );
+    match vault.set_sidebar_visibility(path, title, "folder", next) {
+        Ok(()) => {
+            state.write().error = None;
+            true
+        }
+        Err(error) => {
+            eprintln!("[freya][sidebar] action=visibility-failure path={path} error={error}");
+            state.write().error = Some(error.to_string());
+            false
+        }
+    }
 }
 
 /// Advance the exact Tauri library window. A single prefetch first reveals any

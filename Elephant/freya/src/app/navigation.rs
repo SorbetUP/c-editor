@@ -549,6 +549,7 @@ fn native_view_icon(icon: addon_adapter::NativeViewIcon) -> Icon {
         addon_adapter::NativeViewIcon::Dashboard => Icon::LayoutDashboard,
         addon_adapter::NativeViewIcon::Graph => Icon::GitFork,
         addon_adapter::NativeViewIcon::Models => Icon::Database,
+        addon_adapter::NativeViewIcon::Sync => Icon::RefreshCw,
     }
 }
 
@@ -580,19 +581,23 @@ fn activate_rail_action(mut state: State<ShellState>, item_id: &str) {
         "models" => state
             .write()
             .open_workspace(crate::navigation_contract::WorkspaceView::Models),
+        "sync" => state
+            .write()
+            .open_workspace(crate::navigation_contract::WorkspaceView::Sync),
         "dashboard" => state.write().open_dashboard(),
         _ => {}
     }
 }
 
 fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) -> Element {
-    let vault_name = state
-        .read()
+    let snapshot = state.read().clone();
+    let vault_name = snapshot
         .vault
         .as_ref()
         .map(|vault| vault.descriptor().name.clone())
         .unwrap_or_else(|| "No vault".to_string());
-    rect()
+    let active_id = snapshot.vault_registry.active_vault_id.clone();
+    let mut panel = rect()
         .position(Position::new_absolute().left(52.).bottom(42.))
         .width(Size::px(250.))
         .padding(Gaps::new_all(6.))
@@ -611,20 +616,27 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
                 .font_weight(FontWeight::BOLD)
                 .color(theme::token_color(palette, theme::ThemeToken::Muted))
                 .text("VAULTS"),
-        )
-        .child(
+        );
+
+    if snapshot.vault_registry.vaults.is_empty() {
+        panel = panel.child(
             rect()
                 .height(Size::px(34.))
                 .padding(Gaps::new(0., 10., 0., 10.))
                 .horizontal()
                 .cross_align(Alignment::Center)
-                .background(theme::token_color(palette, theme::ThemeToken::Soft))
-                .with_corner_radius(6.)
-                .a11y_alt(vault_name.clone())
+                .on_mouse_up(move |_| {
+                    let mut shell = state.write();
+                    shell.settings_open = true;
+                    shell.settings_target_section = Some("vaults".to_owned());
+                    shell.search_open = false;
+                    shell.vault_menu_open = false;
+                })
+                .a11y_alt("Manage vaults")
                 .child(svg_icon(
-                    Icon::Vault,
-                    theme::token_color(palette, theme::ThemeToken::Text),
-                    15.,
+                    Icon::Settings,
+                    theme::token_color(palette, theme::ThemeToken::Muted),
+                    16.,
                 ))
                 .child(
                     label()
@@ -632,7 +644,86 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
                         .font_size(13.)
                         .text(vault_name),
                 ),
-        )
+        );
+    } else {
+        for vault in &snapshot.vault_registry.vaults {
+            let id = vault.id.clone();
+            let name = vault.name.clone();
+            let is_active = active_id.as_deref() == Some(vault.id.as_str());
+            let mut switch_state = state;
+            panel = panel.child(
+                rect()
+                    .width(Size::fill())
+                    .height(Size::px(34.))
+                    .padding(Gaps::new(0., 10., 0., 10.))
+                    .horizontal()
+                    .cross_align(Alignment::Center)
+                    .background(theme::token_color(
+                        palette,
+                        if is_active {
+                            theme::ThemeToken::Soft
+                        } else {
+                            theme::ThemeToken::Surface
+                        },
+                    ))
+                    .with_corner_radius(6.)
+                    .a11y_alt(name.clone())
+                    .on_mouse_up(move |_| switch_state.write().activate_vault(&id))
+                    .child(svg_icon(
+                        Icon::Vault,
+                        theme::token_color(
+                            palette,
+                            if is_active {
+                                theme::ThemeToken::Text
+                            } else {
+                                theme::ThemeToken::Muted
+                            },
+                        ),
+                        15.,
+                    ))
+                    .child(
+                        label()
+                            .width(Size::fill())
+                            .padding(Gaps::new(0., 0., 0., 10.))
+                            .font_size(13.)
+                            .color(theme::token_color(
+                                palette,
+                                if is_active {
+                                    theme::ThemeToken::Text
+                                } else {
+                                    theme::ThemeToken::Muted
+                                },
+                            ))
+                            .text(name),
+                    ),
+            );
+        }
+    }
+
+    let add_state = state;
+    panel = panel.child(
+        rect()
+            .height(Size::px(34.))
+            .padding(Gaps::new(0., 10., 0., 10.))
+            .horizontal()
+            .cross_align(Alignment::Center)
+            .on_mouse_up(move |_| super::choose_vault(add_state))
+            .a11y_alt("Add another vault")
+            .child(svg_icon(
+                Icon::Plus,
+                theme::token_color(palette, theme::ThemeToken::Muted),
+                16.,
+            ))
+            .child(
+                label()
+                    .padding(Gaps::new(0., 0., 0., 10.))
+                    .font_size(13.)
+                    .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                    .text("Add another vault"),
+            ),
+    );
+
+    panel
         .child(
             rect()
                 .height(Size::px(34.))
@@ -642,6 +733,7 @@ fn vault_switcher(mut state: State<ShellState>, palette: theme::ThemePalette) ->
                 .on_mouse_up(move |_| {
                     let mut shell = state.write();
                     shell.settings_open = true;
+                    shell.settings_target_section = Some("vaults".to_owned());
                     shell.search_open = false;
                     shell.vault_menu_open = false;
                 })
@@ -666,6 +758,7 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     // Hooks stay unconditional: the host component owns this lifecycle even
     // while the sidebar is hidden.
     let resizer_a11y_id = use_a11y();
+    let resizer_area = use_state(|| Option::<Area>::None);
     let expanded_paths = use_state(HashSet::<String>::new);
     let sidebar_drag = use_state(SidebarEntryDrag::default);
     let snapshot = state.read().clone();
@@ -737,9 +830,29 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
         .map(|page| page.entries)
         .or_else(|| snapshot.page.as_ref().map(|page| page.entries.clone()))
         .unwrap_or_default();
+    let workspace_metadata_present = snapshot
+        .vault
+        .as_ref()
+        .is_some_and(crate::vault_adapter::VaultAdapter::has_workspace_metadata);
+    let attached_paths = snapshot
+        .vault
+        .as_ref()
+        .and_then(|vault| match vault.sidebar_attached_paths() {
+            Ok(paths) => Some(paths),
+            Err(error) => {
+                eprintln!("[freya][sidebar] action=read-workspace-failure error={error}");
+                None
+            }
+        })
+        .unwrap_or_default();
     let entries = root_entries
         .iter()
-        .filter(|entry| sidebar_entry_visible(entry))
+        .filter(|entry| {
+            sidebar_entry_visible(entry)
+                && (!workspace_metadata_present
+                    || !entry.is_directory
+                    || attached_paths.contains(&normalize_sidebar_path(&entry.path)))
+        })
         .map(|entry| sidebar_entry(entry, 0, state, palette, expanded_paths, sidebar_drag))
         .collect::<Vec<_>>();
 
@@ -749,6 +862,8 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     let mut resize_key_state = state;
     let mut resize_enter_state = state;
     let mut resize_leave_state = state;
+    let mut resizer_area_state = resizer_area;
+    let resizer_area_for_press = resizer_area;
     let resizer = rect()
         .width(Size::px(theme::SIDEBAR_RESIZER_WIDTH))
         .height(Size::fill())
@@ -768,6 +883,9 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                 ))
                 .with_corner_radius(999.),
         )
+        .on_sized(move |event: Event<SizedEventData>| {
+            resizer_area_state.set(Some(event.area));
+        })
         .a11y_id(resizer_a11y_id)
         .a11y_alt("Resize sidebar")
         .on_pointer_enter(move |_| {
@@ -780,12 +898,21 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                 .write()
                 .clear_hovered_target("sidebar:resizer");
         })
-        .on_pointer_down(move |event: Event<PointerEventData>| {
+        .on_global_pointer_down(move |event: Event<PointerEventData>| {
             if event.is_primary() {
+                let Some(area) = *resizer_area_for_press.read() else {
+                    return;
+                };
+                let point = event.global_location();
+                if point.x < f64::from(area.min_x())
+                    || point.x > f64::from(area.max_x())
+                    || point.y < f64::from(area.min_y())
+                    || point.y > f64::from(area.max_y())
+                {
+                    return;
+                }
                 resizer_a11y_id.request_focus();
-                resize_press_state
-                    .write()
-                    .begin_sidebar_resize(event.global_location().x);
+                resize_press_state.write().begin_sidebar_resize(point.x);
             }
         })
         .on_global_pointer_move(move |event: Event<PointerEventData>| {
