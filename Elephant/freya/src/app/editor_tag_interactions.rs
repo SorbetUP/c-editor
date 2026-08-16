@@ -12,7 +12,7 @@ pub(super) fn persist_tags(
     tags: &[String],
     title: &str,
 ) -> Result<(), String> {
-    state
+    let update_result = state
         .write()
         .editor
         .as_mut()
@@ -21,8 +21,13 @@ pub(super) fn persist_tags(
             editor
                 .update_tags(tags, title)
                 .map_err(|error| error.to_string())
-                .and_then(|_| editor.save().map_err(|error| error.to_string()))
-        })
+        });
+    update_result.and_then(|_| {
+        state
+            .write()
+            .save_open_editor()
+            .map_err(|error| error.to_string())
+    })
 }
 
 pub(super) fn delete_tag(

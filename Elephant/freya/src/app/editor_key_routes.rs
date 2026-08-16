@@ -9,7 +9,7 @@ use super::super::super::{has_table_ancestor, ShellState};
 use super::super::editor_clipboard_interactions;
 
 pub(super) fn route_key(
-    state: State<ShellState>,
+    mut state: State<ShellState>,
     node_id: NodeId,
     key: &Key,
     modifiers: Modifiers,
@@ -61,11 +61,13 @@ pub(super) fn route_key(
             if modifiers.contains(Modifiers::ctrl_or_meta())
                 && character.eq_ignore_ascii_case("s") =>
         {
-            Some(with_editor(
-                state,
-                "cannot save without an open note",
-                |editor| editor.save().map(|_| ()),
-            ))
+            Some(
+                state
+                    .write()
+                    .save_open_editor()
+                    .map(|_| ())
+                    .map_err(|error| error.to_string()),
+            )
         }
         Key::Character(character)
             if modifiers.contains(Modifiers::ctrl_or_meta())

@@ -414,6 +414,34 @@ impl ShellState {
         );
     }
 
+    pub(super) fn save_open_editor(&mut self) -> Result<(), crate::editor::EditorError> {
+        let result = self
+            .editor
+            .as_mut()
+            .ok_or(crate::editor::EditorError::MissingPath)
+            .and_then(EditorDocument::save);
+        if result.is_ok() {
+            let refreshed = self.editor.as_ref().and_then(|editor| {
+                let path = editor.path()?;
+                let root = self.vault.as_ref()?.root();
+                let relative = path
+                    .strip_prefix(root)
+                    .ok()?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let directory = relative
+                    .rsplit_once('/')
+                    .map(|(parent, _)| parent.to_owned())
+                    .unwrap_or_default();
+                Some((relative, directory))
+            });
+            if let Some((relative, directory)) = refreshed {
+                self.refresh_library_entry(&relative, &directory);
+            }
+        }
+        result
+    }
+
     fn toggle_pinned(&mut self, path: crate::library_contract::RelativePath) {
         let path_for_log = path.clone();
         self.library.toggle_pinned(path);

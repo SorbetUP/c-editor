@@ -564,11 +564,15 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             }
             let result = {
                 let mut shell = save_state.write();
-                shell
+                if shell
                     .editor
-                    .as_mut()
-                    .filter(|editor| editor.autosave_due())
-                    .map_or(Ok(()), |editor| editor.save())
+                    .as_ref()
+                    .is_some_and(|editor| editor.autosave_due())
+                {
+                    shell.save_open_editor()
+                } else {
+                    Ok(())
+                }
             };
             if let Err(error) = result {
                 save_state.write().error = Some(error.to_string());
@@ -699,7 +703,7 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             }
             let result = {
                 let mut shell = state.write();
-                shell
+                let rename_result = shell
                     .editor
                     .as_mut()
                     .ok_or_else(|| "cannot rename without an open note".to_string())
@@ -707,8 +711,9 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
                         editor
                             .rename_title(&next_title)
                             .map_err(|error| error.to_string())
-                            .and_then(|_| editor.save().map_err(|error| error.to_string()))
-                    })
+                    });
+                rename_result
+                    .and_then(|_| shell.save_open_editor().map_err(|error| error.to_string()))
             };
             match result {
                 Ok(()) => {
@@ -892,19 +897,23 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             } else {
                 requested_title
             };
-            let result = state
-                .write()
-                .editor
-                .as_mut()
-                .ok_or_else(|| "cannot save without an open note".to_string())
-                .and_then(|editor| {
-                    if requested_title != title_for_save_original {
-                        editor
-                            .rename_title(&requested_title)
-                            .map_err(|error| error.to_string())?;
-                    }
-                    editor.save().map_err(|error| error.to_string())
-                });
+            let result = {
+                let mut shell = state.write();
+                let rename_result = shell
+                    .editor
+                    .as_mut()
+                    .ok_or_else(|| "cannot save without an open note".to_string())
+                    .and_then(|editor| {
+                        if requested_title != title_for_save_original {
+                            editor
+                                .rename_title(&requested_title)
+                                .map_err(|error| error.to_string())?;
+                        }
+                        Ok(())
+                    });
+                rename_result
+                    .and_then(|_| shell.save_open_editor().map_err(|error| error.to_string()))
+            };
             if let Err(error) = result {
                 state.write().error = Some(error);
             }

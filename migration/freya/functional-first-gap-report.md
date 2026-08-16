@@ -482,3 +482,21 @@ puis en vert après restauration du chemin réel :
 ```text
 cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_link_freya_testing -- --nocapture : 2 passed
 ```
+
+## Mise à jour fonctionnelle — 2026-08-16 (rafraîchissement après sauvegarde)
+
+Les chemins de sauvegarde de l’éditeur Freya passent maintenant par une
+commande shell unique : autosave, Ctrl-S, titre, tags et bouton Save écrivent
+le document réel puis rafraîchissent l’entrée de bibliothèque correspondante.
+La carte ne conserve donc pas un ancien titre, extrait ou jeu de tags après une
+écriture réussie.
+
+Preuves exécutées en série pour éviter le partage concurrent de fixtures :
+
+```text
+cargo check --manifest-path Elephant/freya/Cargo.toml : PASS (warnings préexistants)
+cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_lifecycle_freya_testing -- --test-threads=1 --nocapture : 5 passed
+cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_tags_freya_testing -- --nocapture : 2 passed
+cargo test --manifest-path Elephant/freya/Cargo.toml --test note_title_edit_freya_testing -- --nocapture : 1 passed
+cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_keyboard_freya_testing -- --test-threads=1 --nocapture : 7 passed
+```
