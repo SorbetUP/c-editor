@@ -6,7 +6,7 @@
 use freya::prelude::*;
 
 use crate::{
-    library_contract::{LoadMoreAction, LoadMoreNoop, PageApply},
+    library_contract::{LoadMoreAction, LoadMoreNoop, PageApply, RelativePath},
     theme,
     vault_adapter::PageRequest,
 };
@@ -34,10 +34,19 @@ pub(super) fn card_action_menu(
     let mut delete_state = state;
     let mut sidebar_menu_state = card_menu_state;
     let mut sidebar_state = state;
+    let mut pin_menu_state = card_menu_state;
+    let mut pin_state = state;
     let path_for_delete = path;
     let rename_title = title;
     let sidebar_path = path_for_delete.clone();
+    let pin_path = path_for_delete.clone();
     let sidebar_title = rename_title.clone();
+    let pinned = state
+        .read()
+        .library
+        .pinned_paths
+        .iter()
+        .any(|candidate| candidate.as_str() == sidebar_path.as_str());
     let sidebar_attached = is_folder
         && state
             .read()
@@ -48,7 +57,7 @@ pub(super) fn card_action_menu(
 
     rect()
         .position(Position::new_absolute().top(42.).right(8.))
-        .width(Size::px(if is_folder { 112. } else { 78. }))
+        .width(Size::px(if is_folder { 150. } else { 116. }))
         .height(Size::px(42.))
         .horizontal()
         .spacing(4.)
@@ -81,6 +90,22 @@ pub(super) fn card_action_menu(
                     theme::color(theme::TEXT),
                     20.,
                 )),
+        )
+        .child(
+            rect()
+                .width(Size::px(32.))
+                .height(Size::px(32.))
+                .center()
+                .with_corner_radius(8.)
+                .a11y_alt(if pinned { "Unpin" } else { "Pin" })
+                .on_mouse_up(move |event: Event<MouseEventData>| {
+                    event.stop_propagation();
+                    toggle_pin(&mut pin_state, &pin_path);
+                    let mut menu = pin_menu_state.write();
+                    menu.open = false;
+                    menu.renaming = false;
+                })
+                .child(label().text(if pinned { "📌" } else { "📍" })),
         )
         .child(
             rect()
@@ -140,6 +165,15 @@ pub(super) fn card_action_menu(
                 .into_element()
         }))
         .into_element()
+}
+
+fn toggle_pin(state: &mut State<ShellState>, path: &str) {
+    state
+        .write()
+        .library
+        .toggle_pinned(RelativePath::from(path));
+    state.write().persist_shell_preferences();
+    eprintln!("[freya][library] action=toggle-pin path={path}");
 }
 
 fn toggle_sidebar_visibility(

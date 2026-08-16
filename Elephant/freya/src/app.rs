@@ -315,6 +315,47 @@ impl ShellState {
     pub(super) fn refresh_current_directory_from_external(&mut self) {
         let path = self.library.current_path.as_str().to_owned();
         self.reload_directory(&path);
+        self.refresh_open_note_from_external();
+    }
+
+    fn refresh_open_note_from_external(&mut self) {
+        let Some(note_path) = self
+            .editor
+            .as_ref()
+            .and_then(|editor| editor.path().map(PathBuf::from))
+        else {
+            return;
+        };
+        let markdown = match std::fs::read_to_string(&note_path) {
+            Ok(markdown) => markdown,
+            Err(error) => {
+                eprintln!(
+                    "[freya][editor] action=external-refresh-failure path={} error={error}",
+                    note_path.display()
+                );
+                self.error = Some(format!(
+                    "The open note is no longer readable: {}",
+                    note_path.display()
+                ));
+                return;
+            }
+        };
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match editor.reload_external(&markdown) {
+            Ok(()) => eprintln!(
+                "[freya][editor] action=external-refresh-complete path={}",
+                note_path.display()
+            ),
+            Err(error) => {
+                eprintln!(
+                    "[freya][editor] action=external-refresh-conflict path={} error={error}",
+                    note_path.display()
+                );
+                self.error = Some(error.to_string());
+            }
+        }
     }
 
     fn refresh_library_entry(&mut self, relative_path: &str, directory: &str) {

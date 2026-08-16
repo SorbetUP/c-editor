@@ -65,6 +65,7 @@ pub enum EditorAction {
 pub enum EditorError {
     Io { path: PathBuf, message: String },
     MissingPath,
+    ExternalConflict,
     Edit(EditError),
 }
 
@@ -77,6 +78,9 @@ impl fmt::Display for EditorError {
                 path.display()
             ),
             Self::MissingPath => formatter.write_str("the editor document has no file path"),
+            Self::ExternalConflict => {
+                formatter.write_str("the note changed on disk while it had unsaved Freya edits")
+            }
             Self::Edit(error) => error.fmt(formatter),
         }
     }
@@ -692,6 +696,22 @@ impl EditorDocument {
                 Err(io_error(&path, error))
             }
         }
+    }
+
+    /// Replaces the in-memory document after an external filesystem change.
+    /// Dirty editor state is never discarded by this path; the shell reports
+    /// that conflict to the user instead of silently overwriting their edit.
+    pub fn reload_external(&mut self, markdown: &str) -> Result<(), EditorError> {
+        if self.dirty {
+            return Err(EditorError::ExternalConflict);
+        }
+        self.session = EditorSession::from_markdown(markdown);
+        self.saved_markdown = markdown.to_owned();
+        self.last_edit_at = None;
+        self.autosave_failure_revision = None;
+        self.focus_target = None;
+        self.composition_selection = None;
+        Ok(())
     }
 
     pub fn close(&mut self) -> Result<(), EditorError> {
@@ -1429,5 +1449,26 @@ mod tests {
         assert!(updated.contains("type: \"note\""));
         assert!(updated.contains("tags: [\"work\"]"));
         assert!(updated.contains("# Note"));
+    }
+
+    #[test]
+    fn external_reload_replaces_clean_document() {
+        let mut document = EditorDocument::from_markdown("# Before");
+        document
+            .reload_external("# After")
+            .expect("clean document may reload from disk");
+        assert_eq!(document.serialize(), "# After");
+        assert!(!document.is_dirty());
+    }
+
+    #[test]
+    fn external_reload_preserves_dirty_document_as_a_conflict() {
+        let mut document = EditorDocument::from_markdown("before");
+        document.dispatch_text(" local").expect("local edit");
+        let error = document
+            .reload_external("external")
+            .expect_err("external change must not discard local edits");
+        assert_eq!(error, EditorError::ExternalConflict);
+        assert!(document.serialize().contains("local"));
     }
 }

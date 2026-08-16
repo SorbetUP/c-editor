@@ -406,15 +406,44 @@ d’entrée déclenche le rechargement du vrai `VaultAdapter` et conserve les
 erreurs de lecture dans les logs ; le watcher ne possède ni état métier ni
 rendu de remplacement.
 
-Le test unitaire vérifie les changements réels de fichiers et le test
-`vault_watch_freya_testing::external_vault_note_appears_after_the_watcher_poll`
-vérifie qu’un fichier créé hors de l’application apparaît dans la page Freya
-après le polling. Preuves exécutées :
+Le test unitaire vérifie les changements réels de fichiers. Les tests
+`vault_watch_freya_testing` vérifient qu’un fichier créé hors de l’application
+apparaît dans la page Freya après le polling et qu’une note ouverte propre est
+rechargée dans la vraie session éditeur. Une note ouverte avec des modifications
+locales n’est pas écrasée : elle remonte un conflit visible et journalisé.
+Preuves exécutées :
 
 ```text
 cargo test --manifest-path Elephant/freya/Cargo.toml vault_watch -- --nocapture : PASS
-cargo test --manifest-path Elephant/freya/Cargo.toml --test vault_watch_freya_testing -- --nocapture : 1 passed
+cargo test --manifest-path Elephant/freya/Cargo.toml --test vault_watch_freya_testing -- --nocapture : 2 passed
 pnpm freya:check : PASS (warnings préexistants)
+```
+
+Le cycle éditeur couvre aussi les deux invariants de domaine : recharger une
+note propre remplace le document et réinitialise son état sauvegardé ; recharger
+une note modifiée localement renvoie `ExternalConflict` sans perdre le texte
+local. Preuve exécutée :
+
+```text
+cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_lifecycle_freya_testing -- --test-threads=1 --nocapture : 5 passed
+```
+
+## Mise à jour fonctionnelle — 2026-08-16 (pin depuis les cartes)
+
+Le pin n’est plus seulement un état interne de l’éditeur : le menu d’action de
+chaque carte de bibliothèque expose `Pin`/`Unpin` et appelle la persistance
+réelle `freyaShell.pinnedPaths`. Notes et dossiers utilisent le même contrat,
+ce qui conserve le tri prioritaire déjà présent dans `LibraryState`.
+
+Le nouveau test d’intégration a d’abord échoué car le menu se ferme après
+l’action et l’assertion cherchait immédiatement `Unpin`; le scénario corrigé
+rouvre le menu comme le ferait l’utilisateur et passe avec le fichier workspace
+réel. Artefact d’échec préfixe :
+`/Users/sorbet/Library/Application Support/rtk/tee/1786873244_cargo_test.log`.
+
+```text
+cargo test --manifest-path Elephant/freya/Cargo.toml --test library_pin_action_freya_testing -- --nocapture : 1 passed
+```
 
 ## Mise à jour fonctionnelle — 2026-08-16 (cycle de paquet add-on)
 
@@ -436,5 +465,4 @@ stade.
 cargo test --manifest-path Elephant/freya/Cargo.toml addon_packages -- --nocapture : PASS
 cargo test --manifest-path Elephant/freya/Cargo.toml --test addon_lifecycle_freya_testing -- --nocapture : 1 passed
 pnpm freya:check : PASS (warnings préexistants)
-```
 ```
