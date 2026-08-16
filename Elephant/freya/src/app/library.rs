@@ -33,7 +33,7 @@ use library_actions::{
 use library_icons::{svg_icon, Icon as LibraryIcon};
 
 const LIBRARY_DRAG_THRESHOLD: f64 = 4.;
-const TITLE_OPEN_DELAY: Duration = Duration::from_millis(220);
+const CARD_OPEN_DELAY: Duration = Duration::from_millis(220);
 const GRID_GAP: f32 = 10.;
 const GRID_MIN_CARD_WIDTH: f32 = 240.;
 
@@ -753,14 +753,14 @@ fn begin_library_entry_rename(
     menu.renaming = true;
 }
 
-fn schedule_title_activation(
+fn schedule_card_activation(
     state: State<ShellState>,
     target: EntryOpenTarget,
     generation: State<u64>,
     pending_generation: u64,
 ) {
     spawn(async move {
-        Delay::new(TITLE_OPEN_DELAY).await;
+        Delay::new(CARD_OPEN_DELAY).await;
         if *generation.read() == pending_generation {
             activate_library_entry(state, target);
         }
@@ -785,6 +785,7 @@ impl Component for LibraryCard {
         let rename_value = use_state(String::new);
         let rename_a11y_id = use_a11y();
         let card_area = use_state(|| None::<Area>);
+        let card_open_generation = use_state(|| 0_u64);
         let should_focus_rename = card_menu_state.read().renaming;
         use_side_effect(move || {
             if should_focus_rename {
@@ -800,6 +801,7 @@ impl Component for LibraryCard {
             rename_value,
             rename_a11y_id,
             card_area,
+            card_open_generation,
         )
     }
 }
@@ -813,6 +815,7 @@ fn render_library_card(
     rename_value: State<String>,
     rename_a11y_id: AccessibilityId,
     card_area: State<Option<Area>>,
+    card_open_generation: State<u64>,
 ) -> Element {
     let path = entry.path.as_str().to_string();
     let is_drawing =
@@ -916,6 +919,7 @@ fn render_library_card(
     let mut menu_state_for_secondary = card_menu_state;
     let mut state_for_open = state;
     let mut click_menu_state = card_menu_state;
+    let mut body_open_generation = card_open_generation;
 
     rect()
         .width(if mode == ViewMode::Grid {
@@ -1049,11 +1053,19 @@ fn render_library_card(
             menu.renaming = false;
             drop(menu);
 
-            // Card-body activation is always a single logical activation.
-            // Double-click semantics belong to the title target below (rename).
-            // A folder remount may place a different card under the same global
-            // pointer coordinates; that new target must never be swallowed.
-            activate_library_entry(state_for_open, open_target.clone());
+            // Match NoteCard.vue's CLICK_OPEN_DELAY_MS=220. Keeping the card
+            // mounted during the double-click window prevents the second click
+            // from landing on a newly mounted child at the same coordinates.
+            // A later click on a different logical card gets its own component
+            // generation and remains an independent activation.
+            let pending_generation = (*body_open_generation.read()).wrapping_add(1);
+            body_open_generation.set(pending_generation);
+            schedule_card_activation(
+                state_for_open,
+                open_target.clone(),
+                body_open_generation,
+                pending_generation,
+            );
         })
         .a11y_alt(title)
         .child(menu_trigger)
@@ -1169,7 +1181,7 @@ fn card_title_row(
                     );
                     return;
                 }
-                schedule_title_activation(
+                schedule_card_activation(
                     title_open_state,
                     open_target.clone(),
                     title_generation,
