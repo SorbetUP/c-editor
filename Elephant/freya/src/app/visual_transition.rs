@@ -20,16 +20,18 @@ pub(super) struct SearchOverlayTransition {
 }
 
 pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransition {
-    let hide_timeout = use_timeout(|| Duration::from_millis(75));
-    // The Freya timer starts after the close state commit; 75 ms therefore
-    // lands on the source's 150 ms capture boundary instead of one frame late.
-    let unmount_timeout = use_timeout(|| Duration::from_millis(75));
+    // SearchModal's close transition keeps the glass panel and backdrop fully
+    // painted through the 50 ms and 100 ms capture frames. It disappears at
+    // the 150 ms frame, so both timers use that observable lifetime instead of
+    // hiding the native tree halfway through the source animation.
+    let hide_timeout = use_timeout(|| Duration::from_millis(150));
+    let unmount_timeout = use_timeout(|| Duration::from_millis(150));
     // The source dialog's first visible sample lands on the 200 ms capture
     // tick. Keep the tree mounted immediately for focus/lifecycle ownership,
     // but keep its pixels transparent until this presentation-only animation
     // reaches its first stable sample.
     let open_animation = use_animation(|_| AnimNum::new(0., 1.).time(160).ease(Ease::Out));
-    let close_animation = use_animation(|_| AnimNum::new(1., 0.).time(75).ease(Ease::Out));
+    let close_animation = use_animation(|_| AnimNum::new(1., 0.).time(150).ease(Ease::Out));
     let ever_opened = use_state(|| false);
     let mounted = use_state(|| open);
     let closing = use_state(|| false);
@@ -94,19 +96,25 @@ pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransiti
         // A closing overlay remains visual-only. Pointer events must reach the
         // library immediately after the functional search state closes.
         interactive: open,
-        // Tauri paints the backdrop one frame before the dialog content. The
-        // small intermediate opacity is presentation-only; search state and
-        // accessibility mounting remain controlled by the shell.
+        // Keep the closing pixels stable until the source transition's
+        // 150 ms boundary. The functional route is already closed and the
+        // root is non-interactive, so this only preserves the visual frame.
         backdrop_opacity: if opening || (!open && transition_hidden) {
             0.
         } else if !open {
-            value
+            1.
         } else if value < 0.5 {
             0.08
         } else {
             1.
         },
-        content_opacity: if transition_hidden || opening || value < 0.5 {
+        content_opacity: if !open {
+            if transition_hidden {
+                0.
+            } else {
+                1.
+            }
+        } else if opening || value < 0.5 {
             0.
         } else {
             1.
