@@ -169,8 +169,11 @@ impl ShellState {
             } else if let Err(error) = registry.persist() {
                 eprintln!("[freya][vault-registry] action=persist-failure error={error}");
             }
-            loaded.vault_registry = registry;
         }
+        // Keep the registry available even when the selected path disappeared.
+        // The recovery picker needs the other registered vaults to remain
+        // actionable instead of forcing the user to locate them again.
+        loaded.vault_registry = registry;
         loaded
     }
 
@@ -589,7 +592,32 @@ fn app_shell(mut state: State<ShellState>) -> Element {
 }
 
 fn empty_vault_picker(state: State<ShellState>) -> Element {
-    let error = state.read().error.clone();
+    let snapshot = state.read().clone();
+    let error = snapshot.error.clone();
+    let registered_vaults = snapshot
+        .vault_registry
+        .vaults
+        .into_iter()
+        .filter(|vault| vault.enabled)
+        .collect::<Vec<_>>();
+    let mut recovery_actions = rect().width(Size::fill()).spacing(8.);
+    let mut has_recovery_actions = false;
+    for vault in registered_vaults {
+        has_recovery_actions = true;
+        let id = vault.id;
+        let name = vault.name;
+        let target_label = format!("Open registered vault {name}");
+        let mut open_state = state;
+        recovery_actions = recovery_actions.child(
+            rect()
+                .width(Size::fill())
+                .padding(Gaps::new(8., 12., 8., 12.))
+                .with_corner_radius(8.)
+                .a11y_alt(target_label)
+                .on_press(move |_| open_state.write().activate_vault(&id))
+                .child(label().text(format!("Open {name}"))),
+        );
+    }
     let picker_state = state;
     rect()
         .width(Size::fill())
@@ -612,9 +640,21 @@ fn empty_vault_picker(state: State<ShellState>) -> Element {
                         .text("Select an existing Elephant vault folder to continue."),
                 )
                 .maybe_child(error.map(|message| {
-                    label()
-                        .color(theme::color(theme::MUTED))
-                        .text(message)
+                    rect()
+                        .a11y_alt("Vault unavailable")
+                        .child(label().color(theme::color(theme::MUTED)).text(message))
+                        .into_element()
+                }))
+                .maybe_child(has_recovery_actions.then(|| {
+                    rect()
+                        .width(Size::fill())
+                        .spacing(8.)
+                        .child(
+                            label()
+                                .font_weight(FontWeight::BOLD)
+                                .text("Registered vaults"),
+                        )
+                        .child(recovery_actions)
                         .into_element()
                 }))
                 .child(
