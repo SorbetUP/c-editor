@@ -625,6 +625,17 @@ pub fn search_overlay(
         .child(input);
     let mut key_state = state;
     let mut key_query = query;
+    let mut mode_state = state;
+    let mode_name = snapshot.search.mode.as_str();
+    let mode = rect()
+        .height(Size::px(30.))
+        .padding(Gaps::new(0., 10., 0., 10.))
+        .center()
+        .background(theme::color(theme::SURFACE))
+        .with_corner_radius(7.)
+        .on_press(move |_| mode_state.write().cycle_search_mode())
+        .a11y_alt(format!("Search mode: {mode_name}"))
+        .child(label().font_size(12.).text(format!("Mode: {mode_name}")));
     let clear = if !input_value.trim().is_empty() {
         let mut clear_query = query;
         let mut clear_state = state;
@@ -667,6 +678,7 @@ pub fn search_overlay(
         .with_corner_radius(22.)
         .child(svg_icon(Icon::Search, Color::from_rgb(26, 35, 53), 22.))
         .child(search_input)
+        .child(mode)
         .maybe_child(clear);
     let mut search_tab_state = state;
     let search_tab = rect()

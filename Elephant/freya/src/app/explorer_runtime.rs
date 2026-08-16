@@ -6,14 +6,15 @@
 
 use crate::{
     search_graph_contract::{
-        ConceptCandidate, EvidenceChunk, SearchMatchType, SearchRequest, SearchResult,
+        ConceptCandidate, EvidenceChunk, SearchMatchType, SearchMode, SearchRequest, SearchResult,
         SearchSnippet, SearchStatus, SearchStatusKind, SurfaceError,
     },
-    vault_adapter::VaultAdapter,
+    vault_adapter::{PageRequest, VaultAdapter, VaultEntry, MAX_PAGE_SIZE},
 };
 
 use super::{explorer, ShellState};
 use freya::prelude::State;
+use std::{collections::VecDeque, fs};
 
 #[path = "graph_runtime.rs"]
 mod graph_runtime;
@@ -280,78 +281,149 @@ pub(super) fn search(
         request.limit,
         vault.descriptor().path
     );
-    let refresh = vault.rebuild_search_index().map_err(|error| {
-        eprintln!(
-            "[freya][search] action=index:failure request_id={} error={error}",
-            request_id
-        );
-        SurfaceError::Unknown(format!("Search index failed: {error}"))
-    })?;
-    eprintln!(
-        "[freya][search] action=index:status request_id={} status={} scanned={} indexed={} unchanged={} removed={} failed={}",
-        request_id,
-        refresh.status,
-        refresh.scanned,
-        refresh.indexed,
-        refresh.unchanged,
-        refresh.removed,
-        refresh.failed.len()
-    );
-    if let Some(failure) = refresh.failed.first() {
-        eprintln!(
-            "[freya][search] action=index:failure request_id={} path={} error={}",
-            request_id, failure.path, failure.error
-        );
-        return Err(SurfaceError::Unknown(format!(
-            "Search index could not read {}: {}",
-            failure.path, failure.error
-        )));
-    }
-    let hits = vault
-        .search_index(&request.query, request.limit)
-        .map_err(|error| {
+    match request.mode {
+        SearchMode::Semantic => {
+            let message =
+                "Semantic search unavailable in Freya: no embedding index is connected to VaultAdapter."
+                    .to_string();
             eprintln!(
-                "[freya][search] action=failure request_id={} error={error}",
+                "[freya][search] action=failure request_id={} mode=semantic reason=no_embedding_index",
                 request_id
             );
-            SurfaceError::Unknown(format!("Search failed: {error}"))
+            Err(SurfaceError::Unknown(message))
+        }
+        SearchMode::Exact | SearchMode::Smart => {
+            let execution = exact_search(vault, request, request_id)?;
+            eprintln!(
+                "[freya][search] action=complete request_id={} mode={} results={}",
+                request_id,
+                request.mode.as_str(),
+                execution.results.len()
+            );
+            Ok(execution)
+        }
+    }
+}
+
+fn exact_search(
+    vault: &VaultAdapter,
+    request: &SearchRequest,
+    request_id: u64,
+) -> Result<SearchExecution, SurfaceError> {
+    let entries = visible_markdown_entries(vault, request_id)?;
+    let query = request.query.to_lowercase();
+    let mut results = Vec::new();
+
+    for entry in &entries {
+        let markdown = fs::read_to_string(&entry.full_path).map_err(|error| {
+            eprintln!(
+                "[freya][search] action=read:failure request_id={} path={} error={error}",
+                request_id, entry.path
+            );
+            SurfaceError::Unknown(format!(
+                "Search document could not be read {}: {error}",
+                entry.path
+            ))
         })?;
-    let results = hits
-        .into_iter()
-        .map(|hit| SearchResult {
-            id: format!("note:{}", hit.path),
-            uri: hit.path.clone(),
-            title: hit.title,
-            relative_path: hit.path,
-            excerpt: hit.excerpt.clone(),
-            tags: hit.tags,
-            score: hit.score as f32,
-            match_type: SearchMatchType::Unknown,
+        let haystack = format!("{}\n{}", entry.path, markdown).to_lowercase();
+        let Some(index) = haystack.find(&query) else {
+            continue;
+        };
+        let excerpt = exact_excerpt(&markdown, &query, &entry.path, &entry.excerpt);
+        let score = if index == 0 { 1.0 } else { 0.75 };
+        results.push(SearchResult {
+            id: format!("exact:{}", entry.path),
+            uri: format!("elephantnote://vault/{}", entry.path),
+            title: entry.title.clone(),
+            relative_path: entry.path.clone(),
+            excerpt: excerpt.clone(),
+            tags: entry.tags.clone(),
+            score,
+            match_type: SearchMatchType::Keyword,
             snippets: vec![SearchSnippet {
-                text: hit.excerpt,
-                score: hit.score as f32,
+                text: excerpt,
+                score: 1.0,
             }],
-            updated_at: String::new(),
-        })
-        .collect::<Vec<_>>();
-    let result_count = results.len();
-    let concepts = concept_candidates(&results);
-    eprintln!(
-        "[freya][search] action=complete request_id={} results={}",
-        request_id, result_count
-    );
+            updated_at: entry.updated_at.clone(),
+        });
+        if results.len() >= request.limit {
+            break;
+        }
+    }
+
+    let scanned = entries.len();
+    let mode_message = if request.mode == SearchMode::Smart {
+        "Smart search used the exact fallback"
+    } else {
+        "Exact search scanned"
+    };
     Ok(SearchExecution {
+        concepts: concept_candidates(&results),
         results,
-        concepts,
         status: SearchStatus {
             status: SearchStatusKind::Ready,
             vault_path: vault.descriptor().path.clone(),
-            indexed_documents: refresh.scanned,
-            total_documents: refresh.scanned,
-            message: format!("Indexed {} documents", refresh.scanned),
+            indexed_documents: scanned,
+            total_documents: scanned,
+            message: format!("{mode_message} {scanned} documents"),
             error: String::new(),
         },
     })
+}
+
+fn visible_markdown_entries(
+    vault: &VaultAdapter,
+    request_id: u64,
+) -> Result<Vec<VaultEntry>, SurfaceError> {
+    let mut directories = VecDeque::from([String::new()]);
+    let mut entries = Vec::new();
+    while let Some(directory) = directories.pop_front() {
+        let mut offset = 0;
+        loop {
+            let page = vault
+                .list(
+                    PageRequest::new(directory.clone())
+                        .with_window(offset, MAX_PAGE_SIZE)
+                        .without_preview(),
+                )
+                .map_err(|error| {
+                    eprintln!(
+                        "[freya][search] action=list:failure request_id={} directory={} error={error}",
+                        request_id, directory
+                    );
+                    SurfaceError::Unknown(format!("Search could not list {directory}: {error}"))
+                })?;
+            for entry in page.entries {
+                if entry.is_directory {
+                    directories.push_back(entry.path);
+                } else if entry.path.to_ascii_lowercase().ends_with(".md") {
+                    entries.push(entry);
+                }
+            }
+            let Some(next_offset) = page.next_offset else {
+                break;
+            };
+            offset = next_offset;
+        }
+    }
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
+}
+
+fn exact_excerpt(markdown: &str, query: &str, path: &str, fallback: &str) -> String {
+    let compact = markdown.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact_lower = compact.to_lowercase();
+    if let Some(index) = compact_lower.find(query) {
+        let start = index.saturating_sub(70);
+        let end = (index + query.len() + 90).min(compact.len());
+        if let Some(snippet) = compact.get(start..end) {
+            return snippet.to_string();
+        }
+    }
+    if path.to_lowercase().contains(query) {
+        return path.to_string();
+    }
+    fallback.to_string()
 }
 
 fn concept_candidates(results: &[SearchResult]) -> Vec<ConceptCandidate> {

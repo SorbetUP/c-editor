@@ -288,3 +288,33 @@ Le test rouge/vert
 échouait avant l’association de l’identifiant d’accessibilité au bouton
 focusable, puis passe après `press_cursor` + `Enter` et vérification de la
 section Editor réelle. La suite Settings complète passe avec 11 tests.
+
+## Mise à jour fonctionnelle — 2026-08-16 (recherche, addons et modèles)
+
+La recherche Freya ne prétend plus exécuter un mode sémantique absent : Exact
+et Smart utilisent un parcours réel des fichiers Markdown du vault, avec
+pagination des dossiers, extrait, tags, résultat ouvrable et état persisté par
+le chemin de production. Le mode Semantic retourne une erreur visible et
+journalisée tant qu’aucun index d’embeddings n’est raccordé ; il ne retombe pas
+silencieusement sur Exact.
+
+Preuve rouge/verte :
+`search_mode_freya_testing::search_modes_use_literal_exact_smart_fallback_and_explicit_semantic_boundary`
+échouait avant l’exposition du mode et de sa frontière runtime, puis passe avec
+`search_runtime_freya_testing` (5 tests au total).
+
+Pour les addons, une erreur d’activation/désinstallation n’est plus effacée par
+un refresh immédiat. Le statut d’un addon JavaScript indique explicitement
+`JavaScript worker runtime is not connected in Freya`; aucun worker n’est
+simulé. Le test réel
+`addon_lifecycle_freya_testing::addon_action_error_and_disconnected_worker_status_are_explicit`
+passe après suppression du registre pendant l’action. L’installation depuis
+l’interface et le worker JS restent non migrés.
+
+Enfin, Open Models accepte maintenant la sélection persistée d’un fichier
+`.gguf` local. L’action `Activate` écrit `active-model.json`, recharge l’état
+après redémarrage et ne confond pas cette sélection avec l’exécution d’un
+runtime GGUF. La preuve
+`models_activation_freya_testing::activating_a_local_gguf_persists_the_selection_without_claiming_runtime`
+et la suite workspace native passent ; téléchargement, chargement et
+inférence restent non prouvés.

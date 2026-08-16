@@ -44,6 +44,7 @@ pub(crate) fn addons_settings(
     if let Some(error) = addons.error {
         body = body.child(
             label()
+                .a11y_alt(format!("Addon lifecycle error: {error}"))
                 .color(theme::token_color(palette, theme::ThemeToken::Danger))
                 .text(error),
         );
@@ -86,6 +87,7 @@ fn addon_row(
         | "elephant.sync" => "Native Freya surface available",
         _ => "JavaScript worker runtime is not connected in Freya",
     };
+    let runtime_status_label = format!("Addon runtime status {name}: {runtime_status}");
     let toggle_state = settings_state;
     let toggle_shell = shell_state;
     let toggle = rect()
@@ -142,6 +144,7 @@ fn addon_row(
                 )
                 .child(
                     label()
+                        .a11y_alt(runtime_status_label)
                         .font_size(10.)
                         .color(theme::token_color(
                             palette,
@@ -184,8 +187,7 @@ fn toggle_addon(
     };
     settings_state.write().begin_addon_action(addon_id.clone());
     let result = crate::addon_adapter::set_enabled(vault.root(), &addon_id, enabled).map(|_| ());
-    settings_state.write().finish_addon_action(result);
-    refresh_addons(settings_state, shell_state);
+    finish_addon_action(settings_state, shell_state, result);
 }
 
 fn uninstall_addon(
@@ -201,6 +203,17 @@ fn uninstall_addon(
     };
     settings_state.write().begin_addon_action(addon_id.clone());
     let result = crate::addon_adapter::uninstall(vault.root(), &addon_id);
+    finish_addon_action(settings_state, shell_state, result);
+}
+
+fn finish_addon_action(
+    mut settings_state: State<SettingsViewState>,
+    shell_state: State<ShellState>,
+    result: Result<(), String>,
+) {
+    let should_refresh = result.is_ok();
     settings_state.write().finish_addon_action(result);
-    refresh_addons(settings_state, shell_state);
+    if should_refresh {
+        refresh_addons(settings_state, shell_state);
+    }
 }
