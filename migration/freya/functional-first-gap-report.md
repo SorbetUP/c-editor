@@ -193,3 +193,22 @@ moment d’éditer la note et a bloqué les actions suivantes. Le parcours Freya
 correspondant passe avec 14 actions et ses PNG sont conservés sous
 `/private/tmp/codex-freya-differential-final/freya/`. Cela ne permet pas encore
 de déclarer l’égalité pixel ou la parité complète Tauri/Freya.
+
+## Mise à jour fonctionnelle — 2026-08-16 (calendrier)
+
+L’action métier Tauri `clearEvents` est maintenant présente dans Freya sous
+`Clear calendar events`. Elle supprime le fichier de calendrier du vault,
+réinitialise l’état en mémoire et expose les erreurs de suppression dans la
+surface native ; l’import ICS existant reste séparé.
+
+La preuve rouge/verte est conservée par
+`native_workspace_navigation_freya_testing::calendar_clear_events_removes_persisted_events` :
+le test échouait avant l’implémentation sur la cible absente, puis passe après
+le clic réel, la disparition de l’événement et la vérification du fichier sur
+disque. La suite workspace complète passe avec 2 tests.
+
+Les audits suivants restent des écarts fonctionnels à traiter séparément :
+les modes de recherche Smart/Semantic ne changent pas encore le moteur FTS,
+certains historiques de navigation ne portent que les dossiers/notes, et les
+erreurs de lecture d’arbre doivent devenir visibles plutôt que retomber sur un
+listing vide. Ils ne sont pas masqués par cette tranche calendrier.

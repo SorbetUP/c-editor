@@ -99,6 +99,14 @@ pub(super) fn workspace(shell: State<ShellState>, palette: theme::ThemePalette) 
         .a11y_alt("Import ICS calendar")
         .on_press(move |_| import_ics(import_shell))
         .child(label().font_weight(FontWeight::BOLD).text("Import ICS"));
+    let clear_shell = shell;
+    let clear = rect()
+        .padding(Gaps::new(8., 12., 8., 12.))
+        .with_corner_radius(8.)
+        .a11y_alt("Clear calendar events")
+        .on_press(move |_| clear_events(clear_shell))
+        .child(label().font_weight(FontWeight::BOLD).text("Clear events"));
+    let actions = rect().horizontal().spacing(8.).child(import).child(clear);
 
     let mut body = rect()
         .width(Size::fill())
@@ -127,7 +135,7 @@ pub(super) fn workspace(shell: State<ShellState>, palette: theme::ThemePalette) 
                                 .text("Offline events and notes grouped by date."),
                         ),
                 )
-                .child(import),
+                .child(actions),
         );
 
     if let Some(error) = calendar.error {
@@ -273,6 +281,38 @@ fn import_ics(mut shell: State<ShellState>) {
         Err(error) => state.calendar.error = Some(format!("Calendar import failed: {error}")),
     }
     state.calendar.importing = false;
+}
+
+fn clear_events(mut shell: State<ShellState>) {
+    let Some(vault) = shell.read().vault.clone() else {
+        shell.write().calendar.error = Some("No vault selected.".to_owned());
+        return;
+    };
+    let path = calendar_path(vault.root());
+    let result = match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Calendar data cannot be cleared: {error}")),
+    };
+    let mut state = shell.write();
+    match result {
+        Ok(()) => {
+            state.calendar.events.clear();
+            state.calendar.loaded = true;
+            state.calendar.error = None;
+            eprintln!(
+                "[freya][calendar] action=clear-complete path={}",
+                path.display()
+            );
+        }
+        Err(error) => {
+            eprintln!(
+                "[freya][calendar] action=clear-failure path={} error={error}",
+                path.display()
+            );
+            state.calendar.error = Some(error);
+        }
+    }
 }
 
 fn parse_ics(source: &str) -> Vec<CalendarEvent> {

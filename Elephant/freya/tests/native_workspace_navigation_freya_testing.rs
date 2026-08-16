@@ -230,3 +230,40 @@ fn enabled_official_workspace_views_are_real_clickable_native_routes() {
     assert!(node(&runner, "Sync result").layout().area.size.width > 0.);
     runner.render_to_file(&evidence.join("sync.png"));
 }
+
+#[test]
+fn calendar_clear_events_removes_persisted_events() {
+    let fixture = FixtureVault::new();
+    let root = fixture.root.clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click(&mut runner, "Calendar");
+    runner.sync_and_update();
+    assert!(
+        node(&runner, "Calendar event Team sync")
+            .layout()
+            .area
+            .size
+            .width
+            > 0.
+    );
+
+    click(&mut runner, "Clear calendar events");
+    runner.sync_and_update();
+    assert!(
+        runner
+            .find(|node, element| {
+                (element.accessibility().builder.label() == Some("Calendar event Team sync"))
+                    .then_some(node)
+            })
+            .is_none(),
+        "clearing the calendar must remove the visible event"
+    );
+
+    assert!(!fixture.root.join(".elephantnote/calendar.json").exists());
+}
