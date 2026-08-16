@@ -212,3 +212,18 @@ les modes de recherche Smart/Semantic ne changent pas encore le moteur FTS,
 certains historiques de navigation ne portent que les dossiers/notes, et les
 erreurs de lecture d’arbre doivent devenir visibles plutôt que retomber sur un
 listing vide. Ils ne sont pas masqués par cette tranche calendrier.
+
+## Mise à jour fonctionnelle — 2026-08-16 (historique paginé)
+
+Back/Forward recharge désormais une note avec `VaultAdapter::find_entry`, qui
+parcourt toutes les pages du dossier, au lieu de chercher uniquement dans la
+première page déjà affichée. Le contrat public reste inchangé : la liste
+visible est rechargée dans le dossier parent, puis le document réel est
+rouvert.
+
+Le test rouge/vert
+`search_runtime_freya_testing::navigation_forward_reopens_search_result_beyond_first_directory_page`
+crée 502 notes, ouvre par la vraie recherche une note absente de la première
+page, revient en arrière puis la rouvre en avant. Avant le correctif, Forward
+laissait l’éditeur fermé ; après le correctif, `NoteEditorHost` est présent et
+le test passe.

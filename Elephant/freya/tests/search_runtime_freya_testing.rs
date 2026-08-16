@@ -158,3 +158,50 @@ fn search_rebuilds_production_fts_index_and_preserves_bm25_ranking() {
         "the ordered BM25 scores must come from FTS ranking"
     );
 }
+
+#[test]
+fn navigation_forward_reopens_search_result_beyond_first_directory_page() {
+    let fixture = FixtureVault::new();
+    for index in 0..500 {
+        fs::write(
+            fixture.path().join(format!("Bulk{index:03}.md")),
+            format!("# Bulk {index}\n\nA paginated navigation fixture.\n"),
+        )
+        .expect("write paginated fixture note");
+    }
+    fs::write(
+        fixture.path().join("Target.md"),
+        "# Target\n\nunique paginated navigation target\n",
+    )
+    .expect("write target fixture note");
+
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "All notes");
+    runner.sync_and_update();
+    open_search_and_submit(&mut runner, "unique paginated navigation target");
+    assert_eq!(labeled_nodes(&runner, "Open note Target").len(), 1);
+
+    runner.press_key(Key::Named(NamedKey::ArrowDown));
+    runner.press_key(Key::Named(NamedKey::Enter));
+    runner.sync_and_update();
+    assert_eq!(labeled_nodes(&runner, "NoteEditorHost").len(), 1);
+
+    click_label(&mut runner, "Retour");
+    runner.sync_and_update();
+    assert!(labeled_nodes(&runner, "NoteEditorHost").is_empty());
+
+    click_label(&mut runner, "Avancer");
+    runner.sync_and_update();
+    assert_eq!(
+        labeled_nodes(&runner, "NoteEditorHost").len(),
+        1,
+        "Forward must resolve notes beyond the first directory page"
+    );
+}

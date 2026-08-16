@@ -213,15 +213,11 @@ impl ShellState {
                     .unwrap_or("");
                 self.library.current_path = RelativePath::from(parent);
                 self.reload_directory(parent);
-                let entry = self
-                    .page
-                    .as_ref()
-                    .and_then(|page| page.entries.iter().find(|entry| entry.path == path))
-                    .cloned();
-                if let Some(entry) = entry {
-                    self.open_note_with_history(&entry, false);
-                } else {
-                    self.error = Some(format!("Navigation target is no longer present: {path}"));
+                match self.vault.as_ref().and_then(|vault| vault.find_entry(&path).ok()) {
+                    Some(entry) => self.open_note_with_history(&entry, false),
+                    None => {
+                        self.error = Some(format!("Navigation target is no longer present: {path}"));
+                    }
                 }
             }
         }
