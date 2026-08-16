@@ -571,14 +571,6 @@ pub fn search_overlay(
     // current workspace is Graph. The source SearchModal can be opened from
     // every route; filtering it out for the Graph surface made the rail
     // action mutate state without exposing the actual search controls.
-    if !interactive {
-        return rect()
-            .position(Position::new_global())
-            .width(Size::fill())
-            .height(Size::fill())
-            .interactive(false)
-            .into_element();
-    }
     let search_placeholder = if snapshot.search.query.is_empty() {
         "Search notes, paths, tags, or ideas…".to_owned()
     } else {
