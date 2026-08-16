@@ -205,119 +205,98 @@ fn toggle_sidebar_visibility(
     }
 }
 
-/// Advance the exact Tauri library window. A single prefetch first reveals any
-/// already-buffered render chunk, then may cross one additional backend page
-/// boundary. Limiting one wheel dispatch to two backend reads keeps very large
-/// vaults incremental while avoiding a Freya ScrollView propagation edge case
-/// where the first fetch makes the child scrollable and subsequent wheel events
-/// no longer reach the outer pagination sentinel.
-///
-/// There is deliberately no entry-count cap: later wheel dispatches continue
-/// from the accumulated offset until the real backend reports exhaustion.
-/// The shell's raw `VaultPage` is extended alongside the typed library state
-/// so newly paged notes still open through `ShellState::open_note` rather than
-/// a parallel filesystem path.
+/// Advance the exact Tauri library window by one state transition: reveal one
+/// buffered render chunk or fetch one backend page. The shell's raw `VaultPage`
+/// is extended alongside the typed library state so newly paged notes still
+/// open through `ShellState::open_note` rather than a parallel filesystem path.
 pub(super) fn load_more_library_entries(mut state: State<ShellState>) -> bool {
-    let mut changed = false;
-    let mut backend_fetches = 0usize;
-    loop {
-        let action = state.write().library.load_more();
-        match action {
-            LoadMoreAction::Noop(LoadMoreNoop::BufferedEntriesRevealed) => {
-                eprintln!("[freya][library] pagination:reveal-buffered");
-                changed = true;
-                continue;
-            }
-            LoadMoreAction::Noop(LoadMoreNoop::Exhausted) => return changed,
-            LoadMoreAction::Noop(LoadMoreNoop::AlreadyLoading) => return changed,
-            LoadMoreAction::Noop(LoadMoreNoop::StaleResponse) => return changed,
-            LoadMoreAction::Fetch(request) => {
-                let vault = state.read().vault.clone();
-                let Some(vault) = vault else {
-                    let message = "No vault selected.".to_string();
+    let action = state.write().library.load_more();
+    match action {
+        LoadMoreAction::Noop(LoadMoreNoop::BufferedEntriesRevealed) => {
+            eprintln!("[freya][library] pagination:reveal-buffered");
+            true
+        }
+        LoadMoreAction::Noop(LoadMoreNoop::Exhausted) => false,
+        LoadMoreAction::Noop(LoadMoreNoop::AlreadyLoading) => false,
+        LoadMoreAction::Noop(LoadMoreNoop::StaleResponse) => false,
+        LoadMoreAction::Fetch(request) => {
+            let vault = state.read().vault.clone();
+            let Some(vault) = vault else {
+                let message = "No vault selected.".to_string();
+                let mut next = state.write();
+                next.library.apply_more_error(&request, message.clone());
+                next.error = Some(message);
+                return false;
+            };
+
+            eprintln!(
+                "[freya][library] pagination:fetch-start directory={} offset={} limit={}",
+                request.relative_path.as_str(),
+                request.offset,
+                request.limit
+            );
+            let adapter_request = PageRequest::new(request.relative_path.as_str().to_string())
+                .with_window(request.offset, request.limit);
+            match vault.list(adapter_request) {
+                Ok(page) => {
+                    let page_size = request.limit.saturating_sub(1);
+                    let backend_has_more = page.has_more;
+                    let raw_count = page.entries.len();
+                    let raw_entries = page.entries;
+                    let contract_entries = raw_entries
+                        .iter()
+                        .map(super::to_library_entry)
+                        .collect::<Vec<_>>();
+
+                    let mut next = state.write();
+                    let applied = next.library.apply_more_page(&request, contract_entries);
+                    if applied != PageApply::Applied {
+                        eprintln!(
+                            "[freya][library] pagination:ignored-stale directory={} offset={}",
+                            request.relative_path.as_str(),
+                            request.offset
+                        );
+                        return false;
+                    }
+
+                    if let Some(shell_page) = next.page.as_mut() {
+                        let existing_paths = shell_page
+                            .entries
+                            .iter()
+                            .map(|entry| entry.path.clone())
+                            .collect::<std::collections::HashSet<_>>();
+                        shell_page.entries.extend(
+                            raw_entries
+                                .into_iter()
+                                .take(page_size)
+                                .filter(|entry| !existing_paths.contains(&entry.path)),
+                        );
+                        shell_page.has_more = raw_count > page_size || backend_has_more;
+                        shell_page.next_offset =
+                            shell_page.has_more.then_some(shell_page.entries.len());
+                    }
+                    next.error = None;
+                    eprintln!(
+                        "[freya][library] pagination:fetch-complete directory={} offset={} received={} total={}",
+                        request.relative_path.as_str(),
+                        request.offset,
+                        raw_count.min(page_size),
+                        next.library.entries.len()
+                    );
+                    true
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    eprintln!(
+                        "[freya][library] pagination:fetch-failure directory={} offset={} error={}",
+                        request.relative_path.as_str(),
+                        request.offset,
+                        message
+                    );
                     let mut next = state.write();
                     next.library.apply_more_error(&request, message.clone());
                     next.error = Some(message);
-                    return changed;
-                };
-
-                eprintln!(
-                    "[freya][library] pagination:fetch-start directory={} offset={} limit={}",
-                    request.relative_path.as_str(),
-                    request.offset,
-                    request.limit
-                );
-                let adapter_request = PageRequest::new(request.relative_path.as_str().to_string())
-                    .with_window(request.offset, request.limit);
-                match vault.list(adapter_request) {
-                    Ok(page) => {
-                        let page_size = request.limit.saturating_sub(1);
-                        let backend_has_more = page.has_more;
-                        let raw_count = page.entries.len();
-                        let raw_entries = page.entries;
-                        let contract_entries = raw_entries
-                            .iter()
-                            .map(super::to_library_entry)
-                            .collect::<Vec<_>>();
-
-                        let mut next = state.write();
-                        let applied = next.library.apply_more_page(&request, contract_entries);
-                        if applied != PageApply::Applied {
-                            eprintln!(
-                                "[freya][library] pagination:ignored-stale directory={} offset={}",
-                                request.relative_path.as_str(),
-                                request.offset
-                            );
-                            return changed;
-                        }
-
-                        if let Some(shell_page) = next.page.as_mut() {
-                            let existing_paths = shell_page
-                                .entries
-                                .iter()
-                                .map(|entry| entry.path.clone())
-                                .collect::<std::collections::HashSet<_>>();
-                            shell_page.entries.extend(
-                                raw_entries
-                                    .into_iter()
-                                    .take(page_size)
-                                    .filter(|entry| !existing_paths.contains(&entry.path)),
-                            );
-                            shell_page.has_more = raw_count > page_size || backend_has_more;
-                            shell_page.next_offset =
-                                shell_page.has_more.then_some(shell_page.entries.len());
-                        }
-                        next.error = None;
-                        eprintln!(
-                            "[freya][library] pagination:fetch-complete directory={} offset={} received={} total={}",
-                            request.relative_path.as_str(),
-                            request.offset,
-                            raw_count.min(page_size),
-                            next.library.entries.len()
-                        );
-                        drop(next);
-
-                        changed = true;
-                        backend_fetches += 1;
-                        let may_have_more = raw_count > page_size || backend_has_more;
-                        if backend_fetches < 2 && may_have_more {
-                            continue;
-                        }
-                        return true;
-                    }
-                    Err(error) => {
-                        let message = error.to_string();
-                        eprintln!(
-                            "[freya][library] pagination:fetch-failure directory={} offset={} error={}",
-                            request.relative_path.as_str(),
-                            request.offset,
-                            message
-                        );
-                        let mut next = state.write();
-                        next.library.apply_more_error(&request, message.clone());
-                        next.error = Some(message);
-                        return changed;
-                    }
+                    false
                 }
             }
         }

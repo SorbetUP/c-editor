@@ -8,7 +8,7 @@ use crate::{
     editor::Delay,
     library_contract::{
         EntryKind as ContractKind, EntryOpenTarget, EntryTitle, EntryType, LibraryEntry,
-        RelativePath, SortMode, ViewMode,
+        RelativePath, ScrollAction, SortMode, ViewMode,
     },
     navigation_contract::WorkspaceView,
     theme,
@@ -135,7 +135,7 @@ pub(super) fn main_content(
             .width(Size::fill())
             .height(Size::fill())
             .child(library_toolbar(state))
-            .child(library_grid(state))
+            .child(LibraryGrid { state })
             .child(library_create_button(state))
             .into_element()
     } else if snapshot.view == WorkspaceView::Wiki {
@@ -538,7 +538,72 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
         .into_element()
 }
 
+#[derive(PartialEq)]
+struct LibraryGrid {
+    state: State<ShellState>,
+}
+
+impl Component for LibraryGrid {
+    fn render(&self) -> impl IntoElement {
+        library_grid(self.state)
+    }
+}
+
 fn library_grid(state: State<ShellState>) -> Element {
+    let scroll_position = use_state(|| (0_i32, 0_i32));
+    let scroll_notifier = use_state(|| ());
+    let scroll_requests = use_state(Vec::<ScrollRequest>::new);
+    let viewport_height = use_state(|| 0_f32);
+    let content_height = use_state(|| 0_f32);
+    let on_scroll = use_state(|| {
+        let mut position_state = scroll_position;
+        let mut notifier = scroll_notifier;
+        let paging_state = state;
+        Callback::new(move |event: ScrollEvent| {
+            let (changed, vertical_offset) = {
+                let mut position = position_state.write();
+                let previous = *position;
+                let vertical_offset = match event {
+                    ScrollEvent::X(x) => {
+                        position.0 = x;
+                        None
+                    }
+                    ScrollEvent::Y(y) => {
+                        position.1 = y;
+                        Some(y)
+                    }
+                };
+                (previous != *position, vertical_offset)
+            };
+            if changed {
+                notifier.write();
+            }
+            if changed {
+                if let Some(offset) = vertical_offset {
+                    let viewport = *viewport_height.read();
+                    let content = *content_height.read();
+                    if viewport > 0. && content > 0. {
+                        let scroll_top = offset.saturating_neg() as f32;
+                        let distance_from_bottom =
+                            (content - scroll_top - viewport).max(0.).ceil() as usize;
+                        if paging_state.read().library.on_scroll(distance_from_bottom)
+                            == ScrollAction::RequestMore
+                        {
+                            let _ = load_more_library_entries(paging_state);
+                        }
+                    }
+                }
+            }
+            changed
+        })
+    });
+    let get_scroll = use_state(|| {
+        let position_state = scroll_position;
+        Callback::new(move |_| *position_state.read())
+    });
+    let scroll_controller =
+        ScrollController::managed(scroll_notifier, scroll_requests, on_scroll, get_scroll);
+
     let snapshot = state.read().clone();
     let visible = snapshot.library.visible_entries();
     if visible.is_empty() {
@@ -574,15 +639,16 @@ fn library_grid(state: State<ShellState>) -> Element {
         rect().spacing(6.).children(entries)
     };
 
-    let mut paging_state = state;
     let mut drag_move_state = state;
     let mut drag_release_state = state;
     let mut drag_action_state = state;
+    let mut viewport_height_state = viewport_height;
+    let mut content_height_state = content_height;
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .on_wheel(move |_| {
-            let _ = load_more_library_entries(paging_state);
+        .on_sized(move |event: Event<SizedEventData>| {
+            viewport_height_state.set_if_modified(event.area.height());
         })
         .on_global_pointer_move(move |event: Event<PointerEventData>| {
             if event.is_primary() {
@@ -606,13 +672,16 @@ fn library_grid(state: State<ShellState>) -> Element {
             }
         })
         .child(
-            ScrollView::new()
+            ScrollView::new_controlled(scroll_controller)
                 .width(Size::fill())
                 .height(Size::fill())
                 .child(
                     rect()
                         .width(Size::fill())
                         .padding(Gaps::new(72., 10., 10., 10.))
+                        .on_sized(move |event: Event<SizedEventData>| {
+                            content_height_state.set_if_modified(event.area.height());
+                        })
                         .child(surface),
                 ),
         )
@@ -860,20 +929,16 @@ fn render_library_card(
         } else {
             Gaps::new(8., 10., 8., 10.)
         })
-        .background(theme::color(theme::mix(
-            theme::SURFACE,
-            theme::BG,
-            0.34,
-        )))
+        .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.34)))
         .border(
-                Border::new()
-                    .fill(theme::color(if hovered {
-                        theme::BORDER_STRONG
-                    } else if drop_state == Some(true) {
-                        theme::PRIMARY
-                    } else {
-                        theme::BORDER
-                    }))
+            Border::new()
+                .fill(theme::color(if hovered {
+                    theme::BORDER_STRONG
+                } else if drop_state == Some(true) {
+                    theme::PRIMARY
+                } else {
+                    theme::BORDER
+                }))
                 .width(1.),
         )
         .with_corner_radius(10.)

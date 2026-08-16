@@ -19,7 +19,7 @@ use std::path::Path;
 use crate::{
     editor::{Delay, EditorAction},
     library_contract::RelativePath,
-    theme,
+    markdown_tags, theme,
 };
 
 use super::{route_notice, ShellState};
@@ -670,7 +670,7 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             .chain(snapshot.library.root_entries.iter())
             .find(|entry| entry.path.as_str() == path)
     });
-    let mut tags = document_tags(&markdown);
+    let mut tags = markdown_tags::parse_markdown_tags(&markdown);
     if tags.is_empty() {
         tags = library_entry
             .map(|entry| entry.tags.clone())
@@ -2663,51 +2663,6 @@ fn document_created_at(markdown: &str) -> Option<String> {
     })
 }
 
-fn document_tags(markdown: &str) -> Vec<String> {
-    let Some(frontmatter) = frontmatter(markdown) else {
-        return Vec::new();
-    };
-    let lines = frontmatter.lines().collect::<Vec<_>>();
-    let Some(index) = lines.iter().position(|line| {
-        line.split_once(':')
-            .is_some_and(|(key, _)| key.trim() == "tags")
-    }) else {
-        return Vec::new();
-    };
-    let raw = lines[index]
-        .split_once(':')
-        .map(|(_, raw)| raw.trim())
-        .unwrap_or("");
-    let mut tags = if raw.starts_with('[') && raw.ends_with(']') {
-        raw[1..raw.len() - 1]
-            .split(',')
-            .map(trim_yaml_scalar)
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>()
-    } else if !raw.is_empty() {
-        raw.split(',')
-            .map(trim_yaml_scalar)
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-    if raw.is_empty() {
-        for line in lines.iter().skip(index + 1) {
-            let trimmed = line.trim();
-            if let Some(tag) = trimmed.strip_prefix("- ") {
-                let value = trim_yaml_scalar(tag);
-                if !value.is_empty() && !tags.contains(&value) {
-                    tags.push(value);
-                }
-            } else if !trimmed.is_empty() {
-                break;
-            }
-        }
-    }
-    tags
-}
-
 fn trim_yaml_scalar(value: &str) -> String {
     value
         .trim()
@@ -2749,14 +2704,20 @@ mod tests {
             document_created_at(markdown).as_deref(),
             Some("2026-08-12T08:30:00Z")
         );
-        assert_eq!(document_tags(markdown), vec!["rust", "editor"]);
+        assert_eq!(
+            markdown_tags::parse_markdown_tags(markdown),
+            vec!["rust", "editor"]
+        );
         assert_eq!(short_date("2026-08-12T08:30:00Z"), "2026-08-12");
     }
 
     #[test]
     fn multiline_tags_preserve_source_order() {
         let markdown = "---\ntags:\n  - alpha\n  - beta\ncreatedAt: '2026-01-03'\n---\n# Note";
-        assert_eq!(document_tags(markdown), vec!["alpha", "beta"]);
+        assert_eq!(
+            markdown_tags::parse_markdown_tags(markdown),
+            vec!["alpha", "beta"]
+        );
     }
 
     #[test]

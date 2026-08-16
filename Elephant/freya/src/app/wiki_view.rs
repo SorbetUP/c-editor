@@ -163,9 +163,7 @@ fn wiki_card(
                 .padding(Gaps::new(6., 9., 6., 9.))
                 .with_corner_radius(7.)
                 .a11y_alt(format!("Dismiss Wiki {}", draft.title))
-                .on_press(move |_| {
-                    dismiss_wiki(dismiss_shell, dismiss_view, dismiss_id.clone())
-                })
+                .on_press(move |_| dismiss_wiki(dismiss_shell, dismiss_view, dismiss_id.clone()))
                 .child(label().text("Dismiss")),
         )
     } else {
@@ -283,7 +281,6 @@ fn dismiss_wiki(
         }
     }
 }
-
 
 fn status_label(status: &WikiDraftStatus) -> &'static str {
     match status {

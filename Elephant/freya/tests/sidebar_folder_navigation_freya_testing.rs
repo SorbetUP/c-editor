@@ -16,8 +16,8 @@ impl FixtureVault {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_nanos();
-        let root = std::env::temp_dir()
-            .join(format!("elephant-freya-sidebar-folder-navigation-{stamp}"));
+        let root =
+            std::env::temp_dir().join(format!("elephant-freya-sidebar-folder-navigation-{stamp}"));
         fs::create_dir_all(root.join("Projects")).expect("create fixture folder");
         fs::write(
             root.join("Projects/Plan.md"),

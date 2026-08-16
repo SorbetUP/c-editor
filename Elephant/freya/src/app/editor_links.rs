@@ -190,18 +190,16 @@ pub(crate) fn activate(mut state: freya::prelude::State<super::ShellState>, dest
             }
             eprintln!("[freya][editor] action=link-open path={relative}");
         }
-        Ok(LinkTarget::External(destination)) => {
-            match open_external(&destination) {
-                Ok(()) => {
-                    eprintln!("[freya][editor] action=link-external-open url={destination}");
-                    state.write().error = None;
-                }
-                Err(error) => {
-                    eprintln!("[freya][editor] action=link-external-failure error={error}");
-                    state.write().error = Some(error);
-                }
+        Ok(LinkTarget::External(destination)) => match open_external(&destination) {
+            Ok(()) => {
+                eprintln!("[freya][editor] action=link-external-open url={destination}");
+                state.write().error = None;
             }
-        }
+            Err(error) => {
+                eprintln!("[freya][editor] action=link-external-failure error={error}");
+                state.write().error = Some(error);
+            }
+        },
         Err(error) => {
             eprintln!(
                 "[freya][editor] action=link-failure destination={destination} error={error}"
@@ -221,11 +219,10 @@ fn open_external(destination: &str) -> Result<(), String> {
         .args(["/C", "start", "", destination])
         .status();
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    let result: Result<std::process::ExitStatus, std::io::Error> =
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "opening external links is unsupported on this platform",
-        ));
+    let result: Result<std::process::ExitStatus, std::io::Error> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "opening external links is unsupported on this platform",
+    ));
     let status = result.map_err(|error| format!("Unable to open external link: {error}"))?;
     status
         .success()

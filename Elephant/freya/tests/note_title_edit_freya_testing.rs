@@ -48,8 +48,7 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
 fn click_title_input(runner: &mut TestingRunner) {
     let node = runner
         .find(|node, element| {
-            (element.accessibility().builder.role() == AccessibilityRole::TextInput)
-                .then_some(node)
+            (element.accessibility().builder.role() == AccessibilityRole::TextInput).then_some(node)
         })
         .expect("the real note title input must expose a text-input role");
     runner.click_cursor(node.layout().area.center().to_f64());

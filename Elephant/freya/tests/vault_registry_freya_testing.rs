@@ -7,7 +7,11 @@
 use elephant_freya::app::app_with_vault;
 use freya_testing::{TestingNode, TestingRunner};
 use serde_json::json;
-use std::{env, fs, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    env, fs,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 struct Fixture {
     root: PathBuf,
@@ -17,7 +21,10 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let root = std::env::temp_dir().join(format!("elephant-freya-vault-registry-{stamp}"));
         let profile = root.join("profile");
         let first = root.join("First Vault");
@@ -44,10 +51,16 @@ impl Fixture {
         .unwrap();
         let previous_profile = env::var_os("ELEPHANT_FREYA_PROFILE");
         env::set_var("ELEPHANT_FREYA_PROFILE", &profile);
-        Self { root, profile, previous_profile }
+        Self {
+            root,
+            profile,
+            previous_profile,
+        }
     }
 
-    fn first(&self) -> PathBuf { self.root.join("First Vault") }
+    fn first(&self) -> PathBuf {
+        self.root.join("First Vault")
+    }
 }
 
 impl Drop for Fixture {

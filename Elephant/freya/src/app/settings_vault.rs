@@ -42,19 +42,13 @@ pub(crate) fn vault_settings(
 
     let mut registry_rows = rect()
         .width(Size::fill())
-        .height(Size::px(
-            shell.vault_registry.vaults.len() as f32 * 58.,
-        ))
+        .height(Size::px(shell.vault_registry.vaults.len() as f32 * 58.))
         .spacing(8.)
         .a11y_alt("Registered vaults");
     for vault in &shell.vault_registry.vaults {
         let id = vault.id.clone();
         let name = vault.name.clone();
-        let is_active = shell
-            .vault_registry
-            .active_vault_id
-            .as_deref()
-            == Some(vault.id.as_str());
+        let is_active = shell.vault_registry.active_vault_id.as_deref() == Some(vault.id.as_str());
         let mut activate_state = shell_state;
         let mut remove_state = shell_state;
         let activate_name = name.clone();

@@ -164,13 +164,7 @@ impl Component for ChatWorkspace {
                 let prompt = send_input.read().clone();
                 let model = send_model.read().clone();
                 let base_url = send_base_url.read().clone();
-                send_message(
-                    send_shell,
-                    prompt,
-                    model,
-                    base_url,
-                    send_input,
-                )
+                send_message(send_shell, prompt, model, base_url, send_input)
             })
             .child(
                 label()
@@ -263,13 +257,7 @@ impl Component for ChatWorkspace {
                             let prompt = composer_input.read().clone();
                             let model = composer_model.read().clone();
                             let base_url = composer_base_url.read().clone();
-                            send_message(
-                                composer_shell,
-                                prompt,
-                                model,
-                                base_url,
-                                composer_input,
-                            );
+                            send_message(composer_shell, prompt, model, base_url, composer_input);
                         }
                     }
                 })

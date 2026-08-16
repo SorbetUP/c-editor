@@ -84,6 +84,7 @@ pub struct SettingsViewState {
     pub runtime: SettingsRuntimeState,
     pub(super) trash: VaultTrashState,
     pub(super) addons: AddonsViewState,
+    pub(super) addon_runtime: crate::addon_runtime::RuntimeOwner,
 }
 
 impl SettingsViewState {
@@ -95,6 +96,7 @@ impl SettingsViewState {
             runtime,
             trash: VaultTrashState::default(),
             addons: AddonsViewState::default(),
+            addon_runtime: crate::addon_runtime::RuntimeOwner::default(),
         };
         if let Some(error) = state.runtime.load_error.clone() {
             state.surface = SettingsSurfaceState::Error {
@@ -229,6 +231,7 @@ impl Default for SettingsViewState {
             runtime,
             trash: VaultTrashState::default(),
             addons: AddonsViewState::default(),
+            addon_runtime: crate::addon_runtime::RuntimeOwner::default(),
         }
     }
 }

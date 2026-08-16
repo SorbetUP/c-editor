@@ -6,11 +6,7 @@
 
 use freya::prelude::*;
 
-use crate::{
-    canvas_contract::CanvasPosition,
-    search_graph_contract::SurfaceError,
-    theme,
-};
+use crate::{canvas_contract::CanvasPosition, search_graph_contract::SurfaceError, theme};
 
 use super::{explorer, graph_canvas, ShellState};
 
@@ -29,8 +25,16 @@ pub(super) fn workspace(
         .color(theme::token_color(palette, theme::ThemeToken::Muted))
         .text(format!(
             "{} nodes, {} links",
-            snapshot.graph.snapshot.as_ref().map_or(0, |graph| graph.nodes.len()),
-            snapshot.graph.snapshot.as_ref().map_or(0, |graph| graph.edges.len())
+            snapshot
+                .graph
+                .snapshot
+                .as_ref()
+                .map_or(0, |graph| graph.nodes.len()),
+            snapshot
+                .graph
+                .snapshot
+                .as_ref()
+                .map_or(0, |graph| graph.edges.len())
         ));
     let mut refresh_state = explorer_state;
     let refresh = rect()

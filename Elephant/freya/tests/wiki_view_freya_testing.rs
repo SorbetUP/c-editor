@@ -110,8 +110,7 @@ fn wiki_route_dismisses_a_proposed_draft_in_the_real_store() {
     );
     assert!(runner
         .find(|node, element| {
-            (element.accessibility().builder.label() == Some("Dismiss Wiki Iroh"))
-                .then_some(node)
+            (element.accessibility().builder.label() == Some("Dismiss Wiki Iroh")).then_some(node)
         })
         .is_none());
 }

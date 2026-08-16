@@ -175,6 +175,19 @@ fn native_view_for(addon: &InstalledAddon) -> Option<NativeView> {
     })
 }
 
+pub(crate) fn has_native_view(addon_id: &str) -> bool {
+    matches!(
+        addon_id,
+        "elephant.graph"
+            | "elephant.wiki"
+            | "elephant.calendar"
+            | "elephant.ai-chat"
+            | "elephant.open-models"
+            | "elephant.sync"
+            | "elephant.dashboard"
+    )
+}
+
 pub fn set_enabled(root: &Path, addon_id: &str, enabled: bool) -> Result<InstalledAddon> {
     let mut registry = read(root)?;
     let addon = registry

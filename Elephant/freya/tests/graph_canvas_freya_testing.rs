@@ -1,7 +1,4 @@
-use elephant_freya::{
-    app::app_with_vault_view,
-    navigation_contract::WorkspaceView,
-};
+use elephant_freya::{app::app_with_vault_view, navigation_contract::WorkspaceView};
 use freya::prelude::{Color, Rect};
 use freya_testing::{TestingNode, TestingRunner};
 use std::{

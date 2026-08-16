@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::markdown_tags::update_markdown_tags;
 use muya_core::{
     edit::PasteCommand,
     features::{BlockTypeCommand, TableNavigationCommand, TaskCommand},
@@ -830,80 +831,6 @@ fn rename_markdown_title(markdown: &str, next_title: &str) -> String {
         renamed.push('\n');
     }
     renamed
-}
-
-fn update_markdown_tags(markdown: &str, tags: &[String], title: &str) -> String {
-    let mut normalized = Vec::new();
-    for tag in tags {
-        let tag = tag
-            .trim()
-            .trim_matches(['"', '\''])
-            .trim_start_matches('#')
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        if !tag.is_empty() && !normalized.iter().any(|current| current == &tag) {
-            normalized.push(tag);
-        }
-    }
-    let tags_line = format!(
-        "tags: [{}]",
-        normalized
-            .iter()
-            .map(|tag| format!("\"{}\"", tag.replace('"', "\\\"")))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    let mut lines = markdown.lines().map(str::to_owned).collect::<Vec<_>>();
-    if lines.first().is_some_and(|line| line == "---") {
-        let end = lines
-            .iter()
-            .enumerate()
-            .skip(1)
-            .find_map(|(index, line)| (line == "---").then_some(index));
-        if let Some(end) = end {
-            if let Some(index) = lines
-                .iter()
-                .enumerate()
-                .take(end)
-                .find_map(|(index, line)| line.trim_start().starts_with("tags:").then_some(index))
-            {
-                lines[index] = tags_line;
-            } else {
-                let insert_at = lines
-                    .iter()
-                    .enumerate()
-                    .take(end)
-                    .find_map(|(index, line)| {
-                        ["title:", "type:", "createdAt:", "updatedAt:"]
-                            .iter()
-                            .any(|prefix| line.trim_start().starts_with(prefix))
-                            .then_some(index + 1)
-                    })
-                    .unwrap_or(1);
-                lines.insert(insert_at, tags_line);
-            }
-            return lines.join("\n");
-        }
-    }
-
-    let normalized_title = title.trim();
-    let mut frontmatter = vec!["---".to_string()];
-    if !normalized_title.is_empty() {
-        frontmatter.push(format!(
-            "title: \"{}\"",
-            normalized_title.replace('"', "\\\"")
-        ));
-    }
-    frontmatter.push("type: \"note\"".to_string());
-    frontmatter.push(tags_line);
-    frontmatter.push("---".to_string());
-    let body = markdown.trim();
-    if body.is_empty() {
-        frontmatter.join("\n")
-    } else {
-        format!("{}\n\n{}", frontmatter.join("\n"), body)
-    }
 }
 
 fn text_value(document: &muya_core::Document, node_id: muya_core::NodeId) -> Option<&str> {

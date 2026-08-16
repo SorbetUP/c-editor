@@ -19,6 +19,7 @@
 //!   `title`, `type`/`kind`, `noteCount`, `excerpt`, `tags`, `updatedAt`,
 //!   pagination semantics and move/delete path behavior.
 
+use crate::markdown_tags;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use std::fs;
@@ -738,7 +739,7 @@ impl VaultAdapter {
         }
         fs::read_to_string(self.root().join(relative_path))
             .ok()
-            .map(|markdown| frontmatter_tags(&markdown))
+            .map(|markdown| markdown_tags::parse_markdown_tags(&markdown))
             .unwrap_or_default()
     }
 }
@@ -804,66 +805,11 @@ fn tags_from_value(value: &Value) -> Vec<String> {
         Value::Array(items) => items
             .iter()
             .filter_map(Value::as_str)
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(str::to_string)
+            .filter_map(markdown_tags::normalize_tag)
             .collect(),
-        Value::String(value) => value
-            .split(',')
-            .map(str::trim)
-            .filter(|tag| !tag.is_empty())
-            .map(str::to_string)
-            .collect(),
+        Value::String(value) => markdown_tags::parse_tag_list(value),
         _ => Vec::new(),
     }
-}
-
-fn frontmatter_tags(markdown: &str) -> Vec<String> {
-    let mut lines = markdown.lines();
-    if lines.next().map(str::trim) != Some("---") {
-        return Vec::new();
-    }
-
-    let mut tags = Vec::new();
-    let mut reading_list = false;
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            break;
-        }
-        if reading_list {
-            if let Some(value) = trimmed.strip_prefix('-') {
-                let value = value.trim().trim_matches(['"', '\'']);
-                if !value.is_empty() {
-                    tags.push(value.to_string());
-                }
-                continue;
-            }
-            reading_list = false;
-        }
-        let Some(value) = trimmed.strip_prefix("tags:") else {
-            continue;
-        };
-        let value = value.trim();
-        if value.is_empty() {
-            reading_list = true;
-        } else if value.starts_with('[') && value.ends_with(']') {
-            tags.extend(
-                value[1..value.len() - 1]
-                    .split(',')
-                    .map(str::trim)
-                    .map(|tag| tag.trim_matches(['"', '\'']))
-                    .filter(|tag| !tag.is_empty())
-                    .map(str::to_string),
-            );
-        } else {
-            let value = value.trim_matches(['"', '\'']);
-            if !value.is_empty() {
-                tags.push(value.to_string());
-            }
-        }
-    }
-    tags
 }
 
 fn drawing_preview_for(path: &str, preview: &str, excerpt: &str) -> Option<String> {
@@ -1061,7 +1007,10 @@ mod tests {
         )
         .expect("attached workspace is valid JSON");
         assert_eq!(attached["freyaShell"]["keep"], Value::Bool(true));
-        assert_eq!(attached["sidebar"][0]["path"], Value::String("Folder".into()));
+        assert_eq!(
+            attached["sidebar"][0]["path"],
+            Value::String("Folder".into())
+        );
 
         adapter
             .set_sidebar_visibility("Folder", "Folder", "folder", false)

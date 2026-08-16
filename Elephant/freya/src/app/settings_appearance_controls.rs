@@ -22,7 +22,13 @@ pub(super) fn appearance_settings(
     let dark = current_theme == active_family.dark;
 
     let mut controls = vec![
-        color_mode(state, shell_state, active_family.light, active_family.dark, dark),
+        color_mode(
+            state,
+            shell_state,
+            active_family.light,
+            active_family.dark,
+            dark,
+        ),
         theme_selector(
             state,
             shell_state,

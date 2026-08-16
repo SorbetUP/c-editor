@@ -200,7 +200,9 @@ fn dispatch_graph_command(
                     let mut snapshot = execution.snapshot;
                     if shell.read().view == crate::navigation_contract::WorkspaceView::Canvas {
                         let Some(vault) = vault.as_ref() else {
-                            explorer.write().apply_graph_error(SurfaceError::NoActiveVault);
+                            explorer
+                                .write()
+                                .apply_graph_error(SurfaceError::NoActiveVault);
                             return;
                         };
                         match crate::canvas_runtime::CanvasRuntime::open(

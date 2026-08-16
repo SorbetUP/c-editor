@@ -175,9 +175,7 @@ pub(super) fn section_content(
         content.child(settings_surface::surface_state(surface, palette))
     } else {
         let entries = match active_section {
-        "appearance" => {
-            settings_appearance_controls::appearance_settings(state, shell_state)
-        }
+            "appearance" => settings_appearance_controls::appearance_settings(state, shell_state),
             "editor" => settings_editor_controls::editor_settings(state),
             "vaults" => vec![settings_surface::vault_settings(
                 state,

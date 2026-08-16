@@ -53,7 +53,10 @@ impl VaultRegistry {
             .parent()
             .ok_or_else(|| format!("vault registry path has no parent: {}", path.display()))?;
         fs::create_dir_all(parent).map_err(|error| {
-            format!("create vault registry directory {}: {error}", parent.display())
+            format!(
+                "create vault registry directory {}: {error}",
+                parent.display()
+            )
         })?;
         let mut value = serde_json::to_value(PersistedRegistry {
             vaults: self.vaults.clone(),
@@ -63,12 +66,10 @@ impl VaultRegistry {
         value["schemaVersion"] = serde_json::json!(SCHEMA_VERSION);
         let temporary = path.with_extension("json.tmp");
         let encoded = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
-        fs::write(&temporary, encoded).map_err(|error| {
-            format!("write vault registry {}: {error}", temporary.display())
-        })?;
-        fs::rename(&temporary, &path).map_err(|error| {
-            format!("install vault registry {}: {error}", path.display())
-        })?;
+        fs::write(&temporary, encoded)
+            .map_err(|error| format!("write vault registry {}: {error}", temporary.display()))?;
+        fs::rename(&temporary, &path)
+            .map_err(|error| format!("install vault registry {}: {error}", path.display()))?;
         eprintln!(
             "[freya][vault-registry] action=persist path={} count={}",
             path.display(),
@@ -89,34 +90,34 @@ impl VaultRegistry {
         let canonical = fs::canonicalize(root)
             .map_err(|error| format!("vault root is not accessible {}: {error}", root.display()))?;
         if !canonical.is_dir() {
-            return Err(format!("vault root is not a directory: {}", canonical.display()));
+            return Err(format!(
+                "vault root is not a directory: {}",
+                canonical.display()
+            ));
         }
         let path = normalize_path(&canonical);
-        let descriptor = if let Some(vault) = self
-            .vaults
-            .iter_mut()
-            .find(|vault| vault.path == path)
-        {
-            vault.enabled = true;
-            vault.last_opened_at = now_string();
-            vault.clone()
-        } else {
-            let name = canonical
-                .file_name()
-                .and_then(|value| value.to_str())
-                .unwrap_or("Personal")
-                .to_owned();
-            let descriptor = VaultDescriptor {
-                id: next_vault_id(&self.vaults, &name),
-                name,
-                path,
-                icon: String::new(),
-                last_opened_at: now_string(),
-                enabled: true,
+        let descriptor =
+            if let Some(vault) = self.vaults.iter_mut().find(|vault| vault.path == path) {
+                vault.enabled = true;
+                vault.last_opened_at = now_string();
+                vault.clone()
+            } else {
+                let name = canonical
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("Personal")
+                    .to_owned();
+                let descriptor = VaultDescriptor {
+                    id: next_vault_id(&self.vaults, &name),
+                    name,
+                    path,
+                    icon: String::new(),
+                    last_opened_at: now_string(),
+                    enabled: true,
+                };
+                self.vaults.push(descriptor.clone());
+                descriptor
             };
-            self.vaults.push(descriptor.clone());
-            descriptor
-        };
         self.active_vault_id = Some(descriptor.id.clone());
         Ok(descriptor)
     }

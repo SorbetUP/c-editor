@@ -29,7 +29,8 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
 
 #[test]
 fn code_block_exposes_copy_and_executes_through_the_real_service() {
-    let root = std::env::temp_dir().join(format!("elephant-freya-code-test-{}", std::process::id()));
+    let root =
+        std::env::temp_dir().join(format!("elephant-freya-code-test-{}", std::process::id()));
     fs::create_dir_all(&root).expect("fixture vault");
     fs::write(
         root.join("Code.md"),

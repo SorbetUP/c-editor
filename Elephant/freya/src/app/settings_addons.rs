@@ -14,6 +14,7 @@ pub(crate) fn addons_settings(
     palette: theme::ThemePalette,
 ) -> Element {
     let snapshot = settings_state.read().clone();
+    let addon_runtime = snapshot.addon_runtime;
     let addons = snapshot.addons;
     let refresh_state = settings_state;
     let refresh_shell = shell_state;
@@ -70,7 +71,14 @@ pub(crate) fn addons_settings(
         );
     }
     for addon in addons.items {
-        body = body.child(addon_row(addon, settings_state, shell_state, palette));
+        let runtime_active = addon_runtime.is_active(&addon.manifest.id);
+        body = body.child(addon_row(
+            addon,
+            runtime_active,
+            settings_state,
+            shell_state,
+            palette,
+        ));
     }
     rect()
         .width(Size::fill())
@@ -88,6 +96,7 @@ pub(crate) fn addons_settings(
 
 fn addon_row(
     addon: crate::addon_adapter::InstalledAddon,
+    runtime_active: bool,
     settings_state: State<SettingsViewState>,
     shell_state: State<ShellState>,
     palette: theme::ThemePalette,
@@ -95,10 +104,12 @@ fn addon_row(
     let id = addon.manifest.id.clone();
     let name = addon.manifest.name.clone();
     let enabled = addon.enabled;
-    let runtime_status = match id.as_str() {
-        "elephant.graph" | "elephant.wiki" | "elephant.calendar" | "elephant.dashboard"
-        | "elephant.sync" => "Native Freya surface available",
-        _ => "JavaScript worker runtime is not connected in Freya",
+    let runtime_status = if crate::addon_adapter::has_native_view(&id) {
+        "Native Freya surface available"
+    } else if runtime_active {
+        "JavaScript worker active"
+    } else {
+        "JavaScript worker runtime is not connected in Freya"
     };
     let runtime_status_label = format!("Addon runtime status {name}: {runtime_status}");
     let toggle_state = settings_state;
@@ -182,8 +193,12 @@ fn refresh_addons(mut settings_state: State<SettingsViewState>, shell_state: Sta
         return;
     };
     settings_state.write().begin_addons_load();
-    let result = crate::addon_adapter::list(vault.root());
-    settings_state.write().apply_addons_result(result);
+    let runtime = settings_state.read().addon_runtime.clone();
+    let runtime_result = runtime.reconcile_enabled(vault.root());
+    let addons_result = crate::addon_adapter::list(vault.root());
+    let mut state = settings_state.write();
+    state.apply_addons_result(addons_result);
+    state.finish_addon_action(runtime_result);
 }
 
 fn install_addon(mut settings_state: State<SettingsViewState>, shell_state: State<ShellState>) {
@@ -218,7 +233,8 @@ fn toggle_addon(
         return;
     };
     settings_state.write().begin_addon_action(addon_id.clone());
-    let result = crate::addon_adapter::set_enabled(vault.root(), &addon_id, enabled).map(|_| ());
+    let runtime = settings_state.read().addon_runtime.clone();
+    let result = runtime.set_enabled(vault.root(), &addon_id, enabled);
     finish_addon_action(settings_state, shell_state, result);
 }
 
@@ -234,7 +250,8 @@ fn uninstall_addon(
         return;
     };
     settings_state.write().begin_addon_action(addon_id.clone());
-    let result = crate::addon_adapter::uninstall(vault.root(), &addon_id);
+    let runtime = settings_state.read().addon_runtime.clone();
+    let result = runtime.uninstall(vault.root(), &addon_id);
     finish_addon_action(settings_state, shell_state, result);
 }
 
@@ -243,9 +260,13 @@ fn finish_addon_action(
     shell_state: State<ShellState>,
     result: Result<(), String>,
 ) {
-    let should_refresh = result.is_ok();
-    settings_state.write().finish_addon_action(result);
-    if should_refresh {
-        refresh_addons(settings_state, shell_state);
-    }
+    let refresh = shell_state
+        .read()
+        .vault
+        .clone()
+        .ok_or_else(|| "No vault selected.".to_owned())
+        .and_then(|vault| crate::addon_adapter::list(vault.root()));
+    let mut state = settings_state.write();
+    state.apply_addons_result(refresh);
+    state.finish_addon_action(result);
 }
