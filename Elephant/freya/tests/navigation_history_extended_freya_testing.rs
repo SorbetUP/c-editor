@@ -3,9 +3,10 @@
 //! Contracts: TFR-NAV-001 and FH-001..FH-008 in
 //! `docs/TAURI_FUNCTIONAL_REFERENCE.md`.
 //!
-//! These tests deliberately do not sleep between logical clicks. Two different
-//! logical targets must stay different interactions even when a remount places
-//! them at the same pointer coordinates.
+//! Logical targets must stay distinct even when a remount places them at the
+//! same pointer coordinates. Where the current Tauri card contract deliberately
+//! defers activation for 220ms to disambiguate title double-click rename, the
+//! tests wait for that production timer instead of inserting a race workaround.
 
 use elephant_freya::app::app_with_vault;
 use freya::prelude::Rect;
@@ -13,7 +14,7 @@ use freya_testing::{TestingNode, TestingRunner};
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 struct FixtureVault {
@@ -57,6 +58,16 @@ fn nodes(runner: &TestingRunner, label: &str) -> Vec<TestingNode> {
     })
 }
 
+fn library_cards(runner: &TestingRunner, label: &str) -> Vec<TestingNode> {
+    nodes(runner, label)
+        .into_iter()
+        .filter(|node| {
+            let size = node.layout().area.size;
+            size.width >= 180. && size.height >= 70.
+        })
+        .collect()
+}
+
 fn click_node(runner: &mut TestingRunner, node: TestingNode) {
     runner.click_cursor(node.layout().area.center().to_f64());
 }
@@ -84,7 +95,7 @@ fn click_sidebar_label(runner: &mut TestingRunner, label: &str) {
 }
 
 fn click_library_card(runner: &mut TestingRunner, label: &str) {
-    let node = nodes(runner, label)
+    let node = library_cards(runner, label)
         .into_iter()
         .max_by(|left, right| {
             left.layout()
@@ -96,6 +107,7 @@ fn click_library_card(runner: &mut TestingRunner, label: &str) {
         })
         .unwrap_or_else(|| panic!("no library card has accessible label {label:?}"));
     click_node(runner, node);
+    runner.poll(Duration::from_millis(10), Duration::from_millis(260));
 }
 
 fn opacity(runner: &TestingRunner, label: &str) -> Option<f32> {
@@ -129,8 +141,8 @@ fn enter_projects(runner: &mut TestingRunner) {
     click_library_card(runner, "Projects");
     runner.sync_and_update();
     assert!(
-        !nodes(runner, "Plan").is_empty(),
-        "FH-001: entering Projects must expose its real child note"
+        !library_cards(runner, "Plan").is_empty(),
+        "FH-001: entering Projects must expose its real child note card"
     );
     assert!(
         nodes(runner, "NoteEditorHost").is_empty(),
@@ -144,7 +156,7 @@ fn open_plan(runner: &mut TestingRunner) {
     assert_eq!(
         nodes(runner, "NoteEditorHost").len(),
         1,
-        "FH-002: the first Plan click after the folder remount must open the editor"
+        "FH-002: the first Plan activation after the folder remount must open the editor"
     );
     assert_eq!(
         nodes(runner, "Heading 1").len(),
@@ -163,8 +175,9 @@ fn folder_back_restores_root_and_forward_restores_folder() {
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
     assert!(
-        !nodes(&runner, "Root").is_empty() && !nodes(&runner, "Other").is_empty(),
-        "FH-003: Back from Projects must restore the root library"
+        !library_cards(&runner, "Root").is_empty()
+            && !library_cards(&runner, "Other").is_empty(),
+        "FH-003: Back from Projects must restore the root library cards"
     );
     assert!(nodes(&runner, "NoteEditorHost").is_empty());
     assert_eq!(opacity(&runner, "Avancer"), Some(1.0));
@@ -172,10 +185,13 @@ fn folder_back_restores_root_and_forward_restores_folder() {
     click_label(&mut runner, "Avancer");
     runner.sync_and_update();
     assert!(
-        !nodes(&runner, "Plan").is_empty(),
+        !library_cards(&runner, "Plan").is_empty(),
         "FH-004: Forward must restore the exact Projects directory state"
     );
-    assert!(nodes(&runner, "Root").is_empty());
+    assert!(
+        library_cards(&runner, "Root").is_empty(),
+        "the Root sidebar entry may remain mounted, but the root library card must be absent"
+    );
     assert!(nodes(&runner, "NoteEditorHost").is_empty());
 }
 
@@ -189,11 +205,11 @@ fn new_navigation_after_back_discards_the_stale_forward_branch() {
 
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
-    assert!(!nodes(&runner, "Plan").is_empty());
+    assert!(!library_cards(&runner, "Plan").is_empty());
 
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
-    assert!(!nodes(&runner, "Other").is_empty());
+    assert!(!library_cards(&runner, "Other").is_empty());
     assert_eq!(opacity(&runner, "Avancer"), Some(1.0));
 
     click_library_card(&mut runner, "Other");
@@ -225,7 +241,7 @@ fn closing_nested_note_preserves_bytes_and_returns_to_the_folder_context() {
         "FH-007: Close note must unmount the editor"
     );
     assert!(
-        !nodes(&runner, "Plan").is_empty(),
+        !library_cards(&runner, "Plan").is_empty(),
         "FH-007: closing a nested note must return to its folder context"
     );
     assert_eq!(
@@ -246,10 +262,11 @@ fn close_then_immediate_reopen_loads_the_real_persisted_note() {
     open_plan(&mut runner);
     click_label(&mut runner, "Close note");
     runner.sync_and_update();
-    assert!(!nodes(&runner, "Plan").is_empty());
+    assert!(!library_cards(&runner, "Plan").is_empty());
 
-    // No delay here: a close/remount followed by activation is a new logical
-    // action and may not be swallowed by global-coordinate double-click state.
+    // This is immediately the next logical activation. The helper only waits
+    // for the real Tauri/Freya card activation contract after issuing it; no
+    // pre-click sleep is used to evade stale global double-click state.
     click_library_card(&mut runner, "Plan");
     runner.sync_and_update();
 
