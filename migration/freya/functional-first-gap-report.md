@@ -466,3 +466,19 @@ cargo test --manifest-path Elephant/freya/Cargo.toml addon_packages -- --nocaptu
 cargo test --manifest-path Elephant/freya/Cargo.toml --test addon_lifecycle_freya_testing -- --nocapture : 1 passed
 pnpm freya:check : PASS (warnings préexistants)
 ```
+
+## Mise à jour fonctionnelle — 2026-08-16 (liens inline)
+
+Les liens Markdown visibles dans un paragraphe éditeur sont maintenant reliés
+au même résolveur que la barre d’actions : une cible interne ouvre la note et
+applique son fragment, tandis qu’une URL externe passe par l’ouvreur système.
+Le rendu reste un paragraphe éditable Muya/Freya ; aucun texte parallèle n’est
+maintenu pour simuler le lien.
+
+Le test a été exécuté en rouge après retrait temporaire du dispatch inline
+(échec reproduit : `/Users/sorbet/Library/Application Support/rtk/tee/1786873920_cargo_test.log`),
+puis en vert après restauration du chemin réel :
+
+```text
+cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_link_freya_testing -- --nocapture : 2 passed
+```

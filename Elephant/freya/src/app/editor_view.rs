@@ -140,6 +140,16 @@ impl Component for EditableInlineBlock {
             return route_notice("NoteEditorHost", "No note open").into_element();
         }
 
+        let link_destination = snapshot.editor.as_ref().and_then(|editor| {
+            let mut destinations = Vec::new();
+            collect_inline_link_destinations(
+                editor.session().document(),
+                self.node_id,
+                &mut destinations,
+            );
+            (destinations.len() == 1).then(|| destinations.remove(0))
+        });
+
         if editable.editor().read().committed_text() != value {
             let mut inner = editable.editor_mut().write();
             inner.set(&value);
@@ -183,7 +193,8 @@ impl Component for EditableInlineBlock {
             });
         };
         let on_pointer_up = move |_| editable.process_event(EditableEvent::Release);
-
+        let link_state = self.state;
+        let link_destination_for_click = link_destination.clone();
         let mut paragraph = paragraph()
             .a11y_id(a11y_id)
             .width(Size::fill())
@@ -195,6 +206,11 @@ impl Component for EditableInlineBlock {
             .a11y_alt(self.accessibility_label.clone())
             .on_mouse_down(on_mouse_down)
             .on_mouse_move(on_mouse_move)
+            .on_mouse_up(move |_| {
+                if let Some(destination) = link_destination_for_click.as_deref() {
+                    editor_links::activate(link_state, destination);
+                }
+            })
             .on_global_pointer_press(on_pointer_up)
             .on_key_down(on_key_down)
             .on_key_up(on_key_up)
@@ -2096,6 +2112,23 @@ fn collect_inline_children(
 ) {
     for child in document.children(parent) {
         collect_inline_node(document, child.id, style, palette, text_scale, spans);
+    }
+}
+
+fn collect_inline_link_destinations(
+    document: &Document,
+    parent: NodeId,
+    destinations: &mut Vec<String>,
+) {
+    for node in document.children(parent) {
+        match &node.kind {
+            NodeKind::Inline(InlineKind::Link { destination, .. })
+            | NodeKind::Inline(InlineKind::AutoLink { destination }) => {
+                destinations.push(destination.clone());
+                collect_inline_link_destinations(document, node.id, destinations);
+            }
+            _ => collect_inline_link_destinations(document, node.id, destinations),
+        }
     }
 }
 

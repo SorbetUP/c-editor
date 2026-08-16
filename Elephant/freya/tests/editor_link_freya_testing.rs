@@ -1,4 +1,5 @@
 use elephant_freya::app::app_with_vault;
+use freya::prelude::Paragraph;
 use freya_testing::{TestingNode, TestingRunner};
 use std::{
     fs,
@@ -23,8 +24,11 @@ impl FixtureVault {
             "# Alpha\n\nOpen [Beta](Beta.md#target).\n",
         )
         .expect("write source note");
-        fs::write(root.join("Notes/Beta.md"), "# Beta\n\n## Target\nTarget note.\n")
-            .expect("write target note");
+        fs::write(
+            root.join("Notes/Beta.md"),
+            "# Beta\n\n## Target\nTarget note.\n",
+        )
+        .expect("write target note");
         Self { root }
     }
 }
@@ -65,6 +69,23 @@ fn click_main_label(runner: &mut TestingRunner, label: &str) {
     ));
 }
 
+fn click_inline_link_paragraph(runner: &mut TestingRunner) {
+    let node = runner
+        .find_many(|node, _| {
+            let paragraph = Paragraph::try_downcast(node.element().as_ref())?;
+            let text = paragraph
+                .spans
+                .iter()
+                .map(|span| span.text.as_ref())
+                .collect::<String>();
+            (node.layout().area.min_x() > 280. && text.contains("Open ")).then_some(node)
+        })
+        .into_iter()
+        .next()
+        .expect("missing inline link paragraph");
+    runner.click_cursor(node.layout().area.center().to_f64());
+}
+
 #[test]
 fn activating_an_internal_markdown_link_opens_the_target_note() {
     let fixture = FixtureVault::new();
@@ -94,4 +115,27 @@ fn activating_an_internal_markdown_link_opens_the_target_note() {
         0,
         "a valid heading fragment must not surface an anchor error"
     );
+}
+
+#[test]
+fn clicking_an_inline_markdown_link_opens_the_target_note() {
+    let fixture = FixtureVault::new();
+    let root = fixture.root.clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_main_label(&mut runner, "Notes");
+    runner.sync_and_update();
+    click_label(&mut runner, "Alpha");
+    runner.sync_and_update();
+    click_inline_link_paragraph(&mut runner);
+    runner.sync_and_update();
+
+    assert_eq!(labeled_nodes(&runner, "NoteEditorHost").len(), 1);
+    assert_eq!(labeled_nodes(&runner, "Open link Beta").len(), 0);
+    assert_eq!(labeled_nodes(&runner, "Library error").len(), 0);
 }
