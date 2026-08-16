@@ -243,3 +243,19 @@ vérifiant l’état `Rejected` relu depuis SQLite et la disparition de l’acti
 La suite Wiki complète passe avec 2 tests. La génération de propositions IA
 reste volontairement non déclarée comme migrée : elle nécessite encore son
 runtime de connaissance réel.
+
+## Mise à jour fonctionnelle — 2026-08-16 (modèles locaux)
+
+La carte Open Models Freya expose désormais `Remove` pour supprimer un fichier
+modèle local du vault. Le chemin est validé comme un simple nom de fichier,
+la suppression passe par l’état métier puis recharge le répertoire ; les
+échecs restent visibles et journalisés. Cette action correspond au bouton
+`Remove` du package Tauri.
+
+Le test rouge/vert est intégré à
+`native_workspace_navigation_freya_testing::enabled_official_workspace_views_are_real_clickable_native_routes` :
+il clique le contrôle accessible, vérifie la disparition du fichier
+`.elephantnote/models/tiny.gguf` et confirme que la carte n’est plus rendue.
+La suite des workspaces natifs passe avec 2 tests. Le téléchargement,
+l’activation et l’exécution GGUF restent non prouvés en Freya, car leur
+service natif doit encore être raccordé.

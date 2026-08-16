@@ -53,6 +53,32 @@ impl ModelsState {
             self.error.is_some()
         );
     }
+
+    fn remove_for(&mut self, root: &Path, name: &str) -> Result<(), String> {
+        if name.is_empty()
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.contains('\\')
+        {
+            return Err("Model file name is invalid.".to_owned());
+        }
+        let directory = crate::vault_adapter::vault_layout::hidden_dir(
+            root,
+            crate::vault_adapter::vault_layout::MODELS_DIR,
+        );
+        let path = directory.join(name);
+        if !path.is_file() {
+            return Err(format!("Local model is not present: {name}"));
+        }
+        fs::remove_file(&path).map_err(|error| format!("Model cannot be removed: {error}"))?;
+        self.load_for(root);
+        eprintln!(
+            "[freya][models] action=remove-complete path={}",
+            path.display()
+        );
+        Ok(())
+    }
 }
 
 pub(super) fn workspace(shell: State<ShellState>, palette: theme::ThemePalette) -> Element {
@@ -110,6 +136,29 @@ pub(super) fn workspace(shell: State<ShellState>, palette: theme::ThemePalette) 
         );
     }
     for file in &snapshot.models.files {
+        let name = file.name.clone();
+        let mut remove_shell = shell;
+        let remove = rect()
+            .padding(Gaps::new(6., 9., 6., 9.))
+            .with_corner_radius(7.)
+            .a11y_alt(format!("Remove local model {name}"))
+            .on_press(move |_| {
+                let Some(root) = remove_shell
+                    .read()
+                    .vault
+                    .as_ref()
+                    .map(|vault| vault.root().to_path_buf())
+                else {
+                    remove_shell.write().models.error = Some("No vault selected.".to_owned());
+                    return;
+                };
+                let result = remove_shell.write().models.remove_for(&root, &name);
+                if let Err(error) = result {
+                    eprintln!("[freya][models] action=remove-failure name={name} error={error}");
+                    remove_shell.write().models.error = Some(error);
+                }
+            })
+            .child(label().text("Remove"));
         body = body.child(
             rect()
                 .width(Size::fill())
@@ -131,7 +180,8 @@ pub(super) fn workspace(shell: State<ShellState>, palette: theme::ThemePalette) 
                     label()
                         .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .text(format_bytes(file.size)),
-                ),
+                )
+                .child(remove),
         );
     }
     if snapshot.models.loaded && snapshot.models.files.is_empty() {

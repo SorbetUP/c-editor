@@ -220,6 +220,15 @@ fn enabled_official_workspace_views_are_real_clickable_native_routes() {
             .width
             > 0.
     );
+    click(&mut runner, "Remove local model tiny.gguf");
+    runner.sync_and_update();
+    assert!(!fixture.root.join(".elephantnote/models/tiny.gguf").exists());
+    assert!(runner
+        .find(|node, element| {
+            (element.accessibility().builder.label() == Some("Local model tiny.gguf"))
+                .then_some(node)
+        })
+        .is_none());
     runner.render_to_file(&evidence.join("models.png"));
 
     click(&mut runner, "Sync");
