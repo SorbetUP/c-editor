@@ -1,4 +1,5 @@
 mod addon_adapter;
+mod addon_packages;
 pub mod app;
 pub mod canvas_contract;
 pub mod canvas_runtime;

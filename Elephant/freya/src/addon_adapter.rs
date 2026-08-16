@@ -17,6 +17,8 @@ use crate::vault_layout;
 
 type Result<T> = std::result::Result<T, String>;
 
+pub(crate) const ADDON_API_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AddonManifest {
@@ -27,8 +29,26 @@ pub struct AddonManifest {
     pub description: String,
     #[serde(default)]
     pub author: String,
+    #[serde(default = "default_api_version")]
+    pub api_version: u32,
+    #[serde(default)]
+    pub min_app_version: String,
+    #[serde(default)]
+    pub runtime: AddonRuntime,
+    #[serde(default)]
+    pub contributes: Value,
+    #[serde(default)]
+    pub activation_events: Vec<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonRuntime {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub entry: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -73,6 +93,42 @@ struct Registry {
 
 pub fn list(root: &Path) -> Result<Vec<InstalledAddon>> {
     Ok(read(root)?.addons.into_values().collect())
+}
+
+pub fn install(root: &Path, package_path: &Path) -> Result<InstalledAddon> {
+    let existing = read(root)?;
+    let package = crate::addon_packages::install(root, package_path)?;
+    let enabled = existing
+        .addons
+        .get(&package.manifest.id)
+        .map(|addon| addon.enabled)
+        .unwrap_or(false);
+    let record = InstalledAddon {
+        manifest: package.manifest,
+        enabled,
+        package_hash: package.package_hash,
+        installed_at: now(),
+        source: "external".to_owned(),
+    };
+    let mut registry = existing;
+    registry
+        .addons
+        .insert(record.manifest.id.clone(), record.clone());
+    if let Err(error) = write(root, &registry) {
+        let _ = fs::remove_dir_all(&package.target);
+        if let Some(backup) = package.backup {
+            let _ = fs::rename(backup, package.target);
+        }
+        return Err(error);
+    }
+    if let Some(backup) = package.backup {
+        let _ = fs::remove_dir_all(backup);
+    }
+    eprintln!(
+        "[freya][addons] action=install-complete id={} hash={}",
+        record.manifest.id, record.package_hash
+    );
+    Ok(record)
 }
 
 /// Returns only addon views that have a real native Freya implementation.
@@ -145,8 +201,24 @@ pub fn uninstall(root: &Path, addon_id: &str) -> Result<()> {
         fs::remove_dir_all(&package)
             .map_err(|error| format!("Remove addon package {}: {error}", package.display()))?;
     }
+    let data = vault_layout::addons_dir(root).join("data").join(addon_id);
+    if data.exists() {
+        fs::remove_dir_all(&data)
+            .map_err(|error| format!("Remove addon data {}: {error}", data.display()))?;
+    }
     eprintln!("[freya][addons] action:uninstall-complete id={addon_id}");
     Ok(())
+}
+
+fn default_api_version() -> u32 {
+    ADDON_API_VERSION
+}
+
+fn now() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_owned())
 }
 
 fn read(root: &Path) -> Result<Registry> {

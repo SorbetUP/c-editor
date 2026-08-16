@@ -415,4 +415,26 @@ après le polling. Preuves exécutées :
 cargo test --manifest-path Elephant/freya/Cargo.toml vault_watch -- --nocapture : PASS
 cargo test --manifest-path Elephant/freya/Cargo.toml --test vault_watch_freya_testing -- --nocapture : 1 passed
 pnpm freya:check : PASS (warnings préexistants)
+
+## Mise à jour fonctionnelle — 2026-08-16 (cycle de paquet add-on)
+
+Le premier segment du cycle add-on est maintenant réel côté Freya : un fichier
+`.enaddon` ou `.zip` est limité en taille, haché en BLAKE3, vérifié comme une
+archive ZIP sûre, contrôlé par manifeste (`apiVersion`, identifiant, runtime et
+entrée JavaScript), extrait dans un staging puis remplacé atomiquement. Une
+installation conserve l’état `enabled` existant et écrit le registre ; une
+désinstallation retire maintenant le package et les données persistées de
+l’add-on.
+
+Les tests de domaine créent un vrai ZIP, vérifient l’installation d’une entrée
+JavaScript, le nettoyage des données et le rejet d’un chemin `../` avant
+extraction. Le bouton Settings « Install package » appelle ce même chemin
+filesystem ; aucun worker JavaScript n’est démarré ou prétendu actif à ce
+stade.
+
+```text
+cargo test --manifest-path Elephant/freya/Cargo.toml addon_packages -- --nocapture : PASS
+cargo test --manifest-path Elephant/freya/Cargo.toml --test addon_lifecycle_freya_testing -- --nocapture : 1 passed
+pnpm freya:check : PASS (warnings préexistants)
+```
 ```

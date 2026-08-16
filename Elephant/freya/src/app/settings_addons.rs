@@ -23,6 +23,19 @@ pub(crate) fn addons_settings(
         .a11y_alt("Refresh addons")
         .on_press(move |_| refresh_addons(refresh_state, refresh_shell))
         .child(label().text("Refresh"));
+    let install_state = settings_state;
+    let install_shell = shell_state;
+    let install = rect()
+        .padding(Gaps::new(6., 9., 6., 9.))
+        .with_corner_radius(7.)
+        .a11y_alt("Install addon package")
+        .on_press(move |_| install_addon(install_state, install_shell))
+        .child(label().text("Install package"));
+    let actions = rect()
+        .horizontal()
+        .spacing(6.)
+        .child(install)
+        .child(refresh);
 
     let mut body = rect().width(Size::fill()).spacing(10.).child(
         rect()
@@ -39,7 +52,7 @@ pub(crate) fn addons_settings(
                         "Installed addons"
                     }),
             )
-            .child(refresh),
+            .child(actions),
     );
     if let Some(error) = addons.error {
         body = body.child(
@@ -171,6 +184,25 @@ fn refresh_addons(mut settings_state: State<SettingsViewState>, shell_state: Sta
     settings_state.write().begin_addons_load();
     let result = crate::addon_adapter::list(vault.root());
     settings_state.write().apply_addons_result(result);
+}
+
+fn install_addon(mut settings_state: State<SettingsViewState>, shell_state: State<ShellState>) {
+    let Some(package_path) = rfd::FileDialog::new()
+        .add_filter("Elephant add-on", &["enaddon", "zip"])
+        .pick_file()
+    else {
+        return;
+    };
+    let Some(vault) = shell_state.read().vault.clone() else {
+        settings_state
+            .write()
+            .finish_addon_action(Err("No vault selected.".to_owned()));
+        return;
+    };
+    let action = package_path.display().to_string();
+    settings_state.write().begin_addon_action(action);
+    let result = crate::addon_adapter::install(vault.root(), &package_path).map(|_| ());
+    finish_addon_action(settings_state, shell_state, result);
 }
 
 fn toggle_addon(
