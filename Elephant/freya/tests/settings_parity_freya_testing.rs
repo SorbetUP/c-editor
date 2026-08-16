@@ -446,7 +446,21 @@ fn addons_settings_reads_and_updates_the_real_vault_registry() {
     let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
     let fixture = FixtureVault::new();
     let addons = fixture.root.join(".elephantnote/addons");
-    fs::create_dir_all(addons.join("packages/example-addon")).expect("create addon package");
+    let package = addons.join("packages/example-addon");
+    fs::create_dir_all(&package).expect("create addon package");
+    fs::write(
+        package.join("index.js"),
+        r#"
+self.elephantAddon = {
+  activate(api) {
+    api.log.info('settings fixture activated');
+    return () => api.log.info('settings fixture disposed');
+  },
+  deactivate(api) { api.log.info('settings fixture deactivated'); }
+};
+"#,
+    )
+    .expect("write real addon worker entry");
     fs::write(
         addons.join("registry.json"),
         serde_json::json!({
