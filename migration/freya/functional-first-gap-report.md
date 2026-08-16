@@ -227,3 +227,19 @@ crée 502 notes, ouvre par la vraie recherche une note absente de la première
 page, revient en arrière puis la rouvre en avant. Avant le correctif, Forward
 laissait l’éditeur fermé ; après le correctif, `NoteEditorHost` est présent et
 le test passe.
+
+## Mise à jour fonctionnelle — 2026-08-16 (Wiki)
+
+La proposition Wiki peut maintenant être refusée depuis Freya avec `Dismiss`.
+L’action appelle directement la transition persistée `Proposed -> Rejected`
+du `KnowledgeStore`, rafraîchit la vue et expose les erreurs avec un log
+corrélé au draft. Le libellé utilisateur reste `Dismissed`, comme dans le
+package Tauri.
+
+Le test rouge/vert
+`wiki_view_freya_testing::wiki_route_dismisses_a_proposed_draft_in_the_real_store`
+échouait avant le changement sur la cible accessible absente, puis passe en
+vérifiant l’état `Rejected` relu depuis SQLite et la disparition de l’action.
+La suite Wiki complète passe avec 2 tests. La génération de propositions IA
+reste volontairement non déclarée comme migrée : elle nécessite encore son
+runtime de connaissance réel.

@@ -83,3 +83,35 @@ fn wiki_route_reads_and_accepts_the_real_persisted_draft() {
     assert!(fixture.root.join(".elephantnote/wiki/iroh.md").is_file());
     assert!(node(&runner, "Open Wiki Iroh").layout().area.size.width > 0.);
 }
+
+#[test]
+fn wiki_route_dismisses_a_proposed_draft_in_the_real_store() {
+    let fixture = FixtureVault::new();
+    let root = fixture.root.clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault_view(root.clone(), WorkspaceView::Wiki),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    assert!(node(&runner, "Dismiss Wiki Iroh").layout().area.size.width > 0.);
+    click(&mut runner, "Dismiss Wiki Iroh");
+    runner.sync_and_update();
+
+    let store = KnowledgeStore::open(&fixture.root).expect("reopen Wiki store");
+    assert_eq!(
+        store
+            .wiki_draft("wiki-iroh")
+            .expect("read dismissed Wiki draft")
+            .expect("dismissed Wiki draft")
+            .status,
+        WikiDraftStatus::Rejected
+    );
+    assert!(runner
+        .find(|node, element| {
+            (element.accessibility().builder.label() == Some("Dismiss Wiki Iroh"))
+                .then_some(node)
+        })
+        .is_none());
+}

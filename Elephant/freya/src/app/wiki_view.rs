@@ -136,7 +136,7 @@ fn wiki_card(
     palette: theme::ThemePalette,
 ) -> Element {
     let status = status_label(&draft.status);
-    let draft_id = draft.id.clone();
+    let accept_id = draft.id.clone();
     let accept = if matches!(
         draft.status,
         WikiDraftStatus::Proposed | WikiDraftStatus::Outdated
@@ -148,8 +148,25 @@ fn wiki_card(
                 .padding(Gaps::new(6., 9., 6., 9.))
                 .with_corner_radius(7.)
                 .a11y_alt(format!("Accept Wiki {}", draft.title))
-                .on_press(move |_| accept_wiki(accept_shell, accept_view, draft_id.clone()))
+                .on_press(move |_| accept_wiki(accept_shell, accept_view, accept_id.clone()))
                 .child(label().text("Accept")),
+        )
+    } else {
+        None
+    };
+    let dismiss = if draft.status == WikiDraftStatus::Proposed {
+        let dismiss_shell = shell_state;
+        let dismiss_view = view_state;
+        let dismiss_id = draft.id.clone();
+        Some(
+            rect()
+                .padding(Gaps::new(6., 9., 6., 9.))
+                .with_corner_radius(7.)
+                .a11y_alt(format!("Dismiss Wiki {}", draft.title))
+                .on_press(move |_| {
+                    dismiss_wiki(dismiss_shell, dismiss_view, dismiss_id.clone())
+                })
+                .child(label().text("Dismiss")),
         )
     } else {
         None
@@ -212,6 +229,7 @@ fn wiki_card(
                 .horizontal()
                 .spacing(7.)
                 .maybe_child(accept)
+                .maybe_child(dismiss)
                 .maybe_child(open),
         )
         .into_element()
@@ -240,11 +258,38 @@ fn accept_wiki(
     }
 }
 
+fn dismiss_wiki(
+    shell_state: State<ShellState>,
+    mut view_state: State<WikiViewState>,
+    draft_id: String,
+) {
+    let Some(vault) = shell_state.read().vault.clone() else {
+        view_state.write().fail("No active vault.".to_owned());
+        return;
+    };
+    let result = KnowledgeStore::open(vault.root()).and_then(|store| {
+        store
+            .set_wiki_draft_status(&draft_id, WikiDraftStatus::Rejected)
+            .map(|_| ())
+    });
+    match result {
+        Ok(()) => {
+            eprintln!("[freya][wiki] action:dismiss-complete draft={draft_id}");
+            view_state.write().refresh();
+        }
+        Err(error) => {
+            eprintln!("[freya][wiki] action:dismiss-failure draft={draft_id} error={error}");
+            view_state.write().fail(error);
+        }
+    }
+}
+
+
 fn status_label(status: &WikiDraftStatus) -> &'static str {
     match status {
         WikiDraftStatus::Proposed => "Proposed",
         WikiDraftStatus::Accepted => "Accepted",
-        WikiDraftStatus::Rejected => "Rejected",
+        WikiDraftStatus::Rejected => "Dismissed",
         WikiDraftStatus::Outdated => "Outdated",
     }
 }
