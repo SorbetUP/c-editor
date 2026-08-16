@@ -318,3 +318,17 @@ runtime GGUF. La preuve
 `models_activation_freya_testing::activating_a_local_gguf_persists_the_selection_without_claiming_runtime`
 et la suite workspace native passent ; téléchargement, chargement et
 inférence restent non prouvés.
+
+## Mise à jour fonctionnelle — 2026-08-16 (sauvegarde dessin)
+
+La fermeture d’un dessin Freya ne détruit plus l’état ouvert quand la
+persistance échoue. `Close` appelle la sauvegarde réelle, conserve le canvas si
+le chemin n’est pas inscriptible et laisse l’erreur visible dans la surface
+commune ; la fermeture n’a lieu qu’après un `save` réussi.
+
+Le test
+`drawing_freya_testing::closing_a_drawing_keeps_it_open_when_persisting_fails`
+est passé au rouge en retirant temporairement la garde, puis au vert après sa
+restauration. La panne est provoquée par un chemin de scène remplacé par un
+dossier, donc l’écriture échoue réellement. La suite Drawing passe avec 5
+tests.

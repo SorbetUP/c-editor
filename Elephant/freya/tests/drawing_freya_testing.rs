@@ -170,6 +170,34 @@ fn missing_persisted_preview_still_opens_from_the_real_scene() {
 }
 
 #[test]
+fn closing_a_drawing_keeps_it_open_when_persisting_fails() {
+    let fixture = FixtureVault::new("close-save-error");
+    let scene_path = fixture.seed_scene("Unsaved.excalidraw");
+    let root = fixture.root.clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Unsaved");
+    runner.sync_and_update();
+    fs::remove_file(&scene_path).expect("remove scene before close");
+    fs::create_dir(&scene_path).expect("block scene path before close");
+
+    click_label(&mut runner, "Close drawing");
+    runner.sync_and_update();
+
+    assert_eq!(
+        labeled_nodes(&runner, "DrawingCanvas").len(),
+        1,
+        "a failed save must not discard the open drawing"
+    );
+    assert_eq!(labeled_nodes(&runner, "Library error").len(), 1);
+}
+
+#[test]
 fn create_drawing_action_persists_real_scene_and_mounts_native_renderer() {
     let fixture = FixtureVault::new("create");
     let root = fixture.root.clone();
