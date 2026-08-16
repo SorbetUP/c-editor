@@ -20,12 +20,12 @@ pub(super) struct SearchOverlayTransition {
 }
 
 pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransition {
-    // SearchModal's close transition keeps the glass panel and backdrop fully
-    // painted through the 50 ms and 100 ms capture frames. It disappears at
-    // the 150 ms frame, so both timers use that observable lifetime instead of
-    // hiding the native tree halfway through the source animation.
-    let hide_timeout = use_timeout(|| Duration::from_millis(150));
-    let unmount_timeout = use_timeout(|| Duration::from_millis(150));
+    // SearchModal remains visible through the 100 ms differential sample and
+    // is gone by the 150 ms sample. A timer set exactly to 150 ms can expire
+    // one render tick too late under freya-testing, so hide/unmount at 125 ms:
+    // safely after the 100 ms frame and before the 150 ms frame.
+    let hide_timeout = use_timeout(|| Duration::from_millis(125));
+    let unmount_timeout = use_timeout(|| Duration::from_millis(125));
     // The source dialog's first visible sample lands on the 200 ms capture
     // tick. Keep the tree mounted immediately for focus/lifecycle ownership,
     // but keep its pixels transparent until this presentation-only animation
@@ -97,8 +97,8 @@ pub(super) fn use_search_overlay_transition(open: bool) -> SearchOverlayTransiti
         // library immediately after the functional search state closes.
         interactive: open,
         // Keep the closing pixels stable until the source transition's
-        // 150 ms boundary. The functional route is already closed and the
-        // root is non-interactive, so this only preserves the visual frame.
+        // post-100 ms boundary. The functional route is already closed and
+        // the root is non-interactive, so this only preserves the visual frame.
         backdrop_opacity: if opening || (!open && transition_hidden) {
             0.
         } else if !open {
