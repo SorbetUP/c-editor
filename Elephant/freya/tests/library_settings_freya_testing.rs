@@ -5,7 +5,7 @@ use std::{
     ffi::OsString,
     fs,
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 const LONG_NOTE_TITLE: &str =
@@ -128,6 +128,10 @@ fn click_library_card(runner: &mut TestingRunner, label: &str) {
         ((area.min_x() + area.max_x()) / 2.) as f64,
         ((area.min_y() + area.max_y()) / 2.) as f64,
     ));
+    // NoteCard.vue intentionally defers activation by 220 ms so a title
+    // double-click can enter rename without opening the card. Wait only for
+    // that production contract after the click; never before it.
+    runner.poll(Duration::from_millis(10), Duration::from_millis(260));
 }
 
 fn click_label(runner: &mut TestingRunner, label: &str) {
@@ -504,8 +508,16 @@ fn scrolling_reveals_buffered_entries_and_fetches_beyond_first_real_page() {
     );
     assert!(initial_note_actions > 0);
 
-    for _ in 0..8 {
-        runner.scroll((640., 420.), (0., -900.));
+    // Exercise repeated real scroll transitions until the third backend page
+    // is actually observable. A fixed number of wheel events is not a page
+    // contract: viewport/content heights change after each append.
+    for _ in 0..28 {
+        if !accessible_nodes(&runner, "Bulk 249").is_empty() {
+            break;
+        }
+        runner.scroll((640., 420.), (0., -1200.));
+        runner.sync_and_update();
+        runner.scroll((640., 420.), (0., 180.));
         runner.sync_and_update();
     }
 
@@ -516,7 +528,7 @@ fn scrolling_reveals_buffered_entries_and_fetches_beyond_first_real_page() {
     );
     assert!(
         accessible_nodes(&runner, "Bulk 249").len() >= 1,
-        "a note from the 250-note fixture must become reachable after real page continuation"
+        "a note from the final page of the 250-note fixture must become reachable after repeated real page continuation"
     );
 }
 
@@ -666,7 +678,8 @@ fn folder_sidebar_visibility_round_trips_through_the_real_workspace_metadata() {
     hover_library_card(&mut runner, "Folder");
     click_action_for_card(&mut runner, "Folder", "Folder actions");
     runner.sync_and_update();
-    click_smallest_label(&mut runner, "Hide from sidebar");
+    assert_eq!(accessible_nodes(&runner, "Hide from sidebar").len(), 1);
+    click_action_for_card(&mut runner, "Folder", "Hide from sidebar");
     runner.sync_and_update();
     runner.sync_and_update();
 
@@ -674,6 +687,9 @@ fn folder_sidebar_visibility_round_trips_through_the_real_workspace_metadata() {
         &fs::read_to_string(workspace_dir.join("workspace.json")).expect("read workspace"),
     )
     .expect("workspace remains valid JSON");
-    assert!(workspace["sidebar"].as_array().unwrap().is_empty());
+    assert!(
+        workspace["sidebar"].as_array().unwrap().is_empty(),
+        "the real Hide from sidebar action must remove Folder from canonical workspace metadata"
+    );
     assert_eq!(sidebar_nodes(&runner, "Folder").len(), 0);
 }
