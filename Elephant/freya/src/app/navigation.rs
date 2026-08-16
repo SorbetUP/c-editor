@@ -859,13 +859,20 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
     // SidebarNav.vue keeps rootSidebarEntries stable while directory contents
     // are loaded lazily by each expanded tree node. Do the same here instead
     // of reusing `page.entries`, which represents the current library page.
-    let root_entries = snapshot
-        .vault
-        .as_ref()
-        .and_then(|vault| vault.list_directory("").ok())
-        .map(|page| page.entries)
-        .or_else(|| snapshot.page.as_ref().map(|page| page.entries.clone()))
-        .unwrap_or_default();
+    let (root_entries, root_error) = match snapshot.vault.as_ref() {
+        Some(vault) => match vault.list_directory("") {
+            Ok(page) => (page.entries, None),
+            Err(error) => (Vec::new(), Some(format!("Sidebar error in root: {error}"))),
+        },
+        None => (
+            snapshot
+                .page
+                .as_ref()
+                .map(|page| page.entries.clone())
+                .unwrap_or_default(),
+            None,
+        ),
+    };
     let workspace_metadata_present = snapshot
         .vault
         .as_ref()
@@ -1027,6 +1034,12 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
                         )),
                 ),
         )
+        .maybe_child(root_error.map(|error| {
+            label()
+                .a11y_alt("Sidebar error in root")
+                .color(theme::token_color(palette, theme::ThemeToken::Danger))
+                .text(error)
+        }))
         .child(entries);
     let sidebar = rect()
         .width(Size::px(sidebar_width))
@@ -1085,6 +1098,7 @@ fn sidebar_entry(
     let entry = entry.clone();
     let path = entry.path.clone();
     let title = entry.title.clone();
+    let error_title = title.clone();
     let is_directory = entry.is_directory;
     let snapshot = state.read().clone();
     let drag_snapshot = sidebar_drag.read().clone();
@@ -1201,7 +1215,7 @@ fn sidebar_entry(
                         label()
                             .font_size(14.)
                             .color(theme::token_color(palette, row_color))
-                            .text(title),
+                            .text(title.clone()),
                     ),
             )
             .maybe_child((count > 0).then(|| {
@@ -1247,18 +1261,16 @@ fn sidebar_entry(
                 label()
                     .font_size(14.)
                     .color(theme::token_color(palette, row_color))
-                    .text(title),
+                    .text(title.clone()),
             )
             .into_element()
     };
 
     let children = if expanded {
-        snapshot
-            .vault
-            .as_ref()
-            .and_then(|vault| vault.list_directory(path.clone()).ok())
-            .map(|page| {
-                page.entries
+        match snapshot.vault.as_ref() {
+            Some(vault) => match vault.list_directory(path.clone()) {
+                Ok(page) => page
+                    .entries
                     .iter()
                     .filter(|child| sidebar_entry_visible(child))
                     .map(|child| {
@@ -1271,9 +1283,16 @@ fn sidebar_entry(
                             sidebar_drag,
                         )
                     })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+                    .collect::<Vec<_>>(),
+                Err(error) => vec![label()
+                    .padding(Gaps::new(2., 8., 2., left_padding + TREE_TOGGLE_SIZE))
+                    .a11y_alt(format!("Sidebar error in {error_title}"))
+                    .color(theme::token_color(palette, theme::ThemeToken::Danger))
+                    .text(format!("Unable to read {error_title}: {error}"))
+                    .into_element()],
+            },
+            None => Vec::new(),
+        }
     } else {
         Vec::new()
     };

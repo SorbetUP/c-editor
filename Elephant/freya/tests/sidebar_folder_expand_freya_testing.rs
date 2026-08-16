@@ -103,3 +103,27 @@ fn existing_sidebar_folder_expands_shows_descendants_and_collapses() {
     assert!(accessible_nodes(&runner, "Plan").is_empty());
     assert!(accessible_nodes(&runner, "Nested").is_empty());
 }
+
+#[test]
+fn sidebar_shows_an_error_when_the_vault_root_disappears() {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock must be after the Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("elephant-freya-sidebar-error-{stamp}"));
+    fs::create_dir_all(root.join("Broken")).expect("create fixture folder");
+    fs::write(root.join("Broken/Before.md"), "# Before\n").expect("write fixture note");
+
+    let app_root = root.clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(app_root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+    fs::remove_dir_all(&root).expect("remove vault after initial listing");
+
+    click_label(&mut runner, "Expand Broken");
+    runner.sync_and_update();
+    assert_visible(&runner, "Sidebar error in root");
+}

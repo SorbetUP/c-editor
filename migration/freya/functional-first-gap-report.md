@@ -259,3 +259,19 @@ il clique le contrôle accessible, vérifie la disparition du fichier
 La suite des workspaces natifs passe avec 2 tests. Le téléchargement,
 l’activation et l’exécution GGUF restent non prouvés en Freya, car leur
 service natif doit encore être raccordé.
+
+## Mise à jour fonctionnelle — 2026-08-16 (erreurs d’arborescence)
+
+Les erreurs de lecture de la sidebar ne sont plus transformées silencieusement
+en liste vide. Une erreur sur la racine affiche maintenant `Sidebar error in
+root`; une erreur de lecture d’un dossier déjà déplié affiche une cible
+accessible `Sidebar error in <dossier>` avec le détail de l’échec. Le chemin
+sans coffre conserve le fallback de la page déjà chargée.
+
+La preuve rouge/verte
+`sidebar_folder_expand_freya_testing::sidebar_shows_an_error_when_the_vault_root_disappears`
+supprime le coffre après le premier rendu, déclenche une action réelle dans la
+sidebar et vérifie l’erreur visible. La suite d’expansion complète passe avec
+2 tests. Le cas précis d’une suppression concurrente entre l’énumération de la
+racine et celle d’un dossier reste une condition de course à couvrir dans un
+test d’injection contrôlée ; il n’est pas déclaré comme démontré ici.
