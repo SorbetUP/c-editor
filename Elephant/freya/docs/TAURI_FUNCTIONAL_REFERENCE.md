@@ -1,344 +1,352 @@
-# Freya migration — functional contract from the Tauri reference
+# Freya migration — exact functional contracts from the Tauri reference
 
-Status: **normative migration document, phase 1**
+Status: **normative migration document — active inventory**
 
-The goal of this document is not to describe an idealized Elephant. It records observable behaviour that is actually present in the Tauri/Vue application and turns that behaviour into explicit acceptance criteria for the Freya migration.
+This document records behaviour that is actually implemented by Elephant's Tauri/Vue application and converts it into explicit acceptance contracts for the Freya migration. It is intentionally stricter than a feature checklist: discovery, implementation and proof are different states.
 
-The Tauri implementation is the reference unless a later migration decision explicitly supersedes a behaviour.
+## Reference precedence
 
-## Evidence rules
+Elephant currently contains more than one frontend generation. For migration parity the precedence is:
 
-A Freya feature is considered proven only when the relevant level below is satisfied.
+1. **Current Tauri application:** `Elephant/frontend/app/**`. This is the primary reference whenever the feature exists there.
+2. **Legacy renderer:** `Elephant/frontend/src/renderer/src/**`. Use it only for functionality that has no newer implementation or when tracing historical behaviour.
+3. **Freya typed contracts:** `Elephant/freya/src/*_contract.rs`. These are useful provenance maps, but the Tauri source remains the behavioural evidence.
 
-1. **Visible** — the user can reach the control/state in a real Freya render.
-2. **Interactive** — the real input path (mouse/keyboard/drag) changes the expected visible state.
-3. **Effective** — the expected filesystem/runtime side effect occurs, not only a visual mock.
-4. **Persistent** — when applicable, the effect survives close/reopen or re-reading the vault.
-5. **Regression guarded** — an automated functional test executes the same user path.
-6. **Differentially specified** — the expected result is traceable to the Tauri reference source.
+This precedence matters. For example, the current Library is implemented under `frontend/app/components/library/**`; the old sidebar tree is not a substitute for the current Library card contract.
 
-Tests that only assert that an accessibility label exists are insufficient for a feature whose contract includes a filesystem or editor effect.
+## Proof vocabulary
 
-## Reference files inspected in phase 1
+A feature may be reported as:
 
-- `Elephant/frontend/src/renderer/src/components/sideBar/treeFile.vue`
-- `Elephant/frontend/src/renderer/src/components/sideBar/treeFolder.vue`
-- `Elephant/frontend/src/renderer/src/components/sideBar/index.vue` (component inventory)
-- `Elephant/frontend/src/renderer/src/components/sideBar/search.vue` (component inventory)
-- `Elephant/frontend/src/renderer/src/components/sideBar/searchResultItem.vue` (component inventory)
-- `Elephant/frontend/src/renderer/src/components/search/index.vue`
-- `Elephant/frontend/src/renderer/src/components/titleBar/index.vue`
-- `Elephant/frontend/src/renderer/src/components/{about,commandPalette,editorWithTabs,exportSettings,import,loading,recent,rename,search,sideBar,titleBar,tweet}` (surface inventory)
+- **DISCOVERED** — code/component located, behaviour not fully read;
+- **SPECIFIED** — observable actions/results written below from source evidence;
+- **IMPLEMENTED-UNPROVEN** — Freya has code but no executing functional proof;
+- **PARTIALLY-PROVEN** — some normal/boundary paths execute;
+- **PARITY-PROVEN** — source contract, functional side effects and CI all agree;
+- **FAILING** — an executing regression demonstrates a mismatch.
 
-The inventory is intentionally broader than the detailed contracts below. A feature is not marked specified merely because its component was discovered.
+A label-only smoke test cannot prove a filesystem/editor feature. Where the contract mutates the vault, the test must inspect the physical fixture.
 
 ---
 
-# 1. Vault tree / file navigation
+# 1. Current Library — exact Tauri reference
 
-Reference: `components/sideBar/treeFile.vue`.
+Primary sources:
 
-## TFR-NAV-001 — Markdown file opens on one click
+- `Elephant/frontend/app/components/library/NoteCard.vue`
+- `Elephant/frontend/app/components/library/FolderCard.vue`
+- `Elephant/frontend/app/components/library/LibraryGrid.vue`
+- `Elephant/frontend/app/components/library/LibraryToolbar.vue`
+- `Elephant/frontend/app/components/library/CreateEntryMenu.vue`
+- `Elephant/frontend/app/stores/vaultStore.js`
 
-**Precondition**: a Markdown file is visible in the vault tree.
+The Freya `library_contract.rs` already records the same modern provenance for sort/view, paging and entry payload semantics.
 
-**Action**: one primary click on the file row.
+## LIB-OPEN-001 — one click requests card activation
 
-**Expected**:
+Current `NoteCard.vue` attaches `@click="handleCardClick"` to the entire card.
 
-- the click is sufficient; no second click is required;
-- if the file is not already in an editor tab, Tauri sends `mt::open-file` with the file pathname;
-- if it is already open, the existing tab is selected instead of opening a duplicate;
-- if the already-open file is already current, the action is a no-op.
+A single click is sufficient to request opening. Tauri deliberately waits **220 ms** (`CLICK_OPEN_DELAY_MS`) before emitting `open` so that a double-click on the title can be distinguished from a normal open.
 
-**Migration invariant**: input de-duplication must be based on the logical target/action, never only on global pointer coordinates.
+This delay is target-local state (`openClickTimer` on that `NoteCard` instance), not a global pointer-coordinate double-click detector.
 
-**Critical regression case**: a click on folder A followed immediately by a click on note B after a remount/reflow must activate B even if B appears under the same screen coordinate formerly occupied by A. Those are two logical activations, not a double-click on one target.
+### Required invariant
 
-**Freya coverage**:
+Two clicks on **different logical cards** must remain different actions even if a remount/reflow places the second card at the same global pointer coordinates as the first.
 
-- `navigation_back_forward_freya_testing.rs` exercises a rapid `Projects -> Plan` sequence and currently acts as a regression gate for this invariant.
-- `create_folder_note_freya_testing.rs` proves a created note can subsequently be opened into the real editor.
+A test may wait for the documented 220 ms single-click timer when validating exact timing. What is forbidden as “proof” is adding an arbitrary delay merely to escape a global-coordinate bug. The semantic assertion is target identity, not elapsed time.
 
-## TFR-NAV-002 — Non-Markdown tree file is not opened as a note
+## LIB-OPEN-002 — title double-click renames instead of opening
 
-**Precondition**: a non-Markdown file is shown in the tree.
+The title `<h3>` has `@dblclick.stop.prevent="beginRename"`.
 
-**Action**: primary click.
+`beginRename`:
 
-**Expected**: `handleFileClick` returns before the note-opening path. It must not be mounted as a Markdown editor document through this tree action.
+1. clears a pending open timer;
+2. closes the actions menu;
+3. enters rename mode;
+4. initializes the draft to the current title;
+5. focuses and selects the rename input after the DOM update.
 
-**Freya test required**: explicit fixture containing a non-Markdown file and proof that the note editor is not mounted by the Markdown-open action.
+Therefore title double-click semantics are scoped to the title/card instance. They must never suppress activation of a different card mounted later at the same screen coordinate.
 
-## TFR-NAV-003 — Already-open note is reselected, not duplicated
+### Freya status
 
-**Precondition**: note N exists in the tab list and another note is current.
+Freya now keeps `EventsCombos` on the title path but no longer filters **card-body activation** by global-coordinate double-click state. This is the intended fix for the folder-remount regression; CI remains the proof authority.
 
-**Action**: primary click on N in the tree.
+## LIB-RENAME-001 — rename commit/cancel
 
-**Expected**: N becomes `currentFile`; a second tab for N is not created.
+While renaming, Tauri displays a text input instead of the title.
 
-**Freya test required**: open A, open B, activate A again, assert a single logical A editor/tab and A content.
+- click inside the input stops card activation;
+- Enter calls `commitRename`;
+- Escape calls `cancelRename`;
+- commit trims whitespace;
+- empty title is ignored;
+- unchanged title is ignored;
+- a real change emits `rename` with `{ entry, title }`.
 
-## TFR-NAV-004 — Clicking the current file is stable
+**Required functional proof:** filesystem path changes, old path disappears, content/children survive, unrelated siblings remain unchanged.
 
-**Precondition**: note N is already current.
+## LIB-RENAME-002 — clicking the card while renaming cancels rename
 
-**Action**: click N again.
+`handleCardClick` checks `isRenaming` first. If true it cancels rename and returns instead of opening the entry.
 
-**Expected**: no reopen/reload side effect is requested by the Tauri tree handler.
+This must be tested independently from Enter/Escape.
 
-**Freya test required**: dirty editor state must not be destroyed or duplicated by reactivation.
+## LIB-MENU-001 — actions menu is card-local
+
+Each card has a More button labelled `Folder actions` or `Note actions`. It toggles the card's own popover and stops/prevents normal card activation.
+
+The popover exposes:
+
+- Rename;
+- Delete;
+- for folders only, Show in sidebar / Hide from sidebar.
+
+Right-click (`contextmenu`) on the card also opens this card-local menu.
+
+A context action must never operate on a stale previously active entry.
+
+## LIB-PIN-001 — pin/unpin is independent from opening
+
+The pin button is visible while hovering or when already pinned. It is labelled `Pin entry` / `Unpin entry`, stops normal opening, calls `store.togglePinnedEntry(path)`, then closes the menu state.
+
+Required test: pin B while A is open, prove B changes pin state and A/editor state is unaffected; then verify ordering/persistence according to `vaultStore`.
+
+## LIB-SIDEBAR-001 — folder sidebar visibility
+
+Folders have an action that toggles `store.toggleEntrySidebarVisibility(entry)`. Its label reflects current state (`Show in sidebar` / `Hide from sidebar`). The action is unavailable for non-folders.
+
+## LIB-DELETE-001 — deletion is explicit and card-local
+
+Delete closes the card menu and emits `delete(entry)`.
+
+Required destructive proof must use an isolated vault fixture and assert:
+
+- target removed;
+- sibling files byte-identical;
+- UI no longer exposes target;
+- current navigation/editor state remains coherent.
+
+## LIB-DND-001 — only folders accept library drops
+
+Card drag starts by serializing the entry with its effective kind/title/preview. Drop handling only runs for folder targets.
+
+On drag-over Tauri computes `canDropEntryOnDirectory(draggedEntry, targetPath)` and sets `dropEffect` to `move` only when allowed. An accepted drop calls `store.moveEntry(draggedEntry, targetPath)`.
+
+Required tests must cover:
+
+- note -> folder;
+- folder -> folder;
+- self drop rejection;
+- descendant/cycle rejection;
+- invalid target rejection;
+- filesystem move plus visible refresh;
+- no data loss after move.
+
+## LIB-PREVIEW-001 — folder preview is bounded
+
+A folder card shows at most the first **3** `childrenPreview` items. Empty folders display `No items yet` / `Empty folder` semantics.
+
+Preview titles remove `.md` and `.excalidraw` display suffixes; icons distinguish folder, drawing and normal file/note.
+
+## LIB-PREVIEW-002 — drawing preview lifecycle
+
+For drawings, Tauri resolves the preview against the active vault, loads bytes when `fileUtils.readFile` is available, creates/revokes object URLs, guards stale async loads by `drawingPreviewLoadId`, and falls back to the source path on load failure.
+
+Required tests: valid preview, missing preview, stale-load replacement and cleanup/no crash.
+
+## LIB-CARD-001 — note metadata
+
+Normal note cards expose the computed excerpt and all tags as `#tag`. Drawing and folder cards use their specialized bodies instead.
 
 ---
 
-# 2. Folder tree
+# 2. Library toolbar
 
-Reference: `components/sideBar/treeFolder.vue`.
+Reference: `frontend/app/components/library/LibraryToolbar.vue`.
 
-## TFR-FOLDER-001 — Folder click toggles expansion
+## LIB-TOOLBAR-001 — sort cycle order is exact
 
-**Action**: click the folder name row.
+The cycle is:
 
-**Expected**: local `isCollapsed` is toggled. When expanded, child folders, creation input and files become visible; when collapsed, folder contents are hidden.
+1. `updated-newest` — label `Updated newest`;
+2. `updated-oldest` — label `Updated oldest`;
+3. `title-az` — label `Title A-Z`;
+4. `title-za` — label `Title Z-A`;
+5. back to `updated-newest`.
 
-**Important distinction**: this sidebar-tree behaviour is not the same interaction as entering a directory in Freya's library page. Where Freya exposes both concepts, tests must distinguish **expand/collapse tree node** from **navigate library directory**.
+Legacy store value `title` is normalized to `title-az` for the toolbar.
 
-## TFR-FOLDER-002 — Creating inside a folder expands it
+**Freya functional coverage:** `library_toolbar_reference_freya_testing.rs` clicks the rendered control through the full cycle.
 
-When the `SIDEBAR::show-new-input` action targets the folder:
+## LIB-TOOLBAR-002 — grid/list cycle is bidirectional
 
-- the creation input receives focus;
-- its value is reset to empty;
-- the folder is forced expanded so the input is visible.
+- when current view is grid, action label is `Show notes as list`;
+- when current view is list, action label is `Show notes as grid`;
+- each click toggles between the two states.
 
-Pressing Enter calls `CREATE_FILE_DIRECTORY(createName)`.
+**Freya functional coverage:** `library_toolbar_reference_freya_testing.rs` executes both transitions.
 
-**Freya test required**: create-in-folder must prove both the correct physical parent directory and visible placement after creation.
+## LIB-CREATE-001 — creation is disabled when unavailable
 
-## TFR-FOLDER-003 — Folder rename input commits on Enter
+Create is disabled when the toolbar is busy or there is no active vault. It advertises `aria-busy` while a create action is running.
 
-When rename mode targets the folder:
+## LIB-CREATE-002 — three create actions
 
-- the rename input receives focus;
-- it is initialized with the current folder name;
-- Enter calls `RENAME_IN_SIDEBAR` only when the new name is non-empty.
+The current toolbar dispatches three creation keys:
 
-**Freya test required**: rename folder, verify the old filesystem path is absent, new path exists, children remain present and navigation points to the new path.
+- note -> `store.createNote()`;
+- folder -> `store.createFolder()`;
+- drawing -> `openNewDrawing()`.
 
-## TFR-FOLDER-004 — Right click selects the logical target before context actions
+The busy guard prevents concurrent create actions. Failure becomes a visible action error and is logged; busy state is cleared in `finally`.
 
-The folder row intercepts `contextmenu`, prevents the browser default, calls `CHANGE_ACTIVE_ITEM(folder)`, then opens the sidebar context menu.
-
-**Migration invariant**: Rename/Delete/Copy/etc. initiated from a context menu must affect the row that was right-clicked, not a stale previous selection.
-
----
-
-# 3. File rename and context targeting
-
-Reference: `components/sideBar/treeFile.vue`.
-
-## TFR-RENAME-001 — Rename editor replaces the filename label
-
-When `renameCache === file.pathname`, the visible label is replaced by a text input.
-
-When the input is focused it is initialized to the existing filename.
-
-Enter commits via `RENAME_IN_SIDEBAR(newName)` only when `newName` is non-empty.
-
-Clicking inside the rename input stops the normal file click action.
-
-**Migration invariant**: editing the name must never simultaneously open/reopen the note because the text field click bubbled to the card/tree activation handler.
-
-## TFR-CONTEXT-001 — File context action targets clicked file
-
-On right click Tauri:
-
-1. prevents the default context menu;
-2. changes `activeItem` to that file;
-3. opens the application sidebar context menu with clipboard state.
-
-**Freya test required**: right-click B while A was previously active, invoke a harmless B-specific action (or rename in fixture) and prove A is unchanged.
+**Freya existing coverage:** `create_folder_note_freya_testing.rs` proves physical folder creation and physical note creation/opening. Drawing creation requires its own end-to-end proof.
 
 ---
 
-# 4. Editor find / replace
+# 3. Library paging / ordering contracts
 
-Reference: `components/search/index.vue`.
+Reference: `LibraryGrid.vue`, `vaultStore.js`, and the provenance recorded in `freya/src/library_contract.rs`.
 
-## TFR-SEARCH-001 — Search UI has explicit open state
+Current typed migration constants are:
 
-The search bar is visible only while `showSearch` is true. Merely retaining an old query does not imply the panel is open.
+- directory page size: **120**;
+- render chunk size: **72**;
+- scroll prefetch threshold: **720 px**.
 
-Changing `searchValue` triggers the debounced search only if the search UI is currently open.
+Required proof includes datasets above every boundary: 71/72/73 rendered items and 119/120/121 directory items, followed by repeated paging to prove there is no silent fixed cap.
 
-## TFR-SEARCH-002 — Search result position is observable
-
-The UI displays `highlightIndex + 1 / highlightCount` and provides previous and next controls.
-
-Acceptance needs to prove not just result count but that next/previous changes the active match in the editor.
-
-## TFR-SEARCH-003 — Search modifiers are independent toggles
-
-Tauri exposes three independent controls:
-
-- case sensitive;
-- whole word;
-- regular expression.
-
-Freya parity requires functional cases where each toggle changes the result set, plus combined modifiers.
-
-## TFR-SEARCH-004 — Search and replace are distinct modes
-
-The left control toggles search type. In replace mode a replacement input and two actions are visible:
-
-- replace all;
-- replace single/current.
-
-A parity test must prove text mutation in the actual document model and saved file, not only changed UI text.
-
-## TFR-SEARCH-005 — Invalid search input has a visible error path
-
-The reference has `searchErrorMsg`, an error class on the input wrapper and a visible error message element. Invalid regex behaviour must therefore be non-crashing and observable.
+Sorting must be validated on actual rendered order, not only the enum/control label. Pinned-first ordering also needs independent functional proof.
 
 ---
 
-# 5. Title bar and document status
+# 4. Freya navigation/history contracts
 
-Reference: `components/titleBar/index.vue`.
+These contracts describe the observable workspace created by the Library migration.
 
-## TFR-TITLE-001 — Application/document title
-
-- without a filename, the visible title is `Elephant`;
-- with a pathname, up to the last three parent path segments are shown before the filename;
-- the window/document title is derived from filename and project name.
-
-## TFR-TITLE-002 — Dirty state is visible
-
-The `save-dot` is shown when `isSaved` is false.
-
-**Freya parity requirement**: a user edit must cause an observable dirty/saving state if Freya exposes this contract, and successful persistence must clear it. Functional tests must additionally read the physical Markdown file.
-
-## TFR-TITLE-003 — Filename action triggers rename
-
-The filename in the title bar has its own click action (`rename`). This interaction must not be confused with generic window dragging or card activation.
-
-## TFR-TITLE-004 — Word counter cycles modes
-
-Clicking the word-count control cycles, in order:
-
-1. word;
-2. paragraph;
-3. character;
-4. all / characters including space;
-5. back to word.
-
-The tooltip exposes word, character and paragraph totals.
-
-## TFR-WINDOW-001 — Platform-specific title-bar behaviour
-
-- double-clicking the title region toggles maximize only on macOS;
-- with the custom title bar on non-macOS, explicit close/maximize-or-restore/minimize controls are rendered;
-- maximize action exits fullscreen first, otherwise restores a maximized window, otherwise maximizes it.
-
-These behaviours require platform/runtime tests and must not be marked proven by headless widget tests alone.
-
----
-
-# 6. Functional surfaces discovered but not yet fully specified
-
-The following reference areas exist and must be inspected before parity can be declared:
-
-- About;
-- Command palette;
-- Editor with tabs;
-- Export settings;
-- Import;
-- Loading/startup states;
-- Recent notes;
-- Rename dialog/workflow outside the sidebar inline path;
-- Sidebar search and search result activation;
-- Table of contents;
-- Tweet/embedded content;
-- Context menu command set;
-- global commands/keyboard shortcuts;
-- editor Rust integration;
-- addons;
-- settings/preferences;
-- vault opening/switching;
-- drag-and-drop;
-- images/assets;
-- drawings/Excalidraw;
-- executable code blocks;
-- Wiki/Graph/Knowledge/Open Models;
-- synchronization and conflict handling.
-
-Discovery is **not** proof. Each area must receive contracts like the sections above plus a test mapping.
-
----
-
-# 7. Navigation/history acceptance matrix for Freya
-
-These are app-level behavioural requirements, even where the historical Tauri UI expresses navigation differently.
-
-| ID | Scenario | Required observable result |
+| ID | Scenario | Required result |
 |---|---|---|
-| FH-001 | Root -> folder | Folder content replaces root library content; no editor is mounted. |
-| FH-002 | Folder -> note immediately | Note opens on the first click, even if the pointer coordinates match the prior folder click. |
-| FH-003 | Note -> Back | Exact parent library state is restored and editor disappears. |
-| FH-004 | Back -> Forward | Exact note is reopened; forward becomes unavailable at history tip. |
-| FH-005 | Back -> new navigation | Stale forward branch is discarded. |
-| FH-006 | Multiple Back operations | States are restored in LIFO history order without duplicate phantom entries. |
-| FH-007 | Close note | Closing does not delete or truncate the physical Markdown file. |
-| FH-008 | Reopen note | Real persisted content is loaded, not a stale in-memory copy. |
+| FH-001 | Root -> folder | Folder contents replace root contents; editor absent. |
+| FH-002 | Folder -> note | First logical activation of the newly mounted note succeeds; global pointer reuse cannot swallow it. |
+| FH-003 | Note -> Back | Parent library state restored; editor absent. |
+| FH-004 | Back -> Forward | Exact previous destination restored; Forward becomes unavailable at history tip. |
+| FH-005 | Back -> new navigation | Stale Forward branch is invalidated. |
+| FH-006 | Multiple Back | History restores logical states in order without phantom duplicates. |
+| FH-007 | Close note | Closing never deletes/truncates physical Markdown bytes. |
+| FH-008 | Reopen note | Persisted content is loaded again; no stale replacement/truncation. |
 
-No timing sleep is part of these contracts. A test that passes only after sleeping past a double-click threshold does not prove FH-002.
+Functional coverage:
 
----
+- `navigation_back_forward_freya_testing.rs` — base folder/note/back/forward journey;
+- `navigation_history_extended_freya_testing.rs` — folder Back/Forward, Forward invalidation, close byte preservation, close/reopen.
 
-# 8. Required test design conventions
-
-Every new Freya functional test should state which contract ID it proves.
-
-For vault operations, fixtures should use a temporary physical directory and tests should assert filesystem effects directly.
-
-For editor operations, prefer three-way proof where applicable:
-
-1. visible editor state;
-2. editor content/state after the user action;
-3. physical file content after persistence.
-
-For navigation, assert both the positive destination and the absence of the previous incompatible state. Example: after Back from an editor, assert the folder card exists **and** `NoteEditorHost` is absent.
-
-For destructive operations, use isolated fixtures and prove unrelated sibling files remain byte-for-byte unchanged.
-
-For race-prone interactions, do not introduce sleeps as the acceptance condition. Exercise the sequence at normal event-loop speed and synchronize only through Freya's normal test render/update primitive.
+The original failing implementation classified body clicks with `EventsCombos::pressed(global_location)`, so a newly mounted card at the same coordinates could be discarded. The migrated body path is now target activation without that global-coordinate filter; title double-click remains separate.
 
 ---
 
-# 9. Current migration blocker captured by this specification
+# 5. Legacy renderer contracts still relevant outside the modern Library
 
-At the time this document was introduced, `LibraryCard` in Freya filters its body `on_mouse_up` with:
+The following behaviours were inspected under `frontend/src/renderer/src/**`. They remain specifications only where no newer `frontend/app` implementation supersedes them.
 
-`EventsCombos::pressed(event.global_location).is_double()`
+## LEGACY-TREE-001 — Markdown tree file click
 
-That means the semantic identity of the clicked entry is not part of double-click classification. After navigating into a folder, a newly mounted note can occupy the same coordinate, so the second logical click may be discarded.
+`components/sideBar/treeFile.vue` opens a Markdown file on one click. If already open it selects the existing tab; if already current it does nothing; non-Markdown entries return before the note-open path.
 
-This conflicts with TFR-NAV-001 and FH-002. The title-specific rename/double-click behaviour, if retained by Freya, must be scoped to the title target itself; it must not suppress activation of a different card.
+## LEGACY-TREE-002 — tree folder expansion
 
-The existing `navigation_back_forward_freya_testing.rs` intentionally performs the folder->note interaction without an artificial delay so this remains a real functional gate.
+`components/sideBar/treeFolder.vue` toggles local collapse state on folder-name click. Create-in-folder forces expansion and focuses an empty input. Enter dispatches create. Inline rename initializes the existing name and commits non-empty values on Enter.
+
+This tree expand/collapse contract is distinct from navigating into a modern Library folder card.
+
+## LEGACY-SEARCH-001 — editor find/replace surface
+
+`components/search/index.vue` exposes:
+
+- explicit open/closed search state;
+- active match index and match count;
+- previous/next;
+- case-sensitive toggle;
+- whole-word toggle;
+- regexp toggle;
+- search vs replace mode;
+- replace current and replace all;
+- visible error state for invalid search/regexp input.
+
+Parity tests must mutate/read the actual editor and persisted file for replace operations.
+
+## LEGACY-TITLE-001 — title/document status
+
+`components/titleBar/index.vue` exposes:
+
+- `Elephant` when no filename is active;
+- path context plus filename;
+- unsaved `save-dot` when `isSaved` is false;
+- filename rename action;
+- word counter cycling word -> paragraph -> character -> all -> word;
+- macOS title double-click maximize;
+- custom non-macOS close/maximize/minimize controls.
+
+Window behaviours require real platform/runtime tests; headless rendering alone is insufficient.
 
 ---
 
-# 10. Definition of parity
+# 6. Surfaces to specify next
 
-A section is **PARITY-PROVEN** only when:
+The following are discovered but are **not** considered specified merely by being listed:
 
-- its Tauri behaviour has been inspected and written as explicit contracts;
-- Freya implements every non-superseded contract;
-- automated functional tests cover normal, boundary and failure paths;
-- filesystem/runtime side effects are verified where relevant;
-- no test relies on artificial delays to evade interaction bugs;
-- CI executes those tests and is green on the branch being evaluated.
+- vault chooser/open/switch/reopen;
+- startup/loading/error recovery;
+- Recent notes;
+- sidebar search/results;
+- command palette and every command/shortcut;
+- editor tabs and tab restoration;
+- editor keyboard editing/Markdown transformations;
+- autosave and external filesystem synchronization;
+- context menus and every destructive action;
+- external file drag into vault;
+- image/file drop into note;
+- executable code blocks;
+- Excalidraw/drawing editing and persistence;
+- settings and every preference;
+- import/export, especially Google Keep;
+- Wiki;
+- Graph including >200 nodes;
+- Knowledge sidecar/index/search/graph;
+- Open Models sidecar/model resource lifecycle;
+- addons API/runtime/permissions/inter-addon interactions;
+- synchronization, deletes and conflict handling;
+- mobile-specific interaction contracts;
+- platform packaging/runtime on Bazzite, macOS and Windows.
 
-Until all of those are true, the section should be reported as `specified`, `implemented-unproven`, `partially-proven`, or `failing`, never simply `done`.
+Each section must be expanded into action/result/failure contracts and mapped to executable tests.
+
+---
+
+# 7. Test design rules
+
+For every new functional test:
+
+1. name the contract IDs it proves;
+2. use the real user input path where practical;
+3. assert the positive destination and absence of incompatible previous state;
+4. verify filesystem/runtime side effects directly;
+5. isolate destructive fixtures and prove siblings remain unchanged;
+6. cover normal, boundary, failure and race/reflow paths;
+7. distinguish a **documented product timer** (for example Tauri's 220 ms card-open delay) from an arbitrary sleep used to hide a bug;
+8. never mark a feature proven until the CI workflow executing that test is green on the evaluated commit.
+
+# 8. Definition of PARITY-PROVEN
+
+A feature is PARITY-PROVEN only when:
+
+- the highest-precedence Tauri implementation has been inspected;
+- every non-superseded observable behaviour is written as a contract;
+- Freya implements the contract;
+- tests exercise normal + boundary + error/race paths;
+- physical side effects are checked where applicable;
+- CI actually executes the relevant tests and succeeds on the branch head.
+
+Anything less must remain `SPECIFIED`, `IMPLEMENTED-UNPROVEN`, `PARTIALLY-PROVEN` or `FAILING`.
