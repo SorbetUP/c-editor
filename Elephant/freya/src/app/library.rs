@@ -1049,9 +1049,10 @@ fn render_library_card(
             menu.renaming = false;
             drop(menu);
 
-            if EventsCombos::pressed(event.global_location).is_double() {
-                return;
-            }
+            // Card-body activation is always a single logical activation.
+            // Double-click semantics belong to the title target below (rename).
+            // A folder remount may place a different card under the same global
+            // pointer coordinates; that new target must never be swallowed.
             activate_library_entry(state_for_open, open_target.clone());
         })
         .a11y_alt(title)
