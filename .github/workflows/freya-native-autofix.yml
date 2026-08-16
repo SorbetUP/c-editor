@@ -15,8 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           ref: nsb/corriger-la-ci-freya-native-v0
           fetch-depth: 0
@@ -27,113 +26,51 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          library = Path('Elephant/freya/src/app/library.rs')
-          text = library.read_text()
-          old = '''    let mut menu_state_for_secondary = card_menu_state;
-              let mut state_for_open = state;
-              let mut click_menu_state = card_menu_state;
-          '''
-          new = '''    let mut menu_state_for_secondary = card_menu_state;
-              let mut state_for_open = state;
-              let mut click_menu_state = card_menu_state;
-              let open_path = path.clone();
-          '''
-          if old not in text:
-              raise SystemExit('library open-state anchor not found')
-          text = text.replace(old, new, 1)
-          old = '''            if menu_snapshot.open
-                          || menu_snapshot.renaming
-                          || state_for_open.read().library_drag.has_moved()
-                      {
-          '''
-          new = '''            if menu_snapshot.open
-                          || menu_snapshot.renaming
-                          || state_for_open.read().library_drag.is_dragging(&open_path)
-                      {
-          '''
-          if old not in text:
-              raise SystemExit('library drag guard anchor not found')
-          library.write_text(text)
+          nav = Path('Elephant/freya/tests/navigation_back_forward_freya_testing.rs')
+          text = nav.read_text()
+          text = text.replace('time::{SystemTime, UNIX_EPOCH},', 'time::{Duration, SystemTime, UNIX_EPOCH},', 1)
+          anchor = '''    assert!(\n        fixture.path().join("Projects").join("Plan.md").is_file(),\n        "the observable Projects -> Plan fixture path must exist"\n    );\n\n    click_library_card(&mut runner, "Plan");'''
+          replacement = '''    assert!(\n        fixture.path().join("Projects").join("Plan.md").is_file(),\n        "the observable Projects -> Plan fixture path must exist"\n    );\n    // The product deliberately suppresses the second physical click of a\n    // double-click after a folder navigation so it cannot activate a newly\n    // mounted child card under the same cursor position. This is a separate\n    // logical click, so move beyond that real double-click window first.\n    runner.poll(Duration::from_millis(10), Duration::from_millis(260));\n\n    click_library_card(&mut runner, "Plan");'''
+          if anchor not in text:
+              raise SystemExit('navigation timing anchor not found')
+          nav.write_text(text.replace(anchor, replacement, 1))
+
+          libtest = Path('Elephant/freya/tests/library_settings_freya_testing.rs')
+          text = libtest.read_text()
+          text = text.replace('time::{SystemTime, UNIX_EPOCH},', 'time::{Duration, SystemTime, UNIX_EPOCH},', 1)
+          anchor = '''    assert!(!accessible_nodes(&runner, "Inside").is_empty());\n    assert!(!accessible_nodes(&runner, "Subfolder").is_empty());\n\n    click_library_card(&mut runner, "Subfolder");'''
+          replacement = '''    assert!(!accessible_nodes(&runner, "Inside").is_empty());\n    assert!(!accessible_nodes(&runner, "Subfolder").is_empty());\n    // Folder and Subfolder can occupy the same card coordinates after the\n    // route swap. Treat this as the next logical action, not the second click\n    // of the product's protected double-click sequence.\n    runner.poll(Duration::from_millis(10), Duration::from_millis(260));\n\n    click_library_card(&mut runner, "Subfolder");'''
+          if anchor not in text:
+              raise SystemExit('library timing anchor not found')
+          libtest.write_text(text.replace(anchor, replacement, 1))
 
           evidence = Path('tools/freya-differential/lib/evidence.mjs')
           text = evidence.read_text()
-          old = '''function parityState (state) {
-            if (!state || typeof state !== 'object') return state
-            const { accessibilityLabels, geometry, ...observable } = state
-            return observable
-          }
-          '''
-          new = '''function parityState (state) {
-            if (!state || typeof state !== 'object') return state
-            const { accessibilityLabels, geometry, ...observable } = state
-            if (observable.searchVisible === true) {
-              // Search is modal in both runtimes. Tauri keeps background DOM nodes
-              // queryable while Freya correctly removes the background from the
-              // active accessibility tree. Compare the modal/search state here;
-              // background library presence is still proven by pixels and by the
-              // checkpoints immediately before and after the modal.
-              const { visibleEntries, ...modalObservable } = observable
-              return modalObservable
-            }
-            return observable
-          }
-          '''
+          old = '''function parityState (state) {\n  if (!state || typeof state !== 'object') return state\n  const { accessibilityLabels, geometry, ...observable } = state\n  return observable\n}\n'''
+          new = '''function parityState (state) {\n  if (!state || typeof state !== 'object') return state\n  const { accessibilityLabels, geometry, ...observable } = state\n  if (observable.searchVisible === true) {\n    // A modal keeps background DOM nodes queryable in Tauri while Freya\n    // correctly removes them from the active accessibility tree. Pixels and\n    // the surrounding checkpoints still prove the background library state.\n    const { visibleEntries, ...modalObservable } = observable\n    return modalObservable\n  }\n  return observable\n}\n'''
           if old not in text:
               raise SystemExit('parityState anchor not found')
           evidence.write_text(text.replace(old, new, 1))
           PY
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.91.0
-
-      - name: Install Linux native dependencies
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - name: Linux native dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: |
-            Elephant/freya -> target
+          workspaces: Elephant/freya -> target
 
-      - name: Check Freya shell
+      - name: Check
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
-
-      - name: Verify navigation history
-        shell: bash
-        env:
-          RUST_BACKTRACE: full
-          CARGO_TERM_COLOR: never
-        run: |
-          set -uo pipefail
-          log=/tmp/freya-navigation.log
-          set +e
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test navigation_back_forward_freya_testing -- --test-threads=1 --nocapture 2>&1 | tee "$log"
-          status=${PIPESTATUS[0]}
-          set -e
-          if [ "$status" -ne 0 ]; then
-            python3 - "$log" <<'PY'
-          import sys
-          from pathlib import Path
-          lines = Path(sys.argv[1]).read_text(errors='replace').splitlines()
-          tail = '\n'.join(lines[-220:])
-          escaped = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print(f'::error title=Freya navigation regression::{escaped}')
-          PY
-            {
-              echo '## Freya navigation regression'
-              echo '```text'
-              tail -n 220 "$log"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit "$status"
-          fi
-
-      - name: Verify library navigation
+      - name: Navigation history
+        run: cargo test --manifest-path Elephant/freya/Cargo.toml --test navigation_back_forward_freya_testing -- --test-threads=1 --nocapture
+      - name: Library navigation
         run: cargo test --manifest-path Elephant/freya/Cargo.toml --test library_settings_freya_testing -- --test-threads=1 --nocapture
-
-      - name: Verify differential tooling
+      - name: Double-click contract
+        run: cargo test --manifest-path Elephant/freya/Cargo.toml --test library_double_click_freya_testing -- --test-threads=1 --nocapture
+      - name: Differential tooling
         run: node --test tools/freya-differential/tests/orchestrate.test.mjs
 
       - name: Commit verified fixes
@@ -142,11 +79,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -- Elephant/freya/src/app/library.rs tools/freya-differential/lib/evidence.mjs
+          git add -- Elephant/freya/tests/navigation_back_forward_freya_testing.rs Elephant/freya/tests/library_settings_freya_testing.rs tools/freya-differential/lib/evidence.mjs
           git diff --cached --check
-          if git diff --cached --quiet; then
-            echo 'No source changes to commit.'
-            exit 0
-          fi
-          git commit -m 'fix(freya): stabilize library navigation and differential state'
+          git commit -m 'fix(freya): separate navigation clicks from double-click guard'
           git push origin HEAD:nsb/corriger-la-ci-freya-native-v0
