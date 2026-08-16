@@ -58,6 +58,18 @@ impl Default for GraphCanvasState {
 }
 
 impl GraphCanvasState {
+    pub fn overrides(&self) -> &BTreeMap<String, [f32; 2]> {
+        &self.overrides
+    }
+
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    pub fn adjust_zoom(&mut self, delta: f32) {
+        self.zoom = (self.zoom + delta).clamp(0.5, 1.8);
+    }
+
     fn viewport_label(&self) -> String {
         format!(
             "Graph canvas viewport pan=({:.1},{:.1}) zoom={:.3}",

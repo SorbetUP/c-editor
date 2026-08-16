@@ -24,3 +24,4 @@ rfd = "0.17.2"
 [dev-dependencies]
 freya-clipboard = "0.4.2"
 freya-testing = "0.4.1"
+tokio = { version = "1", features = ["rt", "time"] }

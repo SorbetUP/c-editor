@@ -127,6 +127,13 @@ impl Component for ChatWorkspace {
         let send_input = input;
         let send_model = model;
         let send_base_url = base_url;
+        let child_send_shell = send_shell;
+        let child_send_input = send_input;
+        let child_send_model = send_model;
+        let child_send_base_url = send_base_url;
+        let send_area = use_state(|| Option::<Area>::None);
+        let message_input_a11y_id = use_a11y();
+        let mut send_area_state = send_area;
         let send = rect()
             .width(Size::px(92.))
             .padding(Gaps::new(8., 12., 8., 12.))
@@ -136,17 +143,43 @@ impl Component for ChatWorkspace {
             } else {
                 "Send chat message"
             })
-            .on_press(move |_| {
+            .on_sized(move |event: Event<SizedEventData>| {
+                send_area_state.set(Some(event.area));
+            })
+            .on_global_pointer_press(move |event: Event<PointerEventData>| {
+                if !event.is_primary() {
+                    return;
+                }
+                let Some(area) = *send_area.read() else {
+                    return;
+                };
+                let point = event.global_location();
+                if point.x < f64::from(area.min_x())
+                    || point.x > f64::from(area.max_x())
+                    || point.y < f64::from(area.min_y())
+                    || point.y > f64::from(area.max_y())
+                {
+                    return;
+                }
+                let prompt = send_input.read().clone();
+                let model = send_model.read().clone();
+                let base_url = send_base_url.read().clone();
                 send_message(
                     send_shell,
-                    send_input.read().clone(),
-                    send_model.read().clone(),
-                    send_base_url.read().clone(),
+                    prompt,
+                    model,
+                    base_url,
                     send_input,
                 )
             })
             .child(
                 label()
+                    .on_mouse_up(move |_| {
+                        let prompt = child_send_input.read().clone();
+                        let model = child_send_model.read().clone();
+                        let base_url = child_send_base_url.read().clone();
+                        send_message(child_send_shell, prompt, model, base_url, child_send_input);
+                    })
                     .font_weight(FontWeight::BOLD)
                     .text(if snapshot.chat.busy {
                         "Sending…"
@@ -158,6 +191,7 @@ impl Component for ChatWorkspace {
         let mut message_input = Input::new(input);
         message_input = message_input
             .width(Size::fill())
+            .a11y_id(message_input_a11y_id)
             .placeholder("Ask your configured provider…")
             .on_submit({
                 let submit_shell = self.shell;
@@ -219,6 +253,26 @@ impl Component for ChatWorkspace {
             rect()
                 .width(Size::fill())
                 .spacing(8.)
+                .on_global_key_down({
+                    let composer_shell = self.shell;
+                    let composer_input = input;
+                    let composer_model = model;
+                    let composer_base_url = base_url;
+                    move |event: Event<KeyboardEventData>| {
+                        if event.key == Key::Named(NamedKey::Enter) {
+                            let prompt = composer_input.read().clone();
+                            let model = composer_model.read().clone();
+                            let base_url = composer_base_url.read().clone();
+                            send_message(
+                                composer_shell,
+                                prompt,
+                                model,
+                                base_url,
+                                composer_input,
+                            );
+                        }
+                    }
+                })
                 .child(message_input)
                 .child(send),
         );

@@ -181,7 +181,7 @@ fn open_search_note(
 }
 
 fn dispatch_graph_command(
-    shell: State<ShellState>,
+    mut shell: State<ShellState>,
     mut explorer: State<explorer::ExplorerState>,
     command: crate::search_graph_contract::GraphCommand,
 ) {
@@ -197,12 +197,36 @@ fn dispatch_graph_command(
             let vault = shell.read().vault.clone();
             match graph_runtime::refresh(vault.as_ref(), false) {
                 Ok(execution) => {
-                    let nodes = execution.snapshot.nodes.len();
-                    let edges = execution.snapshot.edges.len();
+                    let mut snapshot = execution.snapshot;
+                    if shell.read().view == crate::navigation_contract::WorkspaceView::Canvas {
+                        let Some(vault) = vault.as_ref() else {
+                            explorer.write().apply_graph_error(SurfaceError::NoActiveVault);
+                            return;
+                        };
+                        match crate::canvas_runtime::CanvasRuntime::open(
+                            vault.root(),
+                            snapshot.clone(),
+                        ) {
+                            Ok(runtime) => {
+                                snapshot = runtime.snapshot_for_render();
+                                shell.write().canvas = Some(runtime);
+                            }
+                            Err(error) => {
+                                let message = format!("Canvas failed: {error}");
+                                eprintln!("[freya][canvas] action=load-failure error={message}");
+                                explorer
+                                    .write()
+                                    .apply_graph_error(SurfaceError::Unknown(message));
+                                return;
+                            }
+                        }
+                    }
+                    let nodes = snapshot.nodes.len();
+                    let edges = snapshot.edges.len();
                     eprintln!(
                         "[freya][graph] action={action}:complete nodes={nodes} edges={edges}"
                     );
-                    explorer.write().apply_graph_snapshot(execution.snapshot);
+                    explorer.write().apply_graph_snapshot(snapshot);
                 }
                 Err(error) => {
                     let message = format!("Graph failed: {}", error.message());

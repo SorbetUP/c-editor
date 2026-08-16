@@ -4,6 +4,7 @@
 //! component ownership they convert: navigation, library, and editor view.
 
 mod calendar_view;
+mod canvas_view;
 mod chat_view;
 mod code_execution;
 mod drawing;
@@ -72,6 +73,7 @@ pub(super) struct ShellState {
     library_drag: library::LibraryCardDrag,
     drawing: Option<drawing::DrawingCanvasState>,
     drawing_path: Option<PathBuf>,
+    canvas: Option<crate::canvas_runtime::CanvasRuntime>,
     calendar: calendar_view::CalendarState,
     chat: chat_view::ChatState,
     models: models_view::ModelsState,
@@ -109,6 +111,7 @@ impl ShellState {
             library_drag: library::LibraryCardDrag::default(),
             drawing: None,
             drawing_path: None,
+            canvas: None,
             calendar: calendar_view::CalendarState::default(),
             chat: chat_view::ChatState::default(),
             models: models_view::ModelsState::default(),
@@ -163,7 +166,11 @@ impl ShellState {
             }
         };
         let mut loaded = shell_runtime::load_from_root(root);
-        if let Some(canonical_root) = loaded.vault.as_ref().map(|vault| vault.root().to_path_buf()) {
+        if let Some(canonical_root) = loaded
+            .vault
+            .as_ref()
+            .map(|vault| vault.root().to_path_buf())
+        {
             if let Err(error) = registry.add_or_activate(&canonical_root) {
                 loaded.error = Some(format!("Unable to register the active vault: {error}"));
             } else if let Err(error) = registry.persist() {
@@ -183,10 +190,14 @@ impl ShellState {
         if let Some(canonical_root) = next.vault.as_ref().map(|vault| vault.root().to_path_buf()) {
             let mut registry = self.vault_registry.clone();
             if let Err(error) = registry.add_or_activate(&canonical_root) {
-                next.error = Some(format!("Vault opened, but it could not be registered: {error}"));
+                next.error = Some(format!(
+                    "Vault opened, but it could not be registered: {error}"
+                ));
             } else if let Err(error) = registry.persist() {
                 eprintln!("[freya][vault-registry] action=persist-failure error={error}");
-                next.error = Some(format!("Vault opened, but its registry could not be saved: {error}"));
+                next.error = Some(format!(
+                    "Vault opened, but its registry could not be saved: {error}"
+                ));
             }
             next.vault_registry = registry;
             if let Err(error) = vault_picker::remember_vault(&canonical_root) {
@@ -215,7 +226,10 @@ impl ShellState {
             self.error = Some(format!("Unknown vault ID: {id}"));
             return;
         };
-        eprintln!("[freya][vault] action=switch-start id={} path={}", descriptor.id, descriptor.path);
+        eprintln!(
+            "[freya][vault] action=switch-start id={} path={}",
+            descriptor.id, descriptor.path
+        );
         let mut next = shell_runtime::load_from_root(PathBuf::from(&descriptor.path));
         if next.vault.is_none() {
             self.error = next.error;
@@ -223,7 +237,9 @@ impl ShellState {
             return;
         }
         if let Err(error) = registry.persist() {
-            next.error = Some(format!("Vault switched, but its registry could not be saved: {error}"));
+            next.error = Some(format!(
+                "Vault switched, but its registry could not be saved: {error}"
+            ));
         }
         let root = next.vault.as_ref().map(|vault| vault.root().to_path_buf());
         next.vault_registry = registry;
@@ -510,7 +526,7 @@ fn app_shell(mut state: State<ShellState>) -> Element {
     explorer::bind_live_search(explorer_state, explorer_query);
     explorer_runtime::drain_explorer_actions(state, explorer_state);
     let snapshot = state.read().clone();
-    if snapshot.view == WorkspaceView::Graph {
+    if snapshot.view == WorkspaceView::Graph || snapshot.view == WorkspaceView::Canvas {
         explorer_state.write().surface = explorer::ExplorerSurface::Graph;
     }
     let search_open = snapshot.search_open;
@@ -534,6 +550,8 @@ fn app_shell(mut state: State<ShellState>) -> Element {
     }
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state, state)
+    } else if snapshot.view == WorkspaceView::Canvas {
+        canvas_view::workspace(state, explorer_state, graph_canvas_state, palette)
     } else if snapshot.view == WorkspaceView::Graph || snapshot.search_open {
         explorer::explorer_view(
             explorer_state,

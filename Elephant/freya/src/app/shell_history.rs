@@ -24,6 +24,9 @@ impl ShellState {
         self.code_execution = Default::default();
         self.drawing = None;
         self.drawing_path = None;
+        if view != WorkspaceView::Canvas {
+            self.canvas = None;
+        }
         self.menu_open = false;
         self.search_open = false;
         self.settings_open = false;
@@ -213,10 +216,15 @@ impl ShellState {
                     .unwrap_or("");
                 self.library.current_path = RelativePath::from(parent);
                 self.reload_directory(parent);
-                match self.vault.as_ref().and_then(|vault| vault.find_entry(&path).ok()) {
+                match self
+                    .vault
+                    .as_ref()
+                    .and_then(|vault| vault.find_entry(&path).ok())
+                {
                     Some(entry) => self.open_note_with_history(&entry, false),
                     None => {
-                        self.error = Some(format!("Navigation target is no longer present: {path}"));
+                        self.error =
+                            Some(format!("Navigation target is no longer present: {path}"));
                     }
                 }
             }

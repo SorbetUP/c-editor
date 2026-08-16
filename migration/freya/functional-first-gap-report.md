@@ -355,3 +355,45 @@ processus et les événements CGEvent, mais bloque encore sur l’observation de
 stricte Tauri/Freya reste **NOT PROVEN**. La capture Freya seule du commit
 courant passe avec 14 actions et 120 frames sous
 `/private/tmp/elephant-freya-differential-current.eLPOEm/output`.
+
+## Mise à jour fonctionnelle — 2026-08-16 (Canvas, Chat et liens)
+
+Cette tranche traite d’abord les effets métier et les frontières runtime, sans
+présenter le rendu comme une preuve de parité visuelle.
+
+Le Canvas Freya est maintenant relié au vrai `GraphSnapshot` produit par le
+runtime graph. Sa couche domaine valide les nœuds/arêtes et les coordonnées,
+charge les positions propres au vault depuis `.elephantnote/canvas.json`, les
+réinjecte dans le snapshot affiché, accepte le déplacement d’un nœud, la
+persistance atomique, le zoom borné à 50–180 %, la sélection et l’ouverture de
+la note correspondante. Une erreur de chargement ou de sauvegarde reste
+visible dans la surface Canvas.
+
+Le Chat appelle désormais le chemin `pi_adapter` réel. Le test d’intégration
+ouvre un provider HTTP local qui renvoie une erreur 503, vérifie le payload
+OpenAI-compatible reçu, l’ajout du message utilisateur, l’erreur visible dans
+Freya et l’écriture de `.elephantnote/chat.json`. La soumission par Entrée est
+couverte ; l’exécution d’un provider externe réel reste à distinguer de cette
+preuve d’adaptateur et d’erreur.
+
+Les liens Markdown internes résolvent les chemins à l’intérieur du vault,
+ouvrent le document cible par le chemin éditeur réel et positionnent le
+scroll sur un titre Markdown lorsqu’un fragment est fourni. Les URLs externes
+validées délèguent maintenant à l’ouvreur du système (`open`, `xdg-open` ou
+`start`) et exposent une erreur si ce processus ne démarre pas.
+
+Preuves exécutées sur cette tranche :
+
+```text
+pnpm freya:check : PASS
+cargo test ... --test canvas_freya_testing : 1 passed
+cargo test ... --test chat_error_freya_testing : 1 passed
+cargo test ... --test editor_link_freya_testing : 1 passed
+cargo test ... resolves_markdown_heading_fragments_to_editor_scroll_positions : 1 passed
+```
+
+`pnpm freya:test` exécute et valide les 154 tests unitaires et les suites
+jusqu’à `differential_freya_capture`, mais son code de sortie reste non nul car
+ce test exige `DIFFERENTIAL_OUTPUT_DIR` et doit être lancé par l’orchestrateur
+de capture partagé. La comparaison stricte Tauri/Freya, la fenêtre Freya
+native packagée et les parcours d’addons JavaScript demeurent **NOT PROVEN**.

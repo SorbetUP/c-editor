@@ -26,6 +26,8 @@ use super::{route_notice, ShellState};
 
 #[path = "editor_interactions.rs"]
 mod editor_interactions;
+#[path = "editor_links.rs"]
+mod editor_links;
 #[path = "editor_tag_interactions.rs"]
 mod editor_tag_interactions;
 
@@ -1155,6 +1157,11 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         palette,
         content_scale,
     );
+    let link_actions = render_link_actions(
+        state,
+        editor_links::collect_links(editor.session().document()),
+        palette,
+    );
     let error_view = snapshot.error.map(|error| {
         rect()
             .width(Size::fill())
@@ -1398,6 +1405,7 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .maybe_child(error_view)
         .child(toolbar)
         .maybe_child(link_form)
+        .maybe_child(link_actions)
         .child(
             rect()
                 .width(Size::fill())
@@ -1414,6 +1422,47 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .child(footer)
         .a11y_alt("NoteEditorHost")
         .into_element()
+}
+
+fn render_link_actions(
+    state: State<ShellState>,
+    links: Vec<editor_links::MarkdownLink>,
+    palette: theme::ThemePalette,
+) -> Option<Element> {
+    if links.is_empty() {
+        return None;
+    }
+    let mut controls = rect()
+        .width(Size::fill())
+        .padding(Gaps::new(6., 24., 6., 24.))
+        .horizontal()
+        .spacing(6.)
+        .background(theme::color(palette.surface))
+        .a11y_alt("Editor links");
+    for link in links {
+        let destination = link.destination.clone();
+        let label_text = if link.label.is_empty() {
+            destination.clone()
+        } else {
+            link.label
+        };
+        let accessibility_label = format!("Open link {label_text}");
+        let press_destination = destination.clone();
+        controls = controls.child(
+            rect()
+                .padding(Gaps::new(5., 8., 5., 8.))
+                .with_corner_radius(6.)
+                .background(theme::color(palette.soft))
+                .a11y_alt(accessibility_label)
+                .on_mouse_up(move |_| editor_links::activate(state, &press_destination))
+                .child(
+                    label()
+                        .color(theme::color(palette.primary))
+                        .text(label_text),
+                ),
+        );
+    }
+    Some(controls.into_element())
 }
 
 fn toolbar_command_button(
@@ -1576,7 +1625,12 @@ fn render_code_block(
         true,
         palette,
         move |_| {
-            let Some(root) = state.read().vault.as_ref().map(|vault| vault.root().to_path_buf()) else {
+            let Some(root) = state
+                .read()
+                .vault
+                .as_ref()
+                .map(|vault| vault.root().to_path_buf())
+            else {
                 state.write().error = Some("Cannot run code without an active vault.".to_owned());
                 return;
             };
@@ -1596,7 +1650,11 @@ fn render_code_block(
             let language_for_execution = run_language.clone();
             let code_for_execution = run_code.clone();
             spawn(async move {
-                let result = super::code_execution::execute(&root, &language_for_execution, &code_for_execution);
+                let result = super::code_execution::execute(
+                    &root,
+                    &language_for_execution,
+                    &code_for_execution,
+                );
                 let mut execution_state = execution_state;
                 let mut shell = execution_state.write();
                 shell.code_execution.running = false;
@@ -1608,7 +1666,9 @@ fn render_code_block(
                             result.output
                         };
                         shell.code_execution.exit_code = Some(result.exit_code);
-                        eprintln!("[freya][editor] action=run-code-block-complete node={node_id:?}");
+                        eprintln!(
+                            "[freya][editor] action=run-code-block-complete node={node_id:?}"
+                        );
                     }
                     Err(error) => {
                         eprintln!("[freya][editor] action=run-code-block-failure node={node_id:?} error={error}");
@@ -1663,11 +1723,13 @@ fn render_code_block(
             label()
                 .font_family(CODE_FONT)
                 .font_size(12. * text_scale)
-                .color(theme::color(if execution.exit_code.as_deref() == Some("0") {
-                    palette.text
-                } else {
-                    palette.danger
-                }))
+                .color(theme::color(
+                    if execution.exit_code.as_deref() == Some("0") {
+                        palette.text
+                    } else {
+                        palette.danger
+                    },
+                ))
                 .a11y_alt("Code execution output")
                 .text(output),
         );

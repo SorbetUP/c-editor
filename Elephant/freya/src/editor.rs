@@ -343,6 +343,29 @@ impl EditorDocument {
         self.view_state.topbar_compact = self.view_state.scroll_top > 24;
     }
 
+    pub fn scroll_to_fragment(&mut self, fragment: &str) -> Result<(), String> {
+        let requested = fragment.trim().trim_start_matches('#');
+        if requested.is_empty() {
+            return Err("Link anchor is empty".to_owned());
+        }
+        for (line_index, line) in self.serialize().lines().enumerate() {
+            let heading = line.trim_start();
+            let level = heading.chars().take_while(|character| *character == '#').count();
+            if !(1..=6).contains(&level) {
+                continue;
+            }
+            let Some(title) = heading.get(level..).filter(|value| value.starts_with(' ')) else {
+                continue;
+            };
+            let title = title.trim().trim_end_matches('#').trim();
+            if fragment_slug(title) == requested || fragment_slug(requested) == fragment_slug(title) {
+                self.set_scroll_top((line_index as i32).saturating_mul(24));
+                return Ok(());
+            }
+        }
+        Err(format!("Link anchor not found: {fragment}"))
+    }
+
     pub fn autosave_due(&self) -> bool {
         self.autosave_enabled()
             && self.dirty
@@ -450,18 +473,14 @@ impl EditorDocument {
 
         let code_node = source_parent
             .and_then(|parent| {
-                nearest_code_span(
-                    self.session.document(),
-                    parent,
-                    &selected,
-                    source_index,
-                )
+                nearest_code_span(self.session.document(), parent, &selected, source_index)
             })
             .or_else(|| find_code_span(self.session.document(), &selected));
         let Some(code_node) = code_node else {
             return Ok(pasted);
         };
-        let Some((text_node, offset_utf16)) = last_text_endpoint(self.session.document(), code_node)
+        let Some((text_node, offset_utf16)) =
+            last_text_endpoint(self.session.document(), code_node)
         else {
             return Ok(pasted);
         };
@@ -712,6 +731,23 @@ impl EditorDocument {
         }
         update
     }
+}
+
+fn fragment_slug(value: &str) -> String {
+    let mut slug = String::new();
+    let mut needs_separator = false;
+    for character in value.chars().flat_map(char::to_lowercase) {
+        if character.is_alphanumeric() {
+            if needs_separator && !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push(character);
+            needs_separator = false;
+        } else {
+            needs_separator = true;
+        }
+    }
+    slug
 }
 
 fn io_error(path: &Path, error: io::Error) -> EditorError {
@@ -974,10 +1010,7 @@ fn nearest_code_span(
         .map(|(node, _)| node)
 }
 
-fn find_code_span(
-    document: &muya_core::Document,
-    value: &str,
-) -> Option<muya_core::NodeId> {
+fn find_code_span(document: &muya_core::Document, value: &str) -> Option<muya_core::NodeId> {
     document.nodes.values().find_map(|node| {
         matches!(
             &node.kind,
@@ -1169,6 +1202,16 @@ mod tests {
         let redone = document.redo().expect("redo must succeed");
         assert_eq!(redone.markdown, "Xalpha");
         assert_eq!(document.serialize(), "Xalpha");
+    }
+
+    #[test]
+    fn resolves_markdown_heading_fragments_to_editor_scroll_positions() {
+        let mut document = EditorDocument::from_markdown("# Intro\n\n## Project Plan\nbody");
+        document
+            .scroll_to_fragment("project-plan")
+            .expect("heading anchor");
+        assert_eq!(document.scroll_top(), 48);
+        assert!(document.scroll_to_fragment("missing").is_err());
     }
 
     #[test]
