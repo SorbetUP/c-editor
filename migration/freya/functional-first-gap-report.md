@@ -275,3 +275,16 @@ sidebar et vérifie l’erreur visible. La suite d’expansion complète passe a
 2 tests. Le cas précis d’une suppression concurrente entre l’énumération de la
 racine et celle d’un dossier reste une condition de course à couvrir dans un
 test d’injection contrôlée ; il n’est pas déclaré comme démontré ici.
+
+## Mise à jour fonctionnelle — 2026-08-16 (navigation clavier des réglages)
+
+Les sections des réglages Freya sont désormais de vraies cibles focusables :
+le focus est demandé au pointer-down et `Enter` ou la barre espace déclenche la
+même sélection que la souris. La transition reste dans `SettingsViewState` ;
+le rendu ne contient pas de logique de préférence.
+
+Le test rouge/vert
+`settings_parity_freya_testing::settings_section_accepts_keyboard_activation_after_focus`
+échouait avant l’association de l’identifiant d’accessibilité au bouton
+focusable, puis passe après `press_cursor` + `Enter` et vérification de la
+section Editor réelle. La suite Settings complète passe avec 11 tests.

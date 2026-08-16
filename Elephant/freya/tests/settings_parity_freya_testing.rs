@@ -209,6 +209,29 @@ fn settings_panel_stays_inside_the_available_shell_viewport_on_small_windows() {
 }
 
 #[test]
+fn settings_section_accepts_keyboard_activation_after_focus() {
+    let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
+    let fixture = FixtureVault::new();
+    let mut runner = runner_for(&fixture);
+    open_settings(&mut runner);
+
+    let editor_button = node_with_label(&runner, "Select Editor settings")
+        .layout()
+        .visible_area();
+    let editor_center = (
+        f64::from(editor_button.origin.x + editor_button.size.width / 2.0),
+        f64::from(editor_button.origin.y + editor_button.size.height / 2.0),
+    );
+    runner.press_cursor(editor_center);
+    runner.sync_and_update();
+    runner.press_key(freya::prelude::Key::Named(freya::prelude::NamedKey::Enter));
+    runner.sync_and_update();
+
+    assert!(accessible_nodes(&runner, "Settings section editor").len() >= 1);
+    assert!(accessible_nodes(&runner, "Enable autosave").len() >= 1);
+}
+
+#[test]
 fn settings_search_is_live_and_opening_a_result_clears_search_mode() {
     let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
     let fixture = FixtureVault::new();

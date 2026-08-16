@@ -139,8 +139,11 @@ fn section_button(
     palette: theme::ThemePalette,
 ) -> Element {
     let selected = active_section == id && search_query.read().trim().is_empty();
+    let section_a11y_id = use_a11y();
     let mut state = state;
     let mut query_state = search_query;
+    let mut key_state = state;
+    let mut key_query_state = search_query;
     rect()
         .width(Size::fill())
         .height(Size::px(38.))
@@ -169,10 +172,21 @@ fn section_button(
         .horizontal()
         .main_align(Alignment::SpaceBetween)
         .cross_align(Alignment::Center)
+        .on_pointer_down(move |_| section_a11y_id.request_focus())
         .on_mouse_up(move |_| {
             *query_state.write() = String::new();
             state.write().select_section(id);
         })
+        .on_key_down(move |event: Event<KeyboardEventData>| {
+            if matches!(event.key, Key::Named(NamedKey::Enter))
+                || matches!(&event.key, Key::Character(value) if value == " ")
+            {
+                *key_query_state.write() = String::new();
+                key_state.write().select_section(id);
+            }
+        })
+        .a11y_focusable(true)
+        .a11y_id(section_a11y_id)
         .a11y_alt(format!("Select {label_text} settings"))
         .child(
             label()
