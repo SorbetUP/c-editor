@@ -623,17 +623,20 @@ fn app_shell(mut state: State<ShellState>) -> Element {
         }
         state.write().settings_target_section = None;
     }
+    // Tauri mounts SearchModal as a sibling of MainContent. Opening search must
+    // therefore never replace the current workspace; it only overlays it.
+    // This also keeps the exact pre-search library/graph state intact for close.
     let content = if snapshot.settings_open {
         settings::settings_panel(settings_state, state)
     } else if snapshot.view == WorkspaceView::Canvas {
         canvas_view::workspace(state, explorer_state, graph_canvas_state, palette)
-    } else if snapshot.view == WorkspaceView::Graph || snapshot.search_open {
+    } else if snapshot.view == WorkspaceView::Graph {
         explorer::explorer_view(
             explorer_state,
             explorer_query,
             explorer_graph_query,
             graph_canvas_state,
-            snapshot.search_open,
+            false,
         )
     } else {
         library::main_content(state, wiki_view_state, palette)
