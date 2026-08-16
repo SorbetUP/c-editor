@@ -2,8 +2,10 @@
 //! LibraryGrid and NoteCard surface.
 
 use freya::prelude::*;
+use std::time::Duration;
 
 use crate::{
+    editor::Delay,
     library_contract::{
         EntryKind as ContractKind, EntryOpenTarget, EntryTitle, EntryType, LibraryEntry,
         RelativePath, SortMode, ViewMode,
@@ -31,6 +33,7 @@ use library_actions::{
 use library_icons::{svg_icon, Icon as LibraryIcon};
 
 const LIBRARY_DRAG_THRESHOLD: f64 = 4.;
+const TITLE_OPEN_DELAY: Duration = Duration::from_millis(220);
 const GRID_GAP: f32 = 10.;
 const GRID_MIN_CARD_WIDTH: f32 = 240.;
 
@@ -632,6 +635,69 @@ fn grid_card_width() -> Size {
     Size::func(|context| Some(grid_card_width_for_parent(context.available_parent)))
 }
 
+fn activate_library_entry(mut state: State<ShellState>, target: EntryOpenTarget) {
+    match target {
+        EntryOpenTarget::Drawing(target) => {
+            drawing::open_existing(state, target.as_str());
+        }
+        EntryOpenTarget::Folder(target) => {
+            state.write().open_directory(target.as_str().to_string());
+        }
+        EntryOpenTarget::Note(target) => {
+            let vault_entry = {
+                let snapshot = state.read();
+                snapshot
+                    .page
+                    .as_ref()
+                    .and_then(|page| {
+                        page.entries
+                            .iter()
+                            .find(|entry| entry.path == target.as_str())
+                    })
+                    .cloned()
+            };
+            if let Some(vault_entry) = vault_entry {
+                state.write().open_note(&vault_entry);
+            } else {
+                eprintln!(
+                    "[freya][library] action:failure action=open path={} reason=missing_page_entry",
+                    target.as_str()
+                );
+                state.write().error = Some(format!(
+                    "Library entry is no longer present in the current directory: {}",
+                    target.as_str()
+                ));
+            }
+        }
+        EntryOpenTarget::Ignored => {}
+    }
+}
+
+fn begin_library_entry_rename(
+    mut card_menu_state: State<CardMenuState>,
+    mut rename_value: State<String>,
+    title: String,
+) {
+    rename_value.set(title);
+    let mut menu = card_menu_state.write();
+    menu.open = false;
+    menu.renaming = true;
+}
+
+fn schedule_title_activation(
+    state: State<ShellState>,
+    target: EntryOpenTarget,
+    generation: State<u64>,
+    pending_generation: u64,
+) {
+    spawn(async move {
+        Delay::new(TITLE_OPEN_DELAY).await;
+        if *generation.read() == pending_generation {
+            activate_library_entry(state, target);
+        }
+    });
+}
+
 #[derive(PartialEq)]
 struct LibraryCard {
     entry: LibraryEntry,
@@ -764,6 +830,7 @@ fn render_library_card(
         card_menu_state,
         rename_value,
         rename_a11y_id,
+        open_target.clone(),
         renaming,
     );
 
@@ -917,41 +984,10 @@ fn render_library_card(
             menu.renaming = false;
             drop(menu);
 
-            match &open_target {
-                EntryOpenTarget::Drawing(target) => {
-                    drawing::open_existing(state_for_open, target.as_str());
-                }
-                EntryOpenTarget::Folder(target) => {
-                    state_for_open.write().open_directory(target.as_str().to_string());
-                }
-                EntryOpenTarget::Note(target) => {
-                    let vault_entry = {
-                        let snapshot = state_for_open.read();
-                        snapshot
-                            .page
-                            .as_ref()
-                            .and_then(|page| {
-                                page.entries
-                                    .iter()
-                                    .find(|entry| entry.path == target.as_str())
-                            })
-                            .cloned()
-                    };
-                    if let Some(vault_entry) = vault_entry {
-                        state_for_open.write().open_note(&vault_entry);
-                    } else {
-                        eprintln!(
-                            "[freya][library] action:failure action=open path={} reason=missing_page_entry",
-                            target.as_str()
-                        );
-                        state_for_open.write().error = Some(format!(
-                            "Library entry is no longer present in the current directory: {}",
-                            target.as_str()
-                        ));
-                    }
-                }
-                EntryOpenTarget::Ignored => {}
+            if EventsCombos::pressed(event.global_location).is_double() {
+                return;
             }
+            activate_library_entry(state_for_open, open_target.clone());
         })
         .a11y_alt(title)
         .child(menu_trigger)
@@ -972,8 +1008,10 @@ fn card_title_row(
     card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
     rename_a11y_id: AccessibilityId,
+    open_target: EntryOpenTarget,
     renaming: bool,
 ) -> Element {
+    let title_open_generation = use_state(|| 0_u64);
     let icon = if is_folder {
         LibraryIcon::Folder
     } else if is_drawing {
@@ -1044,10 +1082,34 @@ fn card_title_row(
             )
             .into_element()
     } else {
+        let mut title_generation = title_open_generation;
+        let mut title_menu_state = card_menu_state;
+        let mut title_rename_value = rename_value;
+        let title_for_rename = title.to_string();
+        let title_open_state = state;
         label()
             .font_size(title_size)
             .font_weight(FontWeight::BOLD)
             .text(title.to_string())
+            .on_mouse_up(move |event: Event<MouseEventData>| {
+                event.stop_propagation();
+                let pending_generation = (*title_generation.read()).wrapping_add(1);
+                title_generation.set(pending_generation);
+                if EventsCombos::pressed(event.global_location).is_double() {
+                    begin_library_entry_rename(
+                        title_menu_state,
+                        title_rename_value,
+                        title_for_rename.clone(),
+                    );
+                    return;
+                }
+                schedule_title_activation(
+                    title_open_state,
+                    open_target.clone(),
+                    title_generation,
+                    pending_generation,
+                );
+            })
             .into_element()
     };
 
