@@ -1,0 +1,42 @@
+name: Freya native CI fix
+
+on:
+  push:
+    branches:
+      - nsb/corriger-la-ci-freya-native-v0
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-freya-regressions:
+    name: Freya targeted regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/freya -> target
+
+      - name: Check Freya shell
+        run: cargo check --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Navigation history regression
+        run: cargo test --manifest-path Elephant/freya/Cargo.toml --test navigation_back_forward_freya_testing -- --test-threads=1 --nocapture
+
+      - name: Library navigation regressions
+        run: cargo test --manifest-path Elephant/freya/Cargo.toml --test library_settings_freya_testing -- --test-threads=1 --nocapture
