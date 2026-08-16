@@ -25,6 +25,7 @@ mod shell_preferences;
 mod shell_runtime;
 mod sync_view;
 mod vault_picker;
+mod vault_watch;
 mod visual_transition;
 mod wiki_view;
 
@@ -309,6 +310,11 @@ impl ShellState {
             }
             Err(error) => self.error = Some(error.to_string()),
         }
+    }
+
+    pub(super) fn refresh_current_directory_from_external(&mut self) {
+        let path = self.library.current_path.as_str().to_owned();
+        self.reload_directory(&path);
     }
 
     fn refresh_library_entry(&mut self, relative_path: &str, directory: &str) {
@@ -598,6 +604,7 @@ fn app_shell(mut state: State<ShellState>) -> Element {
                 )
                 .child(content),
         )
+        .child(vault_watch::VaultWatcherHost { state }.into_element())
         .a11y_alt(contract.provenance.component.source_name());
 
     if snapshot.menu_open {

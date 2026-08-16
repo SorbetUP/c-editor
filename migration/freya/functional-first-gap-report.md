@@ -397,3 +397,22 @@ jusqu’à `differential_freya_capture`, mais son code de sortie reste non nul c
 ce test exige `DIFFERENTIAL_OUTPUT_DIR` et doit être lancé par l’orchestrateur
 de capture partagé. La comparaison stricte Tauri/Freya, la fenêtre Freya
 native packagée et les parcours d’addons JavaScript demeurent **NOT PROVEN**.
+
+## Mise à jour fonctionnelle — 2026-08-16 (rafraîchissement externe)
+
+Freya surveille maintenant le répertoire actuellement affiché avec un
+fingerprint borné au vault. Une création, suppression ou modification
+d’entrée déclenche le rechargement du vrai `VaultAdapter` et conserve les
+erreurs de lecture dans les logs ; le watcher ne possède ni état métier ni
+rendu de remplacement.
+
+Le test unitaire vérifie les changements réels de fichiers et le test
+`vault_watch_freya_testing::external_vault_note_appears_after_the_watcher_poll`
+vérifie qu’un fichier créé hors de l’application apparaît dans la page Freya
+après le polling. Preuves exécutées :
+
+```text
+cargo test --manifest-path Elephant/freya/Cargo.toml vault_watch -- --nocapture : PASS
+cargo test --manifest-path Elephant/freya/Cargo.toml --test vault_watch_freya_testing -- --nocapture : 1 passed
+pnpm freya:check : PASS (warnings préexistants)
+```
