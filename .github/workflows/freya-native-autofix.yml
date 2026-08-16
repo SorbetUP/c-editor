@@ -101,7 +101,34 @@ jobs:
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
       - name: Verify navigation history
-        run: cargo test --manifest-path Elephant/freya/Cargo.toml --test navigation_back_forward_freya_testing -- --test-threads=1 --nocapture
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+          CARGO_TERM_COLOR: never
+        run: |
+          set -uo pipefail
+          log=/tmp/freya-navigation.log
+          set +e
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test navigation_back_forward_freya_testing -- --test-threads=1 --nocapture 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            python3 - "$log" <<'PY'
+          import sys
+          from pathlib import Path
+          lines = Path(sys.argv[1]).read_text(errors='replace').splitlines()
+          tail = '\n'.join(lines[-220:])
+          escaped = tail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print(f'::error title=Freya navigation regression::{escaped}')
+          PY
+            {
+              echo '## Freya navigation regression'
+              echo '```text'
+              tail -n 220 "$log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi
 
       - name: Verify library navigation
         run: cargo test --manifest-path Elephant/freya/Cargo.toml --test library_settings_freya_testing -- --test-threads=1 --nocapture
