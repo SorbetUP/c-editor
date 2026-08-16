@@ -332,3 +332,26 @@ est passé au rouge en retirant temporairement la garde, puis au vert après sa
 restauration. La panne est provoquée par un chemin de scène remplacé par un
 dossier, donc l’écriture échoue réellement. La suite Drawing passe avec 5
 tests.
+
+## Mise à jour fonctionnelle — 2026-08-16 (récupération de vault)
+
+Quand le vault actif enregistré a disparu, Freya conserve maintenant le
+registre chargé et affiche une action permettant d’ouvrir un autre vault
+enregistré. La récupération ne force pas l’utilisateur à resélectionner un
+répertoire déjà connu. Le test
+`vault_inaccessible_freya_testing::inaccessible_active_vault_keeps_registered_recovery_target`
+échouait avant l’ajout de cette cible, puis passe avec la persistance du nouvel
+`activeVaultId`.
+
+Deux écarts restent explicitement non résolus : les spans de texte Muya ne
+fournissent pas encore de hit-test de destination pour ouvrir les liens locaux
+ou externes, et le chemin Chat réel appelle `tokio::spawn` sans runtime Tokio
+dans `TestingRunner`; aucune affirmation de parité de clic de lien ou d’erreur
+provider Chat n’est donc faite.
+
+La capture Tauri native du 2026-08-16T03-26-53-827Z prouve la fenêtre, le
+processus et les événements CGEvent, mais bloque encore sur l’observation de
+`muya-runtime-editor` après le clic physique de la carte. La comparaison
+stricte Tauri/Freya reste **NOT PROVEN**. La capture Freya seule du commit
+courant passe avec 14 actions et 120 frames sous
+`/private/tmp/elephant-freya-differential-current.eLPOEm/output`.
