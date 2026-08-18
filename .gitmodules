@@ -1,0 +1,6 @@
+[submodule "Elephant/feature-incoming/Draw"]
+	path = Elephant/feature-incoming/Draw
+	url = https://github.com/SorbetUP/Draw.git
+[submodule "Elephant/feature-incoming/Note"]
+	path = Elephant/feature-incoming/Note
+	url = https://github.com/SorbetUP/Note.git
