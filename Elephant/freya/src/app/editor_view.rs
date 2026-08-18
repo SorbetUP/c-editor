@@ -19,7 +19,7 @@ use std::path::Path;
 use crate::{
     editor::{Delay, EditorAction},
     library_contract::RelativePath,
-    markdown_tags, theme,
+    theme,
 };
 
 use super::{route_notice, ShellState};
@@ -31,7 +31,6 @@ mod editor_links;
 #[path = "editor_tag_interactions.rs"]
 mod editor_tag_interactions;
 
-const CONTENT_MAX: f32 = 780.;
 const BODY_SIZE: f32 = 16.;
 const BODY_LINE_HEIGHT: f32 = 1.58;
 const TOPBAR_HEIGHT: f32 = 52.;
@@ -39,7 +38,6 @@ const COMPACT_TOPBAR_HEIGHT: f32 = 36.;
 const TOPBAR_ACTION: f32 = 30.;
 const TOOLBAR_HEIGHT: f32 = 56.;
 const TOOLBAR_ACTION: f32 = 34.;
-const FOOTER_HEIGHT: f32 = 50.;
 const UI_FONT: &str = "sans-serif";
 const CODE_FONT: &str = "monospace";
 const PIN_ACTIVE: (u8, u8, u8, u8) = (250, 204, 21, 255);
@@ -124,6 +122,7 @@ impl Component for EditableInlineBlock {
         let mut editable = use_editable(|| value.clone(), EditableConfig::new);
         let a11y_id = use_a11y();
         let holder = use_state(ParagraphHolder::default);
+        let pointer_dragging = use_state(|| false);
 
         let should_focus = snapshot.editor.as_ref().is_some_and(|editor| {
             editor.focus_target().is_some_and(|target| {
@@ -156,12 +155,20 @@ impl Component for EditableInlineBlock {
             inner.clear_selection();
         }
 
-        let cursor_index = editable.editor().read().cursor_pos();
-        let highlights = editable
-            .editor()
-            .read()
-            .get_visible_selection(EditorLine::SingleParagraph);
-        let state = self.state;
+        let has_muya_selection = snapshot
+            .editor
+            .as_ref()
+            .is_some_and(|editor| !editor.session().snapshot().selection.is_collapsed());
+        let cursor_index = should_focus.then(|| editable.editor().read().cursor_pos());
+        let highlights = (should_focus || has_muya_selection)
+            .then(|| {
+                editable
+                    .editor()
+                    .read()
+                    .get_visible_selection(EditorLine::SingleParagraph)
+            })
+            .flatten();
+        let mut state = self.state;
         let autosave_generation = self.autosave_generation;
         let node_id = self.node_id;
         let previous_value = value.clone();
@@ -177,24 +184,47 @@ impl Component for EditableInlineBlock {
         let on_key_up = move |event: Event<KeyboardEventData>| {
             editable.process_event(EditableEvent::KeyUp { key: &event.key });
         };
-        let on_mouse_down = move |event: Event<MouseEventData>| {
+        let mut pointer_dragging_down = pointer_dragging;
+        let on_pointer_down = move |event: Event<PointerEventData>| {
+            if !event.is_primary() {
+                return;
+            }
+            event.stop_propagation();
+            pointer_dragging_down.set(true);
             a11y_id.request_focus();
             editable.process_event(EditableEvent::Down {
-                location: event.element_location,
+                location: event.element_location(),
                 editor_line: EditorLine::SingleParagraph,
                 holder: &holder.read(),
             });
+            if let Err(error) = sync_muya_selection(state, node_id, &editable) {
+                state.write().error = Some(error.clone());
+                eprintln!("[freya][editor] action:failure action=pointer-selection error={error}");
+            } else {
+                eprintln!(
+                    "[freya][editor] action:complete action=pointer-selection node={node_id:?}"
+                );
+            }
         };
-        let on_mouse_move = move |event: Event<MouseEventData>| {
+        let pointer_dragging_move = pointer_dragging;
+        let on_pointer_move = move |event: Event<PointerEventData>| {
+            if !a11y_id.is_focused() || !*pointer_dragging_move.read() {
+                return;
+            }
             editable.process_event(EditableEvent::Move {
-                location: event.element_location,
+                location: event.element_location(),
                 editor_line: EditorLine::SingleParagraph,
                 holder: &holder.read(),
             });
         };
-        let on_pointer_up = move |_| editable.process_event(EditableEvent::Release);
+        let mut pointer_dragging_up = pointer_dragging;
+        let on_pointer_up = move |_| {
+            pointer_dragging_up.set(false);
+            editable.process_event(EditableEvent::Release);
+        };
         let link_state = self.state;
         let link_destination_for_click = link_destination.clone();
+        let mut pointer_dragging_release = pointer_dragging;
         let mut paragraph = paragraph()
             .a11y_id(a11y_id)
             .width(Size::fill())
@@ -204,9 +234,11 @@ impl Component for EditableInlineBlock {
             .highlights(highlights.map(|selection| vec![selection]))
             .spans_iter(spans.into_iter())
             .a11y_alt(self.accessibility_label.clone())
-            .on_mouse_down(on_mouse_down)
-            .on_mouse_move(on_mouse_move)
+            .on_pointer_down(on_pointer_down)
+            .on_global_pointer_move(on_pointer_move)
             .on_mouse_up(move |_| {
+                pointer_dragging_release.set(false);
+                editable.process_event(EditableEvent::Release);
                 if let Some(destination) = link_destination_for_click.as_deref() {
                     editor_links::activate(link_state, destination);
                 }
@@ -218,6 +250,8 @@ impl Component for EditableInlineBlock {
             .font_family(if self.style.code { CODE_FONT } else { UI_FONT })
             .font_size(self.style.font_size * self.text_scale)
             .line_height(self.style.line_height)
+            .cursor_color(theme::color(self.palette.text))
+            .highlight_color(theme::color(self.palette.primary))
             .color(theme::color(self.palette.text));
         if self.style.bold {
             paragraph = paragraph.font_weight(FontWeight::BOLD);
@@ -229,18 +263,19 @@ impl Component for EditableInlineBlock {
     }
 }
 
-pub(super) fn note_editor_host(state: State<ShellState>) -> Element {
-    NoteEditorHost { state }.into_element()
+pub(super) fn note_editor_host(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    NoteEditorHost { state, palette }.into_element()
 }
 
 #[derive(PartialEq)]
 struct NoteEditorHost {
     state: State<ShellState>,
+    palette: theme::ThemePalette,
 }
 
 impl Component for NoteEditorHost {
     fn render(&self) -> impl IntoElement {
-        render_note_editor_host(self.state)
+        render_note_editor_host(self.state, self.palette)
     }
 }
 
@@ -358,12 +393,12 @@ fn action_button(
             .on_pointer_leave(move |_| {
                 leave_state.write().hovered_target = None;
             })
-            .on_mouse_down(move |_| {
+            .on_mouse_down(move |event| {
                 down_state.write().set_hovered_target(down_key.clone());
-            })
-            .on_mouse_up(move |event| {
-                up_state.write().set_hovered_target(up_key.clone());
                 on_press(event);
+            })
+            .on_mouse_up(move |_| {
+                up_state.write().set_hovered_target(up_key.clone());
             });
     }
     button.into_element()
@@ -518,14 +553,12 @@ fn editable_tag_chip(
         .into_element()
 }
 
-fn render_note_editor_host(mut state: State<ShellState>) -> Element {
+fn render_note_editor_host(mut state: State<ShellState>, palette: theme::ThemePalette) -> Element {
     // Hooks are intentionally unconditional. Conditional sub-UI is rendered
     // after every hook has been registered, matching Freya's hook rules.
     let autosave_generation = use_state(|| 0_u64);
     let link_form_open = use_state(|| false);
     let link_value = use_state(String::new);
-    let text_scale = use_state(|| 1.0_f32);
-    let editor_dark_mode = use_state(|| false);
     let tag_form_open = use_state(|| false);
     let tag_draft = use_state(String::new);
     let tag_edit_index = use_state(|| None::<usize>);
@@ -624,18 +657,11 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         return route_notice("NoteEditorHost", "No note open");
     };
 
-    let palette = if *editor_dark_mode.read() {
-        theme::DARK_PALETTE
-    } else {
-        theme::LIGHT_PALETTE
-    };
-    let content_scale = *text_scale.read();
+    let content_scale = 1.0_f32;
     let compact = editor.topbar_compact();
     let editor_snapshot = editor.snapshot();
     let dirty = editor.is_dirty();
     let markdown = editor.serialize();
-    let word_count = markdown.split_whitespace().count();
-    let char_count = markdown.chars().count();
     let fallback_title = editor
         .path()
         .and_then(|path| path.file_stem())
@@ -670,7 +696,7 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
             .chain(snapshot.library.root_entries.iter())
             .find(|entry| entry.path.as_str() == path)
     });
-    let mut tags = markdown_tags::parse_markdown_tags(&markdown);
+    let mut tags = elephant_note::parse_tags(&markdown);
     if tags.is_empty() {
         tags = library_entry
             .map(|entry| entry.tags.clone())
@@ -695,6 +721,15 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
     let title_input = Input::new(title_value)
         .width(Size::fill())
         .a11y_id(title_a11y_id)
+        .theme_colors(
+            InputColorsThemePartial::new()
+                .color(theme::color(palette.text))
+                .placeholder_color(theme::color(palette.muted))
+                .background(Color::TRANSPARENT)
+                .focus_background(Color::TRANSPARENT)
+                .border_fill(Color::TRANSPARENT)
+                .focus_border_fill(Color::TRANSPARENT),
+        )
         .on_submit(move |next_title: String| {
             let next_title = next_title.trim().to_owned();
             if next_title.is_empty() {
@@ -1217,12 +1252,14 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .child(
             rect()
                 .width(Size::flex(1.))
+                .max_width(Size::px(520.))
                 .a11y_alt("Note title")
                 .on_mouse_up(move |_| title_a11y_id.request_focus())
                 .child(title_input),
         );
     let mut topbar_actions = rect()
-        .width(Size::px(340.))
+        .width(Size::auto())
+        .min_width(Size::px(0.))
         .height(Size::fill())
         .horizontal()
         .spacing(8.)
@@ -1263,158 +1300,61 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
         .child(undo)
         .child(redo)
         .child(save)
-        .child(pin)
-        .child(close);
-    topbar = topbar.child(topbar_actions);
+        .child(pin);
+    topbar = topbar.child(
+        ScrollView::new()
+            .direction(Direction::Horizontal)
+            .width(Size::flex(1.))
+            .height(Size::fill())
+            .show_scrollbar(false)
+            .drag_scrolling(false)
+            .child(topbar_actions),
+    );
+    topbar = topbar.child(close);
 
-    let toolbar = rect()
-        .width(Size::fill())
-        .height(Size::px(TOOLBAR_HEIGHT))
+    let toolbar_content = rect()
+        .width(Size::auto())
+        .height(Size::fill())
         .horizontal()
         .spacing(14.)
         .padding(Gaps::new(0., 24., 0., 24.))
         .cross_align(Alignment::Center)
+        .children([
+            heading,
+            bold,
+            italic,
+            strike,
+            link,
+            bullets,
+            ordered,
+            task,
+            inline_code,
+            quote,
+            code_block,
+        ]);
+    let toolbar = rect()
+        .width(Size::fill())
+        .height(Size::px(TOOLBAR_HEIGHT))
         .background(theme::color(palette.surface))
         .border(Border::new().fill(theme::color(palette.border)).width(1.))
         .a11y_alt("Editor toolbar")
-        .child(heading)
-        .child(bold)
-        .child(italic)
-        .child(strike)
-        .child(link)
-        .child(bullets)
-        .child(ordered)
-        .child(task)
-        .child(inline_code)
-        .child(quote)
-        .child(code_block);
+        .child(
+            ScrollView::new()
+                .direction(Direction::Horizontal)
+                .width(Size::fill())
+                .height(Size::fill())
+                .show_scrollbar(false)
+                .drag_scrolling(false)
+                .child(toolbar_content),
+        );
 
     let centered_body = rect().width(Size::fill()).center().child(
         rect()
             .width(Size::fill())
-            .max_width(Size::px(CONTENT_MAX))
+            .max_width(Size::px(1020.))
             .padding(Gaps::new(24., 20., 36., 20.))
             .child(document_view),
     );
-
-    let scale_down = {
-        let mut scale = text_scale;
-        action_button(
-            state,
-            "text-scale-down",
-            "A−",
-            "Decrease editor text size",
-            content_scale > 0.85,
-            false,
-            None,
-            36.,
-            true,
-            palette,
-            move |_| {
-                let next = (*scale.read() - 0.1).clamp(0.85, 1.3);
-                *scale.write() = next;
-            },
-        )
-    };
-    let scale_reset = {
-        let mut scale = text_scale;
-        action_button(
-            state,
-            "text-scale-reset",
-            format!("{}%", (content_scale * 100.).round() as i32),
-            "Reset editor text size",
-            true,
-            (content_scale - 1.0).abs() < f32::EPSILON,
-            Some(palette.primary),
-            52.,
-            true,
-            palette,
-            move |_| *scale.write() = 1.0,
-        )
-    };
-    let scale_up = {
-        let mut scale = text_scale;
-        action_button(
-            state,
-            "text-scale-up",
-            "A+",
-            "Increase editor text size",
-            content_scale < 1.3,
-            false,
-            None,
-            36.,
-            true,
-            palette,
-            move |_| {
-                let next = (*scale.read() + 0.1).clamp(0.85, 1.3);
-                *scale.write() = next;
-            },
-        )
-    };
-    let theme_toggle = {
-        let dark = *editor_dark_mode.read();
-        let mut dark_state = editor_dark_mode;
-        action_button(
-            state,
-            "theme-toggle",
-            if dark { "☀" } else { "☾" },
-            if dark {
-                "Use light editor theme"
-            } else {
-                "Use dark editor theme"
-            },
-            true,
-            dark,
-            Some(palette.primary),
-            36.,
-            true,
-            palette,
-            move |_| {
-                let next = !*dark_state.read();
-                *dark_state.write() = next;
-            },
-        )
-    };
-
-    let footer = rect()
-        .width(Size::fill())
-        .height(Size::px(FOOTER_HEIGHT))
-        .horizontal()
-        .main_align(Alignment::SpaceBetween)
-        .cross_align(Alignment::Center)
-        .padding(Gaps::new(0., 24., 0., 24.))
-        .background(theme::color(palette.surface))
-        .border(Border::new().fill(theme::color(palette.border)).width(1.))
-        .a11y_alt("Editor footer")
-        .child(
-            rect()
-                .horizontal()
-                .spacing(12.)
-                .child(status_label(format!("{word_count} words"), palette, false))
-                .child(status_label(
-                    format!("{char_count} characters"),
-                    palette,
-                    false,
-                ))
-                .child(status_label(
-                    if dirty {
-                        "Unsaved changes".to_string()
-                    } else {
-                        "Saved".to_string()
-                    },
-                    palette,
-                    dirty,
-                )),
-        )
-        .child(
-            rect()
-                .horizontal()
-                .spacing(8.)
-                .child(scale_down)
-                .child(scale_reset)
-                .child(scale_up)
-                .child(theme_toggle),
-        );
 
     rect()
         .width(Size::fill())
@@ -1444,7 +1384,6 @@ fn render_note_editor_host(mut state: State<ShellState>) -> Element {
                         .child(centered_body),
                 ),
         )
-        .child(footer)
         .a11y_alt("NoteEditorHost")
         .into_element()
 }
@@ -1514,24 +1453,6 @@ fn toolbar_command_button(
             dispatch_toolbar_action(state, autosave_generation, action.clone(), interaction_id)
         },
     )
-}
-
-fn status_label(text: String, palette: theme::ThemePalette, accent: bool) -> Element {
-    label()
-        .font_family(UI_FONT)
-        .font_size(12.)
-        .font_weight(if accent {
-            FontWeight::BOLD
-        } else {
-            FontWeight::NORMAL
-        })
-        .color(theme::color(if accent {
-            palette.primary
-        } else {
-            palette.muted
-        }))
-        .text(text)
-        .into_element()
 }
 
 fn render_document(
@@ -1976,16 +1897,19 @@ fn editable_block(
     palette: theme::ThemePalette,
     text_scale: f32,
 ) -> Element {
-    EditableInlineBlock {
-        state,
-        autosave_generation,
-        node_id,
-        accessibility_label: label.to_string(),
-        style,
-        palette,
-        text_scale,
-    }
-    .into_element()
+    rect()
+        .key(("editor-block", node_id))
+        .width(Size::fill())
+        .child(EditableInlineBlock {
+            state,
+            autosave_generation,
+            node_id,
+            accessibility_label: label.to_string(),
+            style,
+            palette,
+            text_scale,
+        })
+        .into_element()
 }
 
 fn unsupported_block(
@@ -2050,6 +1974,7 @@ fn render_list(
                     item.id,
                     task_checked(item.id, document),
                     marker,
+                    palette,
                 )
             } else {
                 label()
@@ -2685,6 +2610,8 @@ fn short_date(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::markdown_tags;
+
     use super::*;
 
     #[test]

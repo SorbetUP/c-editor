@@ -9,7 +9,7 @@ use freya_testing::{TestingNode, TestingRunner};
 use std::{
     fs,
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 struct FixtureVault {
@@ -101,6 +101,7 @@ fn library_card(runner: &TestingRunner, label: &str) -> TestingNode {
 fn click_library_card(runner: &mut TestingRunner, label: &str) {
     let node = library_card(runner, label);
     click_node(runner, node);
+    runner.poll(Duration::from_millis(10), Duration::from_millis(260));
 }
 
 fn open_create_menu(runner: &mut TestingRunner) {

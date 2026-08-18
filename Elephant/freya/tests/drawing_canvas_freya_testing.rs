@@ -202,3 +202,28 @@ fn invalid_scene_is_rejected_instead_of_rendering_a_fake_canvas() {
         .expect_err("non-Excalidraw data must be rejected");
     assert!(error.contains("type=excalidraw"));
 }
+
+#[test]
+fn active_freehand_tool_draws_into_shared_state_and_serializes() {
+    let (mut runner, state) = test_runner();
+    let tool = runner
+        .find(|node, element| {
+            (element.accessibility().builder.label() == Some("Freehand tool")).then_some(node)
+        })
+        .expect("the native canvas must expose a Freehand tool");
+    runner.click_cursor(tool.layout().area.center().to_f64());
+    runner.press_cursor((430., 100.));
+    runner.move_cursor((470., 130.));
+    runner.release_cursor((470., 130.));
+
+    let snapshot = state.peek();
+    let element = snapshot
+        .document
+        .elements
+        .last()
+        .expect("drawing gesture must append a real element");
+    assert_eq!(element.kind, "freedraw");
+    assert!(element.points.len() >= 2);
+    let serialized = snapshot.serialize_json().expect("serialize drawn scene");
+    assert!(serialized.contains(&element.id));
+}

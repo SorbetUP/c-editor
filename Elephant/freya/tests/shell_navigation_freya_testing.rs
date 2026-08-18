@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::{
     fs,
     path::{Path, PathBuf},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 struct FixtureVault {
@@ -195,6 +195,18 @@ fn sidebar_resize_uses_pointer_and_keyboard_and_restores_from_native_workspace()
 #[test]
 fn rail_search_dragged_before_sidebar_toggle_persists_and_restores() {
     let fixture = FixtureVault::new();
+    fs::create_dir_all(fixture.workspace_path().parent().expect("workspace parent"))
+        .expect("create workspace metadata directory");
+    fs::write(
+        fixture.workspace_path(),
+        r#"{
+          "version": 1,
+          "freyaShell": {
+            "railOrder": ["sidebar-toggle", "separator:vanilla", "search"]
+          }
+        }"#,
+    )
+    .expect("seed rail order with separator");
     let root = fixture.path().to_path_buf();
     let (mut runner, ()) = TestingRunner::new(
         move || app_with_vault(root.clone()),
@@ -203,6 +215,7 @@ fn rail_search_dragged_before_sidebar_toggle_persists_and_restores() {
         1.,
     );
 
+    require_labeled_node(&runner, "Rail separator separator:vanilla");
     let search = require_labeled_node(&runner, "Search");
     let toggle = require_labeled_node(&runner, "Hide sidebar");
     assert!(search.layout().area.min_y() > toggle.layout().area.min_y());
@@ -240,7 +253,7 @@ fn rail_search_dragged_before_sidebar_toggle_persists_and_restores() {
         .iter()
         .map(|value| value.as_str().unwrap_or_default())
         .collect::<Vec<_>>();
-    assert_eq!(order, ["search", "sidebar-toggle"]);
+    assert_eq!(order, ["search", "sidebar-toggle", "separator:vanilla"]);
 
     let restart_root = fixture.path().to_path_buf();
     let (runner, ()) = TestingRunner::new(
@@ -249,6 +262,7 @@ fn rail_search_dragged_before_sidebar_toggle_persists_and_restores() {
         |_| (),
         1.,
     );
+    require_labeled_node(&runner, "Rail separator separator:vanilla");
     assert!(
         require_labeled_node(&runner, "Search")
             .layout()
@@ -259,6 +273,23 @@ fn rail_search_dragged_before_sidebar_toggle_persists_and_restores() {
                 .area
                 .min_y()
     );
+}
+
+#[test]
+fn clicking_search_without_pointer_motion_keeps_the_action_path() {
+    let fixture = FixtureVault::new();
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    runner.click_cursor(center(&require_labeled_node(&runner, "Search")));
+    runner.poll(Duration::from_millis(10), Duration::from_millis(260));
+    runner.sync_and_update();
+    assert_eq!(accessible_nodes(&runner, "Search input").len(), 1);
 }
 
 #[test]

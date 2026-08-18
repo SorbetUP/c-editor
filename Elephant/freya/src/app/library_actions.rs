@@ -24,7 +24,8 @@ pub(super) fn card_action_menu(
     path: String,
     title: String,
     is_folder: bool,
-    state: State<ShellState>,
+    mut state: State<ShellState>,
+    palette: theme::ThemePalette,
     card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
 ) -> Element {
@@ -62,9 +63,10 @@ pub(super) fn card_action_menu(
         .horizontal()
         .spacing(4.)
         .padding(Gaps::new_all(5.))
-        .background(theme::color(theme::SURFACE))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::color(palette.surface))
+        .border(Border::new().fill(theme::color(palette.border)).width(1.))
         .with_corner_radius(10.)
+        .layer(Layer::OverlayLevel(25))
         .a11y_alt(if is_folder {
             "Folder actions"
         } else {
@@ -84,10 +86,12 @@ pub(super) fn card_action_menu(
                     let mut menu = rename_menu_state.write();
                     menu.open = false;
                     menu.renaming = true;
+                    drop(menu);
+                    state.write().clear_card_action_target();
                 })
                 .child(svg_icon(
                     LibraryIcon::Pencil,
-                    theme::color(theme::TEXT),
+                    theme::color(palette.text),
                     20.,
                 )),
         )
@@ -104,8 +108,18 @@ pub(super) fn card_action_menu(
                     let mut menu = pin_menu_state.write();
                     menu.open = false;
                     menu.renaming = false;
+                    drop(menu);
+                    pin_state.write().clear_card_action_target();
                 })
-                .child(label().text(if pinned { "📌" } else { "📍" })),
+                .child(svg_icon(
+                    LibraryIcon::Pin,
+                    if pinned {
+                        theme::color(palette.primary)
+                    } else {
+                        theme::color(palette.text)
+                    },
+                    18.,
+                )),
         )
         .child(
             rect()
@@ -120,11 +134,13 @@ pub(super) fn card_action_menu(
                         let mut menu = delete_menu_state.write();
                         menu.open = false;
                         menu.renaming = false;
+                        drop(menu);
+                        delete_state.write().clear_card_action_target();
                     }
                 })
                 .child(svg_icon(
                     LibraryIcon::Trash2,
-                    theme::color(theme::DANGER),
+                    theme::color(palette.danger),
                     20.,
                 )),
         )
@@ -151,6 +167,8 @@ pub(super) fn card_action_menu(
                         let mut menu = sidebar_menu_state.write();
                         menu.open = false;
                         menu.renaming = false;
+                        drop(menu);
+                        sidebar_state.write().clear_card_action_target();
                     }
                 })
                 .child(svg_icon(
@@ -159,7 +177,7 @@ pub(super) fn card_action_menu(
                     } else {
                         LibraryIcon::PanelLeftOpen
                     },
-                    theme::color(theme::MUTED),
+                    theme::color(palette.muted),
                     20.,
                 ))
                 .into_element()

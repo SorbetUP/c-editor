@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use std::{
     fs,
+    io::ErrorKind,
     path::{Component, Path, PathBuf},
 };
 
@@ -15,6 +16,7 @@ pub(super) struct SceneRead {
     pub(super) preview_size: u64,
 }
 
+#[derive(Debug)]
 pub(super) struct NativeSceneRead {
     pub(super) path: PathBuf,
     pub(super) raw: String,
@@ -79,36 +81,37 @@ pub(super) fn read_scene(root: &Path, relative_path: &str) -> Result<SceneRead, 
             scene_path.display()
         )
     })?;
-    let scene: Value = serde_json::from_str(&raw)
-        .map_err(|error| format!("Drawing scene invalid at {}: {error}", scene_path.display()))?;
-    if scene.get("type").and_then(Value::as_str) != Some("excalidraw") {
-        return Err(format!(
-            "Drawing scene invalid at {}: expected type=excalidraw",
-            scene_path.display()
-        ));
-    }
+    let scene = validate_scene_json(&raw, &scene_path)?;
     let Some(elements) = scene.get("elements").and_then(Value::as_array) else {
         return Err(format!(
             "Drawing scene invalid at {}: elements must be an array",
             scene_path.display()
         ));
     };
-    let preview_path = preview_path(&scene_path);
-    let preview_metadata = fs::symlink_metadata(&preview_path).map_err(|error| {
-        format!(
-            "Drawing preview unavailable at {}: {error}",
-            preview_path.display()
-        )
-    })?;
-    if preview_metadata.file_type().is_symlink() {
+    let preview_size = optional_preview_size(root, &scene_path)?;
+    Ok(SceneRead {
+        path: scene_path,
+        raw,
+        element_count: elements.len(),
+        preview_size,
+    })
+}
+
+fn optional_preview_size(root: &Path, scene_path: &Path) -> Result<u64, String> {
+    let preview_path = preview_path(scene_path);
+    let metadata = match fs::symlink_metadata(&preview_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(format!(
+                "Drawing preview unavailable at {}: {error}",
+                preview_path.display()
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(format!(
-            "Refusing symlinked drawing preview: {}",
-            preview_path.display()
-        ));
-    }
-    if !preview_metadata.is_file() {
-        return Err(format!(
-            "Drawing preview unavailable at {}: expected a file",
+            "Refusing invalid drawing preview: {}",
             preview_path.display()
         ));
     }
@@ -125,12 +128,7 @@ pub(super) fn read_scene(root: &Path, relative_path: &str) -> Result<SceneRead, 
             preview_path.display()
         ));
     }
-    Ok(SceneRead {
-        path: scene_path,
-        raw,
-        element_count: elements.len(),
-        preview_size: preview_metadata.len(),
-    })
+    Ok(metadata.len())
 }
 
 pub(super) fn read_native_scene(
@@ -140,7 +138,12 @@ pub(super) fn read_native_scene(
     let path = scene_path(root, relative_path)?;
     let raw = fs::read_to_string(&path)
         .map_err(|error| format!("Drawing scene unavailable at {}: {error}", path.display()))?;
-    let scene: Value = serde_json::from_str(&raw)
+    validate_scene_json(&raw, &path)?;
+    Ok(NativeSceneRead { path, raw })
+}
+
+fn validate_scene_json(raw: &str, path: &Path) -> Result<Value, String> {
+    let scene: Value = serde_json::from_str(raw)
         .map_err(|error| format!("Drawing scene invalid at {}: {error}", path.display()))?;
     if scene.get("type").and_then(Value::as_str) != Some("excalidraw") {
         return Err(format!(
@@ -154,7 +157,7 @@ pub(super) fn read_native_scene(
             path.display()
         ));
     }
-    Ok(NativeSceneRead { path, raw })
+    Ok(scene)
 }
 
 pub(super) fn write_scene(path: &Path, raw: &str) -> Result<(), String> {
@@ -189,11 +192,13 @@ fn scene_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
                 note_path.display()
             )
         })?;
-        note_path
-            .parent()
-            .unwrap_or(root)
-            .join(asset)
-            .with_extension("excalidraw")
+        let scene = note_path.parent().unwrap_or(root).join(asset);
+        let lower_scene = scene.to_string_lossy().to_ascii_lowercase();
+        if lower_scene.ends_with(".excalidraw.png") {
+            scene.with_extension("").with_extension("excalidraw")
+        } else {
+            scene.with_extension("excalidraw")
+        }
     } else if lower_path.ends_with(".excalidraw.png") {
         let mut scene = visible_path.clone();
         scene.set_extension("excalidraw");
@@ -245,4 +250,93 @@ fn markdown_asset_path(markdown: &str) -> Option<PathBuf> {
         .to_ascii_lowercase()
         .ends_with(".png")
         .then(|| PathBuf::from(candidate))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn fixture_root(label: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock must be valid")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("elephant-drawing-storage-{label}-{stamp}"));
+        fs::create_dir_all(&root).expect("create fixture root");
+        root
+    }
+
+    fn scene_with_unknown_element() -> Value {
+        json!({
+            "type": "excalidraw",
+            "version": 2,
+            "source": "storage-test",
+            "elements": [{
+                "id": "unknown-1",
+                "type": "future-element",
+                "x": 12,
+                "y": 24,
+                "width": 80,
+                "height": 40,
+                "futureProperty": {"kept": true},
+                "customData": {"vendor": "preserve-me"}
+            }],
+            "appState": {"viewBackgroundColor": "#fff"},
+            "files": {}
+        })
+    }
+
+    #[test]
+    fn reads_excalidraw_and_json_exports_without_requiring_png_preview() {
+        let root = fixture_root("extensions");
+        for name in ["drawing.excalidraw", "drawing.json"] {
+            let path = root.join(name);
+            fs::write(
+                &path,
+                serde_json::to_vec_pretty(&scene_with_unknown_element()).unwrap(),
+            )
+            .unwrap();
+            let relative = path.file_name().unwrap().to_string_lossy();
+            let loaded = read_native_scene(&root, &relative).expect("valid Excalidraw export");
+            assert_eq!(loaded.path, fs::canonicalize(path).unwrap());
+            assert!(loaded.raw.contains("futureProperty"));
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn markdown_sidecar_resolves_both_png_and_excalidraw_png_links() {
+        let root = fixture_root("markdown-sidecar");
+        fs::create_dir_all(root.join(".assets")).unwrap();
+        let scene = scene_with_unknown_element();
+        fs::write(
+            root.join(".assets/legacy.excalidraw"),
+            serde_json::to_vec_pretty(&scene).unwrap(),
+        )
+        .unwrap();
+        fs::write(root.join("Legacy.md"), "![drawing](.assets/legacy.png)").unwrap();
+        assert!(read_native_scene(&root, "Legacy.md").is_ok());
+
+        fs::write(
+            root.join("Modern.md"),
+            "![drawing](.assets/legacy.excalidraw.png)",
+        )
+        .unwrap();
+        assert!(read_native_scene(&root, "Modern.md").is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_invalid_json_and_paths_outside_the_vault() {
+        let root = fixture_root("validation");
+        fs::write(root.join("invalid.excalidraw"), "{\"elements\":[]}").unwrap();
+        let error = match read_native_scene(&root, "invalid.excalidraw") {
+            Ok(_) => panic!("invalid scene must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.contains("expected type=excalidraw"));
+        assert!(read_native_scene(&root, "../outside.excalidraw").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
 }

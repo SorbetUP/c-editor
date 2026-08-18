@@ -163,6 +163,121 @@ fn approximately(value: f32, expected: f32) -> bool {
     (value - expected).abs() < 0.5
 }
 
+fn assert_horizontal_bounds(runner: &TestingRunner, label: &str, container: freya::prelude::Area) {
+    let area = node_with_label(runner, label).layout().area;
+    assert!(
+        area.size.width > 1.,
+        "{label} must keep a measurable width, got {:?}",
+        area.size
+    );
+    assert!(
+        area.origin.x >= container.origin.x - 0.5,
+        "{label} starts outside its container: {:?} vs {:?}",
+        area,
+        container
+    );
+    assert!(
+        area.origin.x + area.size.width <= container.origin.x + container.size.width + 0.5,
+        "{label} overflows its container horizontally: {:?} vs {:?}",
+        area,
+        container
+    );
+}
+
+fn areas_overlap(left: freya::prelude::Area, right: freya::prelude::Area) -> bool {
+    left.origin.x < right.origin.x + right.size.width
+        && left.origin.x + left.size.width > right.origin.x
+        && left.origin.y < right.origin.y + right.size.height
+        && left.origin.y + left.size.height > right.origin.y
+}
+
+#[test]
+fn settings_is_a_full_viewport_modal_above_the_existing_workspace() {
+    let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
+    let fixture = FixtureVault::new();
+    let mut runner = runner_for_size(&fixture, (1280., 840.));
+    open_settings(&mut runner);
+
+    let backdrop = node_with_label(&runner, "Settings backdrop").layout().area;
+    assert!(approximately(backdrop.origin.x, 0.));
+    assert!(approximately(backdrop.origin.y, 0.));
+    assert!(approximately(backdrop.size.width, 1280.));
+    assert!(approximately(backdrop.size.height, 840.));
+
+    let panel = node_with_label(&runner, "ElephantNote settings")
+        .layout()
+        .area;
+    assert!(approximately(panel.size.width, 1020.));
+    assert!(approximately(panel.size.height, 780.));
+    assert!(approximately(panel.origin.x, 130.));
+    assert!(approximately(panel.origin.y, 30.));
+
+    let workspace_note = node_with_label(&runner, "Welcome").layout().area;
+    assert!(
+        areas_overlap(panel, workspace_note),
+        "the modal must be layered over the still-mounted workspace"
+    );
+}
+
+#[test]
+fn language_options_fill_the_dropdown_without_overflow() {
+    let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
+    let fixture = FixtureVault::new();
+    let mut runner = runner_for_size(&fixture, (800., 600.));
+    open_settings(&mut runner);
+    click_label(&mut runner, "Expand language options");
+
+    let panel = node_with_label(&runner, "ElephantNote settings")
+        .layout()
+        .area;
+    let language = node_with_label(&runner, "Language").layout().area;
+    for label in [
+        "Selected language: System language · en",
+        "Use Français · French language",
+        "Use Deutsch · German language",
+        "Use Português · Portuguese language",
+        "Use Polski · Polish language",
+        "Use Українська · Ukrainian language",
+        "Use 日本語 · Japanese language",
+        "Use 简体中文 · Simplified Chinese language",
+        "Use العربية · Arabic language",
+    ] {
+        assert_horizontal_bounds(&runner, label, panel);
+        let option = node_with_label(&runner, label).layout().area;
+        assert!(
+            option.size.width >= language.size.width * 0.8,
+            "{label} must fill the bounded language dropdown: {:?} vs {:?}",
+            option,
+            language
+        );
+    }
+}
+
+#[test]
+fn theme_cards_use_responsive_columns_without_horizontal_overflow() {
+    let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
+    let fixture = FixtureVault::new();
+    let mut runner = runner_for_size(&fixture, (800., 600.));
+    open_settings(&mut runner);
+
+    let panel = node_with_label(&runner, "ElephantNote settings")
+        .layout()
+        .area;
+    for label in [
+        "Use Elephant theme",
+        "Use Apple theme",
+        "Use Graphite theme",
+        "Use Nord theme",
+        "Use Solar theme",
+        "Use Forest theme",
+        "Use Beige theme",
+        "Use Pastel theme",
+        "Use Gamer Violet theme",
+    ] {
+        assert_horizontal_bounds(&runner, label, panel);
+    }
+}
+
 #[test]
 fn settings_panel_keeps_tauri_reference_geometry_when_space_is_available() {
     let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
@@ -262,6 +377,43 @@ fn settings_search_is_live_and_opening_a_result_clears_search_mode() {
 }
 
 #[test]
+fn settings_search_language_category_stays_bounded_and_horizontal() {
+    let _profile = ProfileOverride::new(r#"{"theme":"light"}"#);
+    let fixture = FixtureVault::new();
+    let mut runner = runner_for(&fixture);
+    open_settings(&mut runner);
+
+    click_label(&mut runner, "Search all settings");
+    runner.write_text("language");
+    runner.sync_and_update();
+
+    assert_eq!(accessible_nodes(&runner, "Open setting Language").len(), 1);
+    let panel = node_with_label(&runner, "ElephantNote settings")
+        .layout()
+        .area;
+    let card = node_with_label(&runner, "Open setting Language")
+        .layout()
+        .area;
+    assert_horizontal_bounds(&runner, "Open setting Language", panel);
+
+    let category = node_with_label(&runner, "Setting category Appearance")
+        .layout()
+        .area;
+    assert!(
+        category.size.width >= 40.,
+        "category must retain intrinsic width: {:?}",
+        category.size
+    );
+    assert!(
+        category.size.height <= 20.,
+        "category must remain a single horizontal label: {:?}",
+        category.size
+    );
+    assert!(category.origin.x >= card.origin.x);
+    assert!(category.origin.x + category.size.width <= card.origin.x + card.size.width);
+}
+
+#[test]
 fn color_mode_preserves_theme_family_and_round_trips_on_disk() {
     let profile =
         ProfileOverride::new(r#"{"theme":"nord-light","futurePreference":{"keep":true}}"#);
@@ -309,6 +461,79 @@ fn color_mode_preserves_theme_family_and_round_trips_on_disk() {
     );
     open_settings(&mut restarted);
     assert_eq!(accessible_nodes(&restarted, "Use Dark color mode").len(), 1);
+}
+
+#[test]
+fn language_settings_render_select_persist_reload_and_report_invalid_values() {
+    let profile = ProfileOverride::new(r#"{"theme":"light","language":"system"}"#);
+    let fixture = FixtureVault::new();
+    let mut runner = runner_for(&fixture);
+    open_settings(&mut runner);
+
+    assert_eq!(accessible_nodes(&runner, "Language").len(), 1);
+    click_label(&mut runner, "Expand language options");
+    assert_eq!(
+        accessible_nodes(&runner, "Use Français · French language").len(),
+        1
+    );
+    assert_eq!(
+        accessible_nodes(&runner, "Selected language: System language · en").len(),
+        1
+    );
+
+    let french_row = accessible_nodes(&runner, "Use Français · French language")
+        .into_iter()
+        .find(|node| {
+            let area = node.layout().visible_area();
+            area.size.width > 1.
+                && area.size.height > 1.
+                && area.origin.x >= 0.
+                && area.origin.y >= 0.
+                && area.origin.x + area.size.width <= 1280.
+                && area.origin.y + area.size.height <= 840.
+        })
+        .expect("French language row must have a visible hit area");
+    let french_area = french_row.layout().visible_area();
+    let french_center = (
+        f64::from(french_area.origin.x + french_area.size.width / 2.),
+        f64::from(french_area.origin.y + french_area.size.height / 2.),
+    );
+    runner.press_cursor(french_center);
+    runner.release_cursor(french_center);
+    let persisted = profile.read_preferences();
+    assert_eq!(persisted["language"], Value::String("fr".to_owned()));
+    assert_eq!(
+        persisted["elephantnote:tauri:language"],
+        Value::String("fr".to_owned())
+    );
+    assert_eq!(
+        accessible_nodes(&runner, "Current language: Français · French").len(),
+        1
+    );
+
+    let restart_root = fixture.root.clone();
+    let (mut restarted, ()) = TestingRunner::new(
+        move || app_with_vault(restart_root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+    open_settings(&mut restarted);
+    assert_eq!(
+        accessible_nodes(&restarted, "Current language: Français · French").len(),
+        1
+    );
+
+    drop(runner);
+    drop(profile);
+    let invalid_profile = ProfileOverride::new(r#"{"theme":"light","language":"xx"}"#);
+    let invalid_fixture = FixtureVault::new();
+    let mut invalid_runner = runner_for(&invalid_fixture);
+    open_settings(&mut invalid_runner);
+    assert_eq!(
+        accessible_nodes(&invalid_runner, "Language preference error").len(),
+        1
+    );
 }
 
 #[test]

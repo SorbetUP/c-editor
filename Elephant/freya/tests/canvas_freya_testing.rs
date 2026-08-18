@@ -12,7 +12,10 @@ impl FixtureVault {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "elephant-freya-canvas-{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&root).expect("create canvas fixture");
         fs::write(root.join("Alpha.md"), "# Alpha\n\n[[Beta]]\n").expect("write Alpha");
@@ -57,7 +60,10 @@ fn canvas_route_loads_real_graph_and_opens_a_selected_note() {
     runner.sync_and_update();
     click(&mut runner, "Refresh Canvas graph");
     runner.sync_and_update();
-    assert_eq!(node(&runner, "Semantic Canvas").layout().area.size.width > 0., true);
+    assert_eq!(
+        node(&runner, "Semantic Canvas").layout().area.size.width > 0.,
+        true
+    );
     let zoom_before = runner
         .find(|_, element| {
             element
@@ -100,5 +106,8 @@ fn canvas_route_loads_real_graph_and_opens_a_selected_note() {
     assert!(canvas["positions"]["Alpha.md"].is_object());
     click(&mut runner, "Open selected note");
     runner.sync_and_update();
-    assert_eq!(node(&runner, "NoteEditorHost").layout().area.size.width > 0., true);
+    assert_eq!(
+        node(&runner, "NoteEditorHost").layout().area.size.width > 0.,
+        true
+    );
 }

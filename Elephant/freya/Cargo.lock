@@ -1138,10 +1138,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 
 [[package]]
+name = "elephant-draw"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "elephant-freya"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "elephant-draw",
+ "elephant-note",
  "elephantnote-knowledge-core",
  "freya",
  "freya-clipboard",
@@ -1154,6 +1164,14 @@ dependencies = [
  "serde_json",
  "tokio",
  "zip",
+]
+
+[[package]]
+name = "elephant-note"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

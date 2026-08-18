@@ -41,6 +41,11 @@ build/android/captures/
 Elephant/backend/tauri/target/
 Elephant/backend/tauri/gen/
 Elephant/backend/tauri/resources/
+Elephant/feature-incoming/**/target/
+
+# Local Freya packaged-app and observability artifacts
+/.cache/
+/test-results-observability/
 
 # Swift Package Manager generated files
 build/ios/.build/

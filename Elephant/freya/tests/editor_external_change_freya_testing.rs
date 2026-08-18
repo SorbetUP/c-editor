@@ -11,8 +11,11 @@ use std::{
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
+    sync::{Mutex, MutexGuard, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+static PROFILE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 struct FixtureVault {
     root: PathBuf,
@@ -45,10 +48,15 @@ impl Drop for FixtureVault {
 struct ProfileOverride {
     root: PathBuf,
     previous: Option<OsString>,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl ProfileOverride {
     fn autosave_disabled() -> Self {
+        let guard = PROFILE_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("profile lock must not be poisoned");
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock must be after the Unix epoch")
@@ -62,7 +70,11 @@ impl ProfileOverride {
         .expect("write preferences");
         let previous = std::env::var_os("ELEPHANT_FREYA_PROFILE");
         std::env::set_var("ELEPHANT_FREYA_PROFILE", &root);
-        Self { root, previous }
+        Self {
+            root,
+            previous,
+            _guard: guard,
+        }
     }
 }
 
@@ -138,8 +150,7 @@ fn clean_external_revision_is_reloaded_before_the_next_local_edit() {
 
     open_alpha(&mut runner);
     let path = fixture.path().join("Alpha.md");
-    fs::write(&path, "# Alpha\n\nExternal revision sentinel.\n")
-        .expect("write external revision");
+    fs::write(&path, "# Alpha\n\nExternal revision sentinel.\n").expect("write external revision");
     wait_for_vault_watcher(&mut runner);
 
     // If the clean editor did not reload, this edit + close would serialize

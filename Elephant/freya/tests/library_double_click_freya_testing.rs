@@ -4,8 +4,11 @@ use freya_testing::{TestingNode, TestingRunner};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+static VAULT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct FixtureVault {
     root: PathBuf,
@@ -13,12 +16,13 @@ struct FixtureVault {
 
 impl FixtureVault {
     fn new() -> Self {
+        let count = VAULT_COUNTER.fetch_add(1, Ordering::Relaxed);
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock must be after the Unix epoch")
             .as_nanos();
         let root =
-            std::env::temp_dir().join(format!("elephant-freya-library-double-click-{stamp}"));
+            std::env::temp_dir().join(format!("elephant-freya-library-double-click-{stamp}-{count}"));
         fs::create_dir_all(root.join("Folder")).expect("create fixture folder");
         fs::write(
             root.join("Folder/Inside.md"),

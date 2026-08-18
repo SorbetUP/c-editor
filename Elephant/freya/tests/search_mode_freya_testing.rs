@@ -67,20 +67,8 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
     ));
 }
 
-fn click_label_containing(runner: &mut TestingRunner, fragment: &str) {
-    let node = labeled_nodes_containing(runner, fragment)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| panic!("no Freya node has a label containing {fragment:?}"));
-    let area = node.layout().area;
-    runner.click_cursor((
-        ((area.min_x() + area.max_x()) / 2.) as f64,
-        ((area.min_y() + area.max_y()) / 2.) as f64,
-    ));
-}
-
 #[test]
-fn search_modes_use_literal_exact_smart_fallback_and_explicit_semantic_boundary() {
+fn search_overlay_matches_tauri_without_tabs_or_mode_controls() {
     let fixture = FixtureVault::new();
     let root = fixture.path().to_path_buf();
     let (mut runner, ()) = TestingRunner::new(
@@ -90,31 +78,36 @@ fn search_modes_use_literal_exact_smart_fallback_and_explicit_semantic_boundary(
         1.,
     );
 
-    click_label(&mut runner, "Search");
+    click_label(&mut runner, "Search notes");
+    runner.poll(
+        std::time::Duration::from_millis(10),
+        std::time::Duration::from_millis(260),
+    );
     runner.sync_and_update();
     click_label(&mut runner, "Search input");
     runner.write_text("alpha");
     runner.press_key(Key::Named(NamedKey::Enter));
+    runner.sync_and_update();
+    runner.poll(
+        std::time::Duration::from_millis(10),
+        std::time::Duration::from_millis(260),
+    );
     runner.sync_and_update();
     assert_eq!(
         labeled_nodes(&runner, "Open note Alphabet").len(),
         1,
         "Exact mode must match the literal query inside a real note title"
     );
-
-    click_label_containing(&mut runner, "exact");
-    runner.sync_and_update();
     assert!(
-        labeled_nodes_containing(&runner, "Semantic search unavailable in Freya").len() == 1,
-        "Semantic mode must not silently execute an exact/FTS query without an embedding index"
+        labeled_nodes_containing(&runner, "Search mode:").is_empty(),
+        "SEARCH-MODE-001: the Tauri SearchModal has no mode control"
     );
-    assert!(labeled_nodes(&runner, "Open note Alphabet").is_empty());
-
-    click_label_containing(&mut runner, "semantic");
+    assert_eq!(labeled_nodes(&runner, "Graph workspace").len(), 0);
+    runner.press_key(Key::Named(NamedKey::Enter));
     runner.sync_and_update();
     assert_eq!(
-        labeled_nodes(&runner, "Open note Alphabet").len(),
+        labeled_nodes(&runner, "NoteEditorHost").len(),
         1,
-        "Smart mode must use the real exact fallback while no semantic index is connected"
+        "SEARCH-MODE-002: Enter must open the exact-match note from the modal"
     );
 }

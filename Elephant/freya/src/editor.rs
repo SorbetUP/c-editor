@@ -355,7 +355,10 @@ impl EditorDocument {
         }
         for (line_index, line) in self.serialize().lines().enumerate() {
             let heading = line.trim_start();
-            let level = heading.chars().take_while(|character| *character == '#').count();
+            let level = heading
+                .chars()
+                .take_while(|character| *character == '#')
+                .count();
             if !(1..=6).contains(&level) {
                 continue;
             }
@@ -363,7 +366,8 @@ impl EditorDocument {
                 continue;
             };
             let title = title.trim().trim_end_matches('#').trim();
-            if fragment_slug(title) == requested || fragment_slug(requested) == fragment_slug(title) {
+            if fragment_slug(title) == requested || fragment_slug(requested) == fragment_slug(title)
+            {
                 self.set_scroll_top((line_index as i32).saturating_mul(24));
                 return Ok(());
             }
@@ -445,7 +449,14 @@ impl EditorDocument {
         &mut self,
         markdown: impl Into<String>,
     ) -> Result<EditorUpdate, EditorError> {
-        self.dispatch(EditorAction::PasteMarkdown(markdown.into()))
+        let markdown = markdown.into();
+        match self.dispatch(EditorAction::PasteMarkdown(markdown.clone())) {
+            Err(EditorError::Edit(EditError::CrossNodeSelection)) => {
+                self.dispatch(EditorAction::InsertText(String::new()))?;
+                self.dispatch(EditorAction::PasteMarkdown(markdown))
+            }
+            result => result,
+        }
     }
 
     pub fn selected_markdown(&self) -> Result<String, String> {
@@ -515,7 +526,12 @@ impl EditorDocument {
 
     pub fn set_selection(&mut self, selection: Selection) -> Result<EditorUpdate, EditorError> {
         let revision = self.session.revision();
-        self.session.set_selection(revision, selection)
+        let update = self.session.set_selection(revision, selection)?;
+        // A pointer selection is also an editor focus transition. Keeping the
+        // target here lets the Freya paragraph render its caret immediately,
+        // before the next keyboard event arrives.
+        self.focus_target = Some(update.selection.focus.node);
+        Ok(update)
     }
 
     pub fn move_caret_to_end_of_block(
@@ -703,6 +719,13 @@ impl EditorDocument {
     /// Dirty editor state is never discarded by this path; the shell reports
     /// that conflict to the user instead of silently overwriting their edit.
     pub fn reload_external(&mut self, markdown: &str) -> Result<(), EditorError> {
+        // The vault watcher also observes the app's own autosave write. Tauri
+        // keeps the live Muya instance in place for that path; reloading here
+        // would reset the caret, selection, composition and history after
+        // every successful save.
+        if self.serialize() == markdown || self.saved_markdown == markdown {
+            return Ok(());
+        }
         if self.dirty {
             return Err(EditorError::ExternalConflict);
         }
@@ -889,27 +912,111 @@ fn first_text_node(
         .find_map(|child| first_text_node(document, *child))
 }
 
+#[derive(Clone, Debug)]
+struct InlineSelection {
+    nodes: Vec<(muya_core::NodeId, String)>,
+    start_utf16: u32,
+    end_utf16: u32,
+}
+
+fn editable_inline_nodes(
+    document: &muya_core::Document,
+    root: muya_core::NodeId,
+    output: &mut Vec<(muya_core::NodeId, String)>,
+) {
+    let children = document
+        .node(root)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    for child in children {
+        if let Some(value) = text_value(document, child) {
+            output.push((child, value.to_owned()));
+        }
+        editable_inline_nodes(document, child, output);
+    }
+}
+
+fn containing_block(
+    document: &muya_core::Document,
+    node_id: muya_core::NodeId,
+) -> Option<muya_core::NodeId> {
+    let mut current = node_id;
+    loop {
+        let node = document.node(current)?;
+        if matches!(node.kind, NodeKind::Block(_)) {
+            return Some(current);
+        }
+        current = node.parent?;
+    }
+}
+
+fn inline_offset(
+    nodes: &[(muya_core::NodeId, String)],
+    point: SelectionPoint,
+) -> Result<u32, String> {
+    let mut cursor = 0_u32;
+    for (node_id, value) in nodes {
+        let length = value.encode_utf16().count() as u32;
+        if *node_id == point.node {
+            utf16_slice(value, 0, point.offset_utf16)
+                .map_err(|error| format!("invalid selection endpoint: {error}"))?;
+            return Ok(cursor + point.offset_utf16);
+        }
+        cursor += length;
+    }
+    Err("selection endpoint is not an editable inline node".to_string())
+}
+
+fn inline_selection(
+    document: &muya_core::Document,
+    selection: Selection,
+) -> Result<InlineSelection, String> {
+    let anchor_block = containing_block(document, selection.anchor.node)
+        .ok_or_else(|| "selection anchor has no Muya block".to_string())?;
+    let focus_block = containing_block(document, selection.focus.node)
+        .ok_or_else(|| "selection focus has no Muya block".to_string())?;
+    if anchor_block != focus_block {
+        return Err("selection spans multiple Muya blocks".to_string());
+    }
+
+    let mut nodes = Vec::new();
+    editable_inline_nodes(document, anchor_block, &mut nodes);
+    let anchor = inline_offset(&nodes, selection.anchor)?;
+    let focus = inline_offset(&nodes, selection.focus)?;
+    Ok(InlineSelection {
+        nodes,
+        start_utf16: anchor.min(focus),
+        end_utf16: anchor.max(focus),
+    })
+}
+
+fn selected_inline_text_from_range(selection: &InlineSelection) -> Result<String, String> {
+    let mut cursor = 0_u32;
+    let mut text = String::new();
+    for (_, value) in &selection.nodes {
+        let length = value.encode_utf16().count() as u32;
+        let start = selection.start_utf16.saturating_sub(cursor).min(length);
+        let end = selection.end_utf16.saturating_sub(cursor).min(length);
+        if start < end {
+            text.push_str(&utf16_slice(value, start, end)?);
+        }
+        cursor += length;
+        if cursor >= selection.end_utf16 {
+            break;
+        }
+    }
+    Ok(text)
+}
+
 fn selected_inline_text(
     document: &muya_core::Document,
     selection: Selection,
 ) -> Result<String, String> {
-    if selection.anchor.node != selection.focus.node {
-        return Err("selection spans multiple Muya inline nodes".to_string());
-    }
-    let value = text_value(document, selection.anchor.node)
-        .ok_or_else(|| "selection is not editable text".to_string())?;
-    let start = selection
-        .anchor
-        .offset_utf16
-        .min(selection.focus.offset_utf16);
-    let end = selection
-        .anchor
-        .offset_utf16
-        .max(selection.focus.offset_utf16);
-    if start == end {
+    let selected = inline_selection(document, selection)?;
+    if selected.start_utf16 == selected.end_utf16 {
         return Err("formatting requires a non-empty selection".to_string());
     }
-    utf16_slice(value, start, end)
+    selected_inline_text_from_range(&selected)
 }
 
 fn last_text_endpoint(
@@ -971,31 +1078,46 @@ fn selected_inline_markdown(
     document: &muya_core::Document,
     selection: Selection,
 ) -> Result<String, String> {
-    if selection.anchor.node != selection.focus.node {
-        return Err("copy selection spans multiple Muya text nodes".to_string());
-    }
-    let node = document
-        .node(selection.anchor.node)
-        .ok_or_else(|| "copy selection has no Muya text node".to_string())?;
-    let value = text_value(document, selection.anchor.node)
-        .ok_or_else(|| "copy selection is not text".to_string())?;
-    let start = selection
-        .anchor
-        .offset_utf16
-        .min(selection.focus.offset_utf16);
-    let end = selection
-        .anchor
-        .offset_utf16
-        .max(selection.focus.offset_utf16);
-    if start == end {
+    let selected = inline_selection(document, selection)?;
+    if selected.start_utf16 == selected.end_utf16 {
         return Err("copy requires a non-empty selection".to_string());
     }
-    let text = utf16_slice(value, start, end)?;
-    if matches!(node.kind, NodeKind::Inline(InlineKind::CodeSpan { .. })) {
-        return Ok(inline_code_markdown(&text));
+
+    let mut markdown = String::new();
+    let mut cursor = 0_u32;
+    for (node_id, value) in &selected.nodes {
+        let length = value.encode_utf16().count() as u32;
+        let start = selected.start_utf16.saturating_sub(cursor).min(length);
+        let end = selected.end_utf16.saturating_sub(cursor).min(length);
+        if start < end {
+            let text = utf16_slice(value, start, end)?;
+            if matches!(
+                document.node(*node_id).map(|node| &node.kind),
+                Some(NodeKind::Inline(InlineKind::CodeSpan { .. }))
+            ) {
+                markdown.push_str(&inline_code_markdown(&text));
+            } else {
+                markdown.push_str(&wrapped_inline_markdown(document, *node_id, &text)?);
+            }
+        }
+        cursor += length;
+        if cursor >= selected.end_utf16 {
+            break;
+        }
     }
+    Ok(markdown)
+}
+
+fn wrapped_inline_markdown(
+    document: &muya_core::Document,
+    node_id: muya_core::NodeId,
+    text: &str,
+) -> Result<String, String> {
     let mut wrappers = Vec::new();
-    let mut parent = node.parent;
+    let mut parent = document
+        .node(node_id)
+        .ok_or_else(|| "copy selection has no Muya text node".to_string())?
+        .parent;
     while let Some(parent_id) = parent {
         let parent_node = document
             .node(parent_id)
@@ -1021,11 +1143,12 @@ fn selected_inline_markdown(
         }
         parent = parent_node.parent;
     }
+
     let mut markdown = String::new();
     for (open, _) in wrappers.iter().rev() {
         markdown.push_str(open);
     }
-    markdown.push_str(&text);
+    markdown.push_str(text);
     for (_, close) in &wrappers {
         markdown.push_str(close);
     }
@@ -1232,6 +1355,71 @@ mod tests {
     }
 
     #[test]
+    fn multi_inline_selection_supports_copy_and_toolbar_replacements() {
+        fn editable_nodes(
+            document: &muya_core::Document,
+            root: muya_core::NodeId,
+            output: &mut Vec<(muya_core::NodeId, u32)>,
+        ) {
+            for node in document.children(root) {
+                if let Some(value) = text_value(document, node.id) {
+                    output.push((node.id, value.encode_utf16().count() as u32));
+                }
+                editable_nodes(document, node.id, output);
+            }
+        }
+
+        fn select_across_inline_nodes(document: &mut EditorDocument) {
+            let paragraph = document
+                .session()
+                .document()
+                .children(document.session().document().root)
+                .next()
+                .expect("fixture paragraph");
+            let mut nodes = Vec::new();
+            editable_nodes(document.session().document(), paragraph.id, &mut nodes);
+            let (first, _) = nodes.first().copied().expect("first editable inline");
+            let (last, end) = nodes.last().copied().expect("last editable inline");
+            assert_ne!(first, last, "fixture must create a multi-node selection");
+            document
+                .set_selection(Selection {
+                    anchor: SelectionPoint {
+                        node: first,
+                        offset_utf16: 0,
+                    },
+                    focus: SelectionPoint {
+                        node: last,
+                        offset_utf16: end,
+                    },
+                })
+                .expect("select across inline nodes");
+        }
+
+        let mut copy = EditorDocument::from_markdown("alpha **bold** omega");
+        select_across_inline_nodes(&mut copy);
+        assert_eq!(
+            copy.selected_text().expect("copy plain text selection"),
+            "alpha bold omega"
+        );
+        assert_eq!(
+            copy.selected_markdown().expect("copy Markdown selection"),
+            "alpha **bold** omega"
+        );
+
+        let mut link = EditorDocument::from_markdown("alpha **bold** omega");
+        select_across_inline_nodes(&mut link);
+        link.link_selection("https://example.com")
+            .expect("link selection across inline nodes");
+        assert_eq!(link.serialize(), "[alpha bold omega](https://example.com)");
+
+        let mut code = EditorDocument::from_markdown("alpha **bold** omega");
+        select_across_inline_nodes(&mut code);
+        code.apply_inline_code()
+            .expect("inline code selection across inline nodes");
+        assert_eq!(code.serialize(), "`alpha bold omega`");
+    }
+
+    #[test]
     fn inline_code_chooses_a_safe_backtick_delimiter() {
         assert_eq!(inline_code_markdown("alpha"), "`alpha`");
         assert_eq!(inline_code_markdown("a`b"), "``a`b``");
@@ -1339,6 +1527,33 @@ mod tests {
     }
 
     #[test]
+    fn set_selection_marks_the_focused_node_for_immediate_caret_rendering() {
+        let mut document = EditorDocument::from_markdown("alpha");
+        let paragraph = document
+            .session()
+            .document()
+            .children(document.session().document().root)
+            .next()
+            .expect("fixture paragraph");
+        let text_node = document
+            .session()
+            .document()
+            .children(paragraph.id)
+            .next()
+            .expect("fixture inline")
+            .id;
+
+        document
+            .set_selection(Selection::collapsed(SelectionPoint {
+                node: text_node,
+                offset_utf16: 2,
+            }))
+            .expect("pointer selection must succeed");
+
+        assert_eq!(document.focus_target(), Some(text_node));
+    }
+
+    #[test]
     fn rename_title_updates_frontmatter_and_displayed_heading_only() {
         let markdown = "---\ntitle: Old\ntags: [rust]\n---\n# Old\n\nKeep this body.";
         let renamed = rename_markdown_title(markdown, "New title");
@@ -1386,6 +1601,50 @@ mod tests {
             .expect("clean document may reload from disk");
         assert_eq!(document.serialize(), "# After");
         assert!(!document.is_dirty());
+    }
+
+    #[test]
+    fn external_reload_ignores_the_editor_own_saved_markdown() {
+        let mut document = EditorDocument::from_markdown("alpha");
+        let paragraph = document
+            .session()
+            .document()
+            .children(document.session().document().root)
+            .next()
+            .expect("fixture paragraph");
+        let text_node = document
+            .session()
+            .document()
+            .children(paragraph.id)
+            .next()
+            .expect("fixture inline")
+            .id;
+        document
+            .set_selection(Selection::collapsed(SelectionPoint {
+                node: text_node,
+                offset_utf16: 2,
+            }))
+            .expect("selection must succeed");
+        let revision = document.session().revision();
+
+        document
+            .reload_external("alpha")
+            .expect("the app's own save must not reload the live editor");
+
+        assert_eq!(document.session().revision(), revision);
+        assert_eq!(document.focus_target(), Some(text_node));
+    }
+
+    #[test]
+    fn external_reload_ignores_the_previous_save_while_new_edits_are_dirty() {
+        let mut document = EditorDocument::from_markdown("alpha");
+        document.dispatch_text(" local").expect("local edit");
+        document
+            .reload_external("alpha")
+            .expect("the last known save is not an external conflict");
+
+        assert_eq!(document.serialize(), " localalpha");
+        assert!(document.is_dirty());
     }
 
     #[test]

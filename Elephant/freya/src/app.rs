@@ -49,6 +49,7 @@ use shell_history::NavigationTarget;
 pub(super) struct ShellState {
     view: WorkspaceView,
     sidebar_visible: bool,
+    mobile_navigation_open: bool,
     sidebar_width: SidebarWidth,
     vault: Option<VaultAdapter>,
     vault_registry: VaultRegistry,
@@ -87,6 +88,7 @@ impl ShellState {
         Self {
             view: WorkspaceView::Notes,
             sidebar_visible: true,
+            mobile_navigation_open: false,
             sidebar_width: SidebarWidth::default(),
             vault: None,
             vault_registry: VaultRegistry::default(),
@@ -181,6 +183,22 @@ impl ShellState {
         // Keep the registry available even when the selected path disappeared.
         // The recovery picker needs the other registered vaults to remain
         // actionable instead of forcing the user to locate them again.
+        loaded.vault_registry = registry;
+        loaded
+    }
+
+    fn load_root_without_persisted_registry(root: PathBuf) -> Self {
+        let mut loaded = shell_runtime::load_from_root(root);
+        let mut registry = VaultRegistry::default();
+        if let Some(canonical_root) = loaded
+            .vault
+            .as_ref()
+            .map(|vault| vault.root().to_path_buf())
+        {
+            if let Err(error) = registry.add_or_activate(&canonical_root) {
+                loaded.error = Some(format!("Unable to register the active vault: {error}"));
+            }
+        }
         loaded.vault_registry = registry;
         loaded
     }
@@ -528,6 +546,10 @@ impl ShellState {
     fn set_card_action_target(&mut self, target: impl Into<String>) {
         self.card_action_target = Some(target.into());
     }
+
+    pub(super) fn clear_card_action_target(&mut self) {
+        self.card_action_target = None;
+    }
 }
 
 pub(super) fn choose_vault(mut state: State<ShellState>) {
@@ -550,7 +572,7 @@ pub fn app() -> impl IntoElement {
 /// adapter while injecting a clean fixture root.
 pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
     let root = root.into();
-    let state = use_state(move || ShellState::load_root_with_registry(root.clone()));
+    let state = use_state(move || ShellState::load_root_without_persisted_registry(root.clone()));
     app_shell(state)
 }
 
@@ -563,7 +585,7 @@ pub fn app_with_vault(root: impl Into<PathBuf>) -> impl IntoElement {
 pub fn app_with_vault_view(root: impl Into<PathBuf>, view: WorkspaceView) -> impl IntoElement {
     let root = root.into();
     let state = use_state(move || {
-        let mut state = ShellState::load_root_with_registry(root.clone());
+        let mut state = ShellState::load_root_without_persisted_registry(root.clone());
         state.view = view.clone();
         state
     });
@@ -593,6 +615,8 @@ fn app_shell(mut state: State<ShellState>) -> Element {
     let mut settings_state = use_state(settings::SettingsViewState::default);
     let settings_effects = settings_state.read().effects();
     let palette = settings_effects.palette();
+    let viewport = Platform::get().root_size.read();
+    let mobile = viewport.width < 760.;
     let mut explorer_state = use_state(explorer::ExplorerState::new);
     let explorer_query = use_state(String::new);
     let explorer_graph_query = use_state(String::new);
@@ -605,6 +629,7 @@ fn app_shell(mut state: State<ShellState>) -> Element {
         explorer_state.write().surface = explorer::ExplorerSurface::Graph;
     }
     let search_open = snapshot.search_open;
+    let drawing_fullscreen = snapshot.drawing.is_some();
     let overlay_transition = visual_transition::use_search_overlay_transition(search_open);
     if snapshot.vault.is_none() {
         return empty_vault_picker(state);
@@ -626,9 +651,7 @@ fn app_shell(mut state: State<ShellState>) -> Element {
     // Tauri mounts SearchModal as a sibling of MainContent. Opening search must
     // therefore never replace the current workspace; it only overlays it.
     // This also keeps the exact pre-search library/graph state intact for close.
-    let content = if snapshot.settings_open {
-        settings::settings_panel(settings_state, state)
-    } else if snapshot.view == WorkspaceView::Canvas {
+    let content = if snapshot.view == WorkspaceView::Canvas {
         canvas_view::workspace(state, explorer_state, graph_canvas_state, palette)
     } else if snapshot.view == WorkspaceView::Graph {
         explorer::explorer_view(
@@ -637,9 +660,51 @@ fn app_shell(mut state: State<ShellState>) -> Element {
             explorer_graph_query,
             graph_canvas_state,
             false,
+            palette,
         )
     } else {
         library::main_content(state, wiki_view_state, palette)
+    };
+    let mut mobile_navigation_state = state;
+    let mobile_navigation = snapshot.mobile_navigation_open.then(|| {
+        rect()
+            .position(Position::new_global().left(0.).top(52.))
+            .width(Size::px(300.))
+            .height(Size::fill())
+            .background(theme::token_color(palette, theme::ThemeToken::Sidebar))
+            .layer(Layer::OverlayLevel(40))
+            .child(SidebarNavHost { state, palette }.into_element())
+            .on_global_pointer_press(move |_| {
+                mobile_navigation_state.write().mobile_navigation_open = false;
+            })
+    });
+    let workspace = if mobile || drawing_fullscreen {
+        rect()
+            .expanded()
+            .child(content)
+            .into_element()
+    } else {
+        rect()
+            .expanded()
+            .horizontal()
+            .child(navigation::icon_rail(state, palette, &settings_effects))
+            .child(
+                rect()
+                    .width(Size::px(if snapshot.sidebar_visible {
+                        f32::from(snapshot.sidebar_width.get())
+                    } else {
+                        0.
+                    }))
+                    .height(Size::fill())
+                    .child(SidebarNavHost { state, palette }.into_element()),
+            )
+            .child(
+                rect()
+                    .expanded()
+                    .height(Size::fill())
+                    .child(content),
+            )
+            .into_element()
     };
     let shell = rect()
         .width(Size::fill())
@@ -647,7 +712,13 @@ fn app_shell(mut state: State<ShellState>) -> Element {
         .font_family(theme::UI_FONT_FAMILY)
         .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .color(theme::token_color(palette, theme::ThemeToken::Text))
-        .child(navigation::top_vault_bar(state, palette))
+        .maybe_child((!drawing_fullscreen).then(|| {
+            if mobile {
+                navigation::mobile_top_bar(state, palette)
+            } else {
+                navigation::top_vault_bar(state, palette)
+            }
+        }))
         .maybe_child(overlay_transition.mounted.then(|| {
             explorer::search_overlay(
                 state,
@@ -656,32 +727,20 @@ fn app_shell(mut state: State<ShellState>) -> Element {
                 overlay_transition.interactive,
                 overlay_transition.backdrop_opacity,
                 overlay_transition.content_opacity,
+                palette,
             )
         }))
-        .child(
-            rect()
-                .width(Size::fill())
-                .height(Size::fill())
-                .horizontal()
-                .child(navigation::icon_rail(state, palette, &settings_effects))
-                .child(
-                    rect()
-                        .width(Size::px(if snapshot.sidebar_visible {
-                            f32::from(snapshot.sidebar_width.get())
-                        } else {
-                            0.
-                        }))
-                        .height(Size::fill())
-                        .child(SidebarNavHost { state, palette }.into_element()),
-                )
-                .child(content),
-        )
+        .child(workspace)
+        .maybe_child(snapshot.settings_open.then(|| {
+            settings::settings_panel(settings_state, state)
+        }))
+        .maybe_child(mobile_navigation)
         .child(vault_watch::VaultWatcherHost { state }.into_element())
         .a11y_alt(contract.provenance.component.source_name());
 
     if snapshot.menu_open {
         shell
-            .child(library::create_entry_menu(state))
+            .child(library::create_entry_menu(state, palette))
             .into_element()
     } else {
         shell.into_element()

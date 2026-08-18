@@ -31,6 +31,7 @@ fn render_element(
         "ellipse" => output.push(shape_rect(
             element, index, label, x, y, width, height, viewport, stroke, fill, true,
         )),
+        "diamond" => render_diamond(output, element, index, viewport, stroke, fill, &label),
         "line" | "arrow" => render_polyline(output, element, index, viewport, stroke, &label),
         "freedraw" => render_polyline(output, element, index, viewport, stroke, &label),
         "text" => output.push(text_element(element, index, viewport, stroke, &label)),
@@ -54,7 +55,7 @@ fn shape_rect(
     fill: Color,
     ellipse: bool,
 ) -> Element {
-    let radius = if ellipse { width.max(height) } else { 0. };
+    let radius = if ellipse { (width.min(height) / 2.).max(2.) * viewport.zoom } else { 0. };
     rect()
         .key(("drawing-element", index))
         .position(absolute(viewport, x, y))
@@ -69,6 +70,47 @@ fn shape_rect(
         .with_corner_radius(radius)
         .a11y_alt(label)
         .into_element()
+}
+
+fn render_diamond(
+    output: &mut Vec<Element>,
+    element: &DrawingElement,
+    index: usize,
+    viewport: Viewport,
+    stroke: Color,
+    _fill: Color,
+    label: &str,
+) {
+    let (x, y, width, height) = element.bounds();
+    let cx = width / 2.;
+    let cy = height / 2.;
+    let pts = [
+        [x + cx, y],
+        [x + width, y + cy],
+        [x + cx, y + height],
+        [x, y + cy],
+        [x + cx, y],
+    ];
+    for (seg_idx, seg) in pts.windows(2).enumerate() {
+        let start = seg[0];
+        let end = seg[1];
+        let dx = end[0] - start[0];
+        let dy = end[1] - start[1];
+        let length = (dx * dx + dy * dy).sqrt().max(1.);
+        let angle = dy.atan2(dx).to_degrees();
+        output.push(
+            rect()
+                .key(("drawing-diamond-seg", index, seg_idx))
+                .position(absolute(viewport, start[0], start[1]))
+                .width(Size::px(length * viewport.zoom))
+                .height(Size::px(element.stroke_width.max(1.) * viewport.zoom))
+                .background(stroke)
+                .with_corner_radius(element.stroke_width.max(1.) * viewport.zoom / 2.)
+                .rotation(angle)
+                .a11y_alt(format!("{label} diamond segment {seg_idx}"))
+                .into_element(),
+        );
+    }
 }
 
 fn render_polyline(

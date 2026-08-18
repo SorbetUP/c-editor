@@ -36,6 +36,7 @@ const LIBRARY_DRAG_THRESHOLD: f64 = 4.;
 const CARD_OPEN_DELAY: Duration = Duration::from_millis(220);
 const GRID_GAP: f32 = 10.;
 const GRID_MIN_CARD_WIDTH: f32 = 240.;
+const GRID_MAX_CARD_WIDTH: f32 = 290.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct LibraryCardDrag {
@@ -129,14 +130,14 @@ pub(super) fn main_content(
     let body = if snapshot.drawing.is_some() {
         drawing::drawing_view(state)
     } else if snapshot.editor.is_some() {
-        editor_view::note_editor_host(state)
+        editor_view::note_editor_host(state, palette)
     } else if snapshot.view == WorkspaceView::Notes {
         rect()
             .width(Size::fill())
             .height(Size::fill())
-            .child(library_toolbar(state))
-            .child(LibraryGrid { state })
-            .child(library_create_button(state))
+            .child(library_toolbar(state, palette))
+            .child(LibraryGrid { state, palette })
+            .child(library_create_button(state, palette))
             .into_element()
     } else if snapshot.view == WorkspaceView::Wiki {
         wiki_view::wiki_workspace(state, wiki_view_state, palette)
@@ -159,26 +160,31 @@ pub(super) fn main_content(
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .background(theme::color(theme::BG))
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
         .padding(if showing_library {
             Gaps::new_all(0.)
         } else {
             Gaps::new(8., 12., 12., 12.)
         })
-        .maybe_child(snapshot.error.as_deref().map(library_error_notice))
+        .maybe_child(
+            snapshot
+                .error
+                .as_deref()
+                .map(|error| library_error_notice(error, palette)),
+        )
         .child(body)
         .into_element()
 }
 
-fn library_error_notice(error: &str) -> Element {
+fn library_error_notice(error: &str, palette: theme::ThemePalette) -> Element {
     let accessibility_label = drawing::error_accessibility_label(error);
     rect()
         .position(Position::new_absolute().left(12.).right(12.).top(80.))
         .padding(Gaps::new_all(10.))
-        .background(theme::color(theme::SURFACE))
+        .background(theme::color(palette.surface))
         .border(
             Border::new()
-                .fill(theme::color(theme::BORDER_STRONG))
+                .fill(theme::color(palette.border_strong))
                 .width(1.),
         )
         .with_corner_radius(8.)
@@ -186,13 +192,13 @@ fn library_error_notice(error: &str) -> Element {
         .a11y_alt(accessibility_label)
         .child(
             label()
-                .color(theme::color(theme::DANGER))
+                .color(theme::color(palette.danger))
                 .text(error.to_owned()),
         )
         .into_element()
 }
 
-fn library_toolbar(state: State<ShellState>) -> Element {
+fn library_toolbar(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
     let snapshot = state.read().clone();
     let sort_hovered = snapshot.hovered_target.as_deref() == Some("toolbar:sort");
     let mut sort_state = state;
@@ -203,11 +209,15 @@ fn library_toolbar(state: State<ShellState>) -> Element {
         .height(Size::px(52.))
         .center()
         .background(theme::color(if sort_hovered {
-            theme::SOFT
+            palette.soft
         } else {
-            theme::mix(theme::SURFACE, theme::BG, 0.52)
+            theme::mix(palette.surface, palette.bg, 0.52)
         }))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(12.)
         .on_mouse_up(move |_| sort_state.write().library.cycle_sort())
         .on_pointer_enter(move |_| sort_enter_state.write().set_hovered_target("toolbar:sort"))
@@ -219,7 +229,7 @@ fn library_toolbar(state: State<ShellState>) -> Element {
         .a11y_alt(format!("Sort: {}", sort_label(snapshot.library.sort)))
         .child(svg_icon(
             sort_icon(snapshot.library.sort),
-            theme::color(theme::TEXT),
+            theme::token_color(palette, theme::ThemeToken::Text),
             22.,
         ));
 
@@ -237,11 +247,15 @@ fn library_toolbar(state: State<ShellState>) -> Element {
         .height(Size::px(52.))
         .center()
         .background(theme::color(if view_hovered {
-            theme::SOFT
+            palette.soft
         } else {
-            theme::mix(theme::SURFACE, theme::BG, 0.52)
+            theme::mix(palette.surface, palette.bg, 0.52)
         }))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .with_corner_radius(12.)
         .on_mouse_up(move |_| view_state.write().library.cycle_view())
         .on_pointer_enter(move |_| view_enter_state.write().set_hovered_target("toolbar:view"))
@@ -257,7 +271,7 @@ fn library_toolbar(state: State<ShellState>) -> Element {
             } else {
                 LibraryIcon::Grid3x3
             },
-            theme::color(theme::TEXT),
+            theme::token_color(palette, theme::ThemeToken::Text),
             22.,
         ));
 
@@ -266,6 +280,7 @@ fn library_toolbar(state: State<ShellState>) -> Element {
         .width(Size::fill())
         .height(Size::px(72.))
         .padding(Gaps::new(10., 12., 10., 12.))
+        .layer(Layer::OverlayLevel(10))
         .horizontal()
         .child(
             rect()
@@ -278,7 +293,10 @@ fn library_toolbar(state: State<ShellState>) -> Element {
         .into_element()
 }
 
-fn library_create_button(state: State<ShellState>) -> Element {
+fn library_create_button(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    let viewport = Platform::get().root_size.read();
+    let mobile = viewport.width < 760.;
+    let button_size = if mobile { 64. } else { 56. };
     let snapshot = state.read().clone();
     let hovered = snapshot.hovered_target.as_deref() == Some("toolbar:create");
     let mut click_state = state;
@@ -287,21 +305,17 @@ fn library_create_button(state: State<ShellState>) -> Element {
 
     rect()
         .position(Position::new_absolute().right(20.).bottom(20.))
-        .width(Size::px(56.))
-        .height(Size::px(56.))
+        .width(Size::px(button_size))
+        .height(Size::px(button_size))
         .center()
         .background(theme::color(if hovered {
-            theme::mix(theme::PRIMARY, (0, 0, 0, 255), 0.88)
+            theme::mix(palette.primary, palette.bg, 0.88)
         } else {
-            theme::PRIMARY
+            palette.primary
         }))
         .border(
             Border::new()
-                .fill(theme::color(theme::mix(
-                    theme::PRIMARY,
-                    theme::BORDER,
-                    0.64,
-                )))
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
                 .width(1.),
         )
         .with_corner_radius(11.)
@@ -315,7 +329,7 @@ fn library_create_button(state: State<ShellState>) -> Element {
         .a11y_alt("Create")
         .child(svg_icon(
             LibraryIcon::Plus,
-            theme::color((255, 255, 255, 255)),
+            theme::token_color(palette, theme::ThemeToken::Text),
             27.,
         ))
         .into_element()
@@ -357,6 +371,7 @@ fn run_create_action(mut state: State<ShellState>, action: crate::library_contra
 #[derive(PartialEq)]
 struct CreateMenuItem {
     state: State<ShellState>,
+    palette: theme::ThemePalette,
     action: crate::library_contract::CreateAction,
     icon: LibraryIcon,
     title: &'static str,
@@ -368,6 +383,7 @@ impl Component for CreateMenuItem {
         let area = use_state(|| Option::<Area>::None);
         let mut area_state = area;
         let action_state = self.state;
+        let palette = self.palette;
         let action = self.action;
         let hover_key = format!("create-menu:{}", self.title);
         let hovered = self.state.read().hovered_target.as_deref() == Some(hover_key.as_str());
@@ -382,11 +398,14 @@ impl Component for CreateMenuItem {
             .horizontal()
             .spacing(12.)
             .with_corner_radius(10.)
-            .background(theme::color(if hovered {
-                theme::SOFT
-            } else {
-                theme::SURFACE
-            }))
+            .background(theme::token_color(
+                palette,
+                if hovered {
+                    theme::ThemeToken::Soft
+                } else {
+                    theme::ThemeToken::Surface
+                },
+            ))
             .layer(Layer::OverlayLevel(22))
             .on_sized(move |event: Event<SizedEventData>| area_state.set(Some(event.area)))
             // Keep both paths: direct mouse-up handles the icon/root hit
@@ -430,7 +449,11 @@ impl Component for CreateMenuItem {
                 }
             })
             .a11y_alt(self.title)
-            .child(svg_icon(self.icon, theme::color(theme::PRIMARY), 20.))
+            .child(svg_icon(
+                self.icon,
+                theme::token_color(palette, theme::ThemeToken::Primary),
+                20.,
+            ))
             .child(
                 rect()
                     .spacing(2.)
@@ -443,7 +466,7 @@ impl Component for CreateMenuItem {
                     .child(
                         label()
                             .font_size(12.)
-                            .color(theme::color(theme::MUTED))
+                            .color(theme::token_color(palette, theme::ThemeToken::Muted))
                             .text(self.description),
                     ),
             )
@@ -451,10 +474,13 @@ impl Component for CreateMenuItem {
     }
 }
 
-pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
+pub(super) fn create_entry_menu(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    let viewport = Platform::get().root_size.read();
+    let menu_bottom = if viewport.width < 760. { 94. } else { 86. };
     let item = |action, icon, title, description| {
         CreateMenuItem {
             state,
+            palette,
             action,
             icon,
             title,
@@ -478,13 +504,13 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
         .on_mouse_up(move |_| close_state.write().menu_open = false);
 
     let popover = rect()
-        .position(Position::new_global().right(20.).bottom(86.))
+        .position(Position::new_global().right(20.).bottom(menu_bottom))
         .width(Size::px(280.))
         .padding(Gaps::new_all(8.))
-        .background(theme::color(theme::SURFACE))
+        .background(theme::token_color(palette, theme::ThemeToken::Surface))
         .border(
             Border::new()
-                .fill(theme::color(theme::BORDER_STRONG))
+                .fill(theme::token_color(palette, theme::ThemeToken::BorderStrong))
                 .width(1.),
         )
         .with_corner_radius(14.)
@@ -495,7 +521,7 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
                 .padding(Gaps::new(8., 10., 6., 10.))
                 .font_size(12.)
                 .font_weight(FontWeight::BOLD)
-                .color(theme::color(theme::MUTED))
+                .color(theme::token_color(palette, theme::ThemeToken::Muted))
                 .text("CREATE"),
         )
         .child(item(
@@ -541,20 +567,22 @@ pub(super) fn create_entry_menu(state: State<ShellState>) -> Element {
 #[derive(PartialEq)]
 struct LibraryGrid {
     state: State<ShellState>,
+    palette: theme::ThemePalette,
 }
 
 impl Component for LibraryGrid {
     fn render(&self) -> impl IntoElement {
-        library_grid(self.state)
+        library_grid(self.state, self.palette)
     }
 }
 
-fn library_grid(state: State<ShellState>) -> Element {
+fn library_grid(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
     let scroll_position = use_state(|| (0_i32, 0_i32));
     let scroll_notifier = use_state(|| ());
     let scroll_requests = use_state(Vec::<ScrollRequest>::new);
     let viewport_height = use_state(|| 0_f32);
     let content_height = use_state(|| 0_f32);
+    let grid_width = use_state(|| 0_f32);
     let on_scroll = use_state(|| {
         let mut position_state = scroll_position;
         let mut notifier = scroll_notifier;
@@ -615,6 +643,7 @@ fn library_grid(state: State<ShellState>) -> Element {
     }
 
     let count = visible.len();
+    let measured_grid_width = *grid_width.read();
     let entries = visible
         .into_iter()
         .enumerate()
@@ -624,6 +653,8 @@ fn library_grid(state: State<ShellState>) -> Element {
                 mode: snapshot.library.view_mode,
                 featured: snapshot.library.view_mode == ViewMode::Grid && index == 0 && count > 3,
                 state,
+                palette,
+                grid_width: measured_grid_width,
             }
             .into_element()
         })
@@ -644,11 +675,25 @@ fn library_grid(state: State<ShellState>) -> Element {
     let mut drag_action_state = state;
     let mut viewport_height_state = viewport_height;
     let mut content_height_state = content_height;
+    let mut grid_width_state = grid_width;
+    let menu_backdrop = snapshot.card_action_target.is_some().then(|| {
+        let mut dismiss_state = state;
+        rect()
+            .position(Position::new_global().left(0.).right(0.).top(0.).bottom(0.))
+            .width(Size::fill())
+            .height(Size::fill())
+            .layer(Layer::OverlayLevel(24))
+            .on_mouse_up(move |event: Event<MouseEventData>| {
+                event.stop_propagation();
+                dismiss_state.write().clear_card_action_target();
+            })
+    });
     rect()
         .width(Size::fill())
         .height(Size::fill())
         .on_sized(move |event: Event<SizedEventData>| {
             viewport_height_state.set_if_modified(event.area.height());
+            grid_width_state.set_if_modified(event.area.width());
         })
         .on_global_pointer_move(move |event: Event<PointerEventData>| {
             if event.is_primary() {
@@ -663,6 +708,7 @@ fn library_grid(state: State<ShellState>) -> Element {
             if !event.is_primary() {
                 return;
             }
+            drag_release_state.write().clear_card_action_target();
             let moved = {
                 let mut drag = drag_release_state.write();
                 drag.library_drag.finish()
@@ -685,6 +731,7 @@ fn library_grid(state: State<ShellState>) -> Element {
                         .child(surface),
                 ),
         )
+        .maybe_child(menu_backdrop)
         .into_element()
 }
 
@@ -696,12 +743,23 @@ fn grid_card_width_for_parent(available: f32) -> f32 {
 
     let columns = ((available + GRID_GAP) / (GRID_MIN_CARD_WIDTH + GRID_GAP))
         .floor()
-        .max(1.);
+        .clamp(1., 3.);
     ((available - GRID_GAP * (columns - 1.)) / columns).max(0.)
 }
 
 fn grid_card_width() -> Size {
     Size::func(|context| Some(grid_card_width_for_parent(context.available_parent)))
+}
+
+fn runtime_grid_card_width() -> f32 {
+    let viewport = Platform::get().root_size.read();
+    if viewport.width < 760. {
+        (viewport.width - 24.).max(220.)
+    } else if viewport.width < 1600. {
+        290.
+    } else {
+        GRID_MAX_CARD_WIDTH
+    }
 }
 
 fn activate_library_entry(mut state: State<ShellState>, target: EntryOpenTarget) {
@@ -773,6 +831,8 @@ struct LibraryCard {
     mode: ViewMode,
     featured: bool,
     state: State<ShellState>,
+    palette: theme::ThemePalette,
+    grid_width: f32,
 }
 
 impl Component for LibraryCard {
@@ -797,6 +857,8 @@ impl Component for LibraryCard {
             self.mode,
             self.featured,
             self.state,
+            self.palette,
+            self.grid_width,
             card_menu_state,
             rename_value,
             rename_a11y_id,
@@ -810,7 +872,9 @@ fn render_library_card(
     entry: &LibraryEntry,
     mode: ViewMode,
     featured: bool,
-    state: State<ShellState>,
+    mut state: State<ShellState>,
+    palette: theme::ThemePalette,
+    grid_width: f32,
     mut card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
     rename_a11y_id: AccessibilityId,
@@ -856,7 +920,44 @@ fn render_library_card(
     let hover_move_key = hover_key.clone();
     let hover_move_area = card_area;
 
+    let is_pinned = state
+        .read()
+        .library
+        .pinned_paths
+        .iter()
+        .any(|pinned| pinned.as_str() == path.as_str());
+    let mut pin_state = state;
+    let pin_action_path = path.clone();
+    let pin_button = (is_pinned || hovered).then(|| {
+        rect()
+            .position(Position::new_absolute().top(8.).right(38.))
+            .width(Size::px(30.))
+            .height(Size::px(30.))
+            .center()
+            .a11y_alt(if is_pinned {
+                "Unpin entry"
+            } else {
+                "Pin entry"
+            })
+            .on_mouse_up(move |event: Event<MouseEventData>| {
+                event.stop_propagation();
+                pin_state
+                    .write()
+                    .toggle_pinned(RelativePath::new(&pin_action_path));
+            })
+            .child(svg_icon(
+                LibraryIcon::Pin,
+                if is_pinned {
+                    Color::from_rgb(250, 204, 21)
+                } else {
+                    theme::color(palette.muted)
+                },
+                18.,
+            ))
+    });
+
     let mut trigger_state = card_menu_state;
+    let action_target_path = path.clone();
     let menu_trigger = rect()
         .position(Position::new_absolute().top(8.).right(8.))
         .width(Size::px(30.))
@@ -872,19 +973,29 @@ fn render_library_card(
             let mut menu = trigger_state.write();
             menu.open = !menu.open;
             menu.renaming = false;
+            let mut shell = state.write();
+            if menu.open {
+                shell.set_card_action_target(action_target_path.clone());
+            } else {
+                shell.clear_card_action_target();
+            }
         })
         .child(svg_icon(
             LibraryIcon::MoreHorizontal,
-            theme::color(theme::MUTED),
+            theme::color(palette.muted),
             20.,
         ));
 
-    let card_menu = if menu_snapshot.open && !renaming {
+    let card_menu = if menu_snapshot.open
+        && !renaming
+        && state.read().card_action_target.as_deref() == Some(path.as_str())
+    {
         Some(card_action_menu(
             path.clone(),
             title.clone(),
             is_folder,
             state,
+            palette,
             card_menu_state,
             rename_value,
         ))
@@ -899,6 +1010,7 @@ fn render_library_card(
         is_folder,
         is_drawing,
         state,
+        palette,
         card_menu_state,
         rename_value,
         rename_a11y_id,
@@ -909,11 +1021,11 @@ fn render_library_card(
     let body = if mode == ViewMode::List {
         rect().height(Size::px(0.)).into_element()
     } else if is_folder {
-        folder_preview(entry)
+        folder_preview(entry, palette)
     } else if is_drawing {
-        drawing_card_body(&title, featured)
+        drawing_card_body(&title, featured, palette)
     } else {
-        note_card_body(entry)
+        note_card_body(entry, palette)
     };
 
     let mut menu_state_for_secondary = card_menu_state;
@@ -923,7 +1035,8 @@ fn render_library_card(
 
     rect()
         .width(if mode == ViewMode::Grid {
-            grid_card_width()
+            let _ = grid_width;
+            Size::px(runtime_grid_card_width())
         } else {
             Size::fill()
         })
@@ -933,15 +1046,15 @@ fn render_library_card(
         } else {
             Gaps::new(8., 10., 8., 10.)
         })
-        .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.34)))
+        .background(theme::color(theme::mix(palette.surface, palette.bg, 0.34)))
         .border(
             Border::new()
                 .fill(theme::color(if hovered {
-                    theme::BORDER_STRONG
+                    palette.border_strong
                 } else if drop_state == Some(true) {
-                    theme::PRIMARY
+                    palette.primary
                 } else {
-                    theme::BORDER
+                    palette.border
                 }))
                 .width(1.),
         )
@@ -1068,6 +1181,7 @@ fn render_library_card(
             );
         })
         .a11y_alt(title)
+        .maybe_child(pin_button)
         .child(menu_trigger)
         .maybe_child(card_menu)
         .child(title_row)
@@ -1083,6 +1197,7 @@ fn card_title_row(
     is_folder: bool,
     is_drawing: bool,
     state: State<ShellState>,
+    palette: theme::ThemePalette,
     card_menu_state: State<CardMenuState>,
     rename_value: State<String>,
     rename_a11y_id: AccessibilityId,
@@ -1133,8 +1248,8 @@ fn card_title_row(
                 rect()
                     .width(Size::fill())
                     .padding(Gaps::new(4., 6., 4., 6.))
-                    .background(theme::color(theme::SURFACE))
-                    .border(Border::new().fill(theme::color(theme::PRIMARY)).width(1.))
+                    .background(theme::color(palette.surface))
+                    .border(Border::new().fill(theme::color(palette.primary)).width(1.))
                     .with_corner_radius(7.)
                     .child(
                         Input::new(rename_value)
@@ -1195,12 +1310,12 @@ fn card_title_row(
         .width(Size::fill())
         .horizontal()
         .spacing(8.)
-        .child(svg_icon(icon, theme::color(theme::TEXT), icon_size))
+        .child(svg_icon(icon, theme::color(palette.text), icon_size))
         .child(copy)
         .into_element()
 }
 
-fn folder_preview(entry: &LibraryEntry) -> Element {
+fn folder_preview(entry: &LibraryEntry, palette: theme::ThemePalette) -> Element {
     let rows = entry
         .children_preview
         .iter()
@@ -1215,11 +1330,11 @@ fn folder_preview(entry: &LibraryEntry) -> Element {
                 .width(Size::fill())
                 .horizontal()
                 .spacing(6.)
-                .child(svg_icon(icon, theme::color(theme::MUTED), 15.))
+                .child(svg_icon(icon, theme::color(palette.muted), 15.))
                 .child(
                     label()
                         .font_size(13.)
-                        .color(theme::color(theme::MUTED))
+                        .color(theme::color(palette.muted))
                         .text(preview_title(child.title.as_str())),
                 )
                 .into_element()
@@ -1232,17 +1347,17 @@ fn folder_preview(entry: &LibraryEntry) -> Element {
             .height(Size::px(42.))
             .padding(Gaps::new(7., 8., 7., 8.))
             .center()
-            .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.55)))
+            .background(theme::color(theme::mix(palette.surface, palette.bg, 0.55)))
             .border(
                 Border::new()
-                    .fill(theme::color(theme::mix(theme::BORDER, theme::BG, 0.70)))
+                    .fill(theme::color(theme::mix(palette.border, palette.bg, 0.70)))
                     .width(1.),
             )
             .with_corner_radius(8.)
             .child(
                 label()
                     .font_size(13.)
-                    .color(theme::color(theme::MUTED))
+                    .color(theme::color(palette.muted))
                     .text("No items yet"),
             )
             .into_element()
@@ -1251,10 +1366,10 @@ fn folder_preview(entry: &LibraryEntry) -> Element {
             .width(Size::fill())
             .padding(Gaps::new(7., 8., 7., 8.))
             .spacing(4.)
-            .background(theme::color(theme::mix(theme::SURFACE, theme::BG, 0.55)))
+            .background(theme::color(theme::mix(palette.surface, palette.bg, 0.55)))
             .border(
                 Border::new()
-                    .fill(theme::color(theme::mix(theme::BORDER, theme::BG, 0.70)))
+                    .fill(theme::color(theme::mix(palette.border, palette.bg, 0.70)))
                     .width(1.),
             )
             .with_corner_radius(8.)
@@ -1269,32 +1384,32 @@ fn folder_preview(entry: &LibraryEntry) -> Element {
         .into_element()
 }
 
-fn drawing_card_body(title: &str, featured: bool) -> Element {
+fn drawing_card_body(title: &str, featured: bool, palette: theme::ThemePalette) -> Element {
     rect()
         .width(Size::fill())
         .height(Size::px(if featured { 156. } else { 112. }))
         .padding(Gaps::new(10., 0., 8., 0.))
         .center()
-        .background(theme::color((255, 255, 255, 255)))
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .background(theme::color(palette.surface))
+        .border(Border::new().fill(theme::color(palette.border)).width(1.))
         .with_corner_radius(8.)
         .a11y_alt(format!("{title} drawing"))
         .child(svg_icon(
             LibraryIcon::Excalidraw,
-            theme::color(theme::PRIMARY),
+            theme::color(palette.primary),
             42.,
         ))
         .into_element()
 }
 
-fn note_card_body(entry: &LibraryEntry) -> Element {
+fn note_card_body(entry: &LibraryEntry, palette: theme::ThemePalette) -> Element {
     let tags = entry
         .tags
         .iter()
         .map(|tag| {
             label()
                 .font_size(12.)
-                .color(theme::color(theme::MUTED))
+                .color(theme::color(palette.muted))
                 .text(format!("#{tag}"))
                 .into_element()
         })
@@ -1306,7 +1421,7 @@ fn note_card_body(entry: &LibraryEntry) -> Element {
         .spacing(8.)
         .child(
             label()
-                .color(theme::color(theme::MUTED))
+                .color(theme::color(palette.muted))
                 .text(entry.excerpt.clone()),
         )
         .maybe_child((!tags.is_empty()).then(|| {

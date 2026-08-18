@@ -5,7 +5,10 @@ use std::sync::{Arc, Mutex};
 
 use freya::prelude::*;
 
-use crate::{addon_adapter, theme, vault_adapter::VaultEntry};
+use crate::{
+    addon_adapter, navigation_contract::ICON_RAIL_SEPARATOR_PREFIX, theme,
+    vault_adapter::VaultEntry,
+};
 
 use super::{
     navigation_icons::{svg_icon, Icon},
@@ -24,6 +27,9 @@ const TREE_ROW_HORIZONTAL_PADDING: f32 = 10.;
 const TREE_TOGGLE_SIZE: f32 = 22.;
 const TAGS_HEADER_HEIGHT: f32 = 36.;
 const SIDEBAR_DRAG_THRESHOLD: f64 = 4.;
+const RAIL_SEPARATOR_WIDTH: f32 = 24.;
+const RAIL_SEPARATOR_HEIGHT: f32 = 1.;
+const RAIL_SEPARATOR_VERTICAL_SPACE: f32 = 5.;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct SidebarEntryDrag {
@@ -269,30 +275,34 @@ pub(super) fn icon_rail(
         .cross_align(Alignment::Center)
         .spacing(theme::RAIL_GAP)
         .children(
-            effects
-                .visible_rail_order(&snapshot.rail_order)
-                .iter()
-                .filter_map(|item| match item.as_str() {
-                    "sidebar-toggle" => Some((
-                        "sidebar-toggle",
-                        if snapshot.sidebar_visible {
-                            "Hide sidebar"
-                        } else {
-                            "Show sidebar"
-                        },
-                        if snapshot.sidebar_visible {
-                            Icon::PanelLeftClose
-                        } else {
-                            Icon::PanelLeftOpen
-                        },
-                    )),
-                    "search" => Some(("search", "Search", Icon::Search)),
-                    _ => None,
-                })
-                .map(|(item_id, label_text, icon)| {
-                    rail_action(item_id, label_text, icon, state, palette)
-                })
-                .collect::<Vec<_>>(),
+            visible_core_rail_order(
+                &snapshot.rail_order,
+                &effects.visible_rail_order(&snapshot.rail_order),
+            )
+            .into_iter()
+            .map(|item_id| match item_id.as_str() {
+                "sidebar-toggle" => rail_action(
+                    "sidebar-toggle",
+                    if snapshot.sidebar_visible {
+                        "Hide sidebar"
+                    } else {
+                        "Show sidebar"
+                    },
+                    if snapshot.sidebar_visible {
+                        Icon::PanelLeftClose
+                    } else {
+                        Icon::PanelLeftOpen
+                    },
+                    state,
+                    palette,
+                ),
+                "search" => rail_action("search", "Search", Icon::Search, state, palette),
+                separator_id if is_rail_separator(separator_id) => {
+                    rail_separator(separator_id, palette)
+                }
+                _ => unreachable!("visible vanilla rail order contains unknown item"),
+            })
+            .collect::<Vec<_>>(),
         )
         .children(native_views.into_iter().map(|view| {
             RailAction {
@@ -349,6 +359,47 @@ pub(super) fn icon_rail(
         .into_element()
 }
 
+fn is_rail_separator(item_id: &str) -> bool {
+    item_id.starts_with(ICON_RAIL_SEPARATOR_PREFIX)
+}
+
+fn visible_core_rail_order(shell_order: &[String], visible_actions: &[String]) -> Vec<String> {
+    let mut visible = Vec::new();
+    for item_id in shell_order.iter().map(|item_id| item_id.trim()) {
+        if item_id.is_empty()
+            || (!is_rail_separator(item_id)
+                && !visible_actions.iter().any(|candidate| candidate == item_id))
+            || visible.iter().any(|current| current == item_id)
+        {
+            continue;
+        }
+        visible.push(item_id.to_owned());
+    }
+    for item_id in visible_actions {
+        if !visible.iter().any(|current| current == item_id) {
+            visible.push(item_id.to_owned());
+        }
+    }
+    visible
+}
+
+fn rail_separator(item_id: &str, palette: theme::ThemePalette) -> Element {
+    rect()
+        .width(Size::px(RAIL_SEPARATOR_WIDTH))
+        .height(Size::px(
+            RAIL_SEPARATOR_HEIGHT + RAIL_SEPARATOR_VERTICAL_SPACE * 2.,
+        ))
+        .center()
+        .a11y_alt(format!("Rail separator {item_id}"))
+        .child(
+            rect()
+                .width(Size::px(RAIL_SEPARATOR_WIDTH))
+                .height(Size::px(RAIL_SEPARATOR_HEIGHT))
+                .background(theme::token_color(palette, theme::ThemeToken::Border)),
+        )
+        .into_element()
+}
+
 fn vault_action(mut state: State<ShellState>, palette: theme::ThemePalette) -> Element {
     let title = state
         .read()
@@ -396,7 +447,7 @@ impl Component for RailAction {
         let palette = self.palette;
         let area = use_state(|| Option::<Area>::None);
         let mut area_state = area;
-        let hover_key = format!("rail:{label_text}");
+        let hover_key = format!("rail:{item_id}");
         let hovered = state.read().hovered_target.as_deref() == Some(hover_key.as_str());
         let drop_target = state.read().rail_drop_target.as_deref() == Some(item_id.as_str());
         let dragging = state
@@ -440,7 +491,7 @@ impl Component for RailAction {
             .opacity(if dragging { 0.55 } else { 1. })
             .on_sized(move |event: Event<SizedEventData>| area_state.set(Some(event.area)))
             .on_pointer_down(move |event: Event<PointerEventData>| {
-                if event.is_primary() {
+                if event.is_primary() && rail_action_is_draggable(&drag_item_id) {
                     focus_state.write().begin_rail_drag(
                         &drag_item_id,
                         event.global_location().x,
@@ -525,6 +576,10 @@ impl Component for RailAction {
     }
 }
 
+fn rail_action_is_draggable(item_id: &str) -> bool {
+    item_id != "sidebar-toggle" && item_id != "settings" && item_id != "vault"
+}
+
 fn rail_action(
     item_id: &str,
     label_text: &str,
@@ -540,6 +595,75 @@ fn rail_action(
         palette,
     }
     .into_element()
+}
+
+pub(super) fn mobile_top_bar(state: State<ShellState>, palette: theme::ThemePalette) -> Element {
+    let mut menu_state = state;
+    let mut search_state = state;
+    let mut settings_state = state;
+    rect()
+        .width(Size::fill())
+        .height(Size::px(52.))
+        .padding(Gaps::new(8., 12., 8., 12.))
+        .horizontal()
+        .spacing(10.)
+        .center()
+        .background(theme::token_color(palette, theme::ThemeToken::Bg))
+        .child(
+            rect()
+                .width(Size::px(36.))
+                .height(Size::px(36.))
+                .center()
+                .a11y_alt(if state.read().mobile_navigation_open {
+                    "Close navigation"
+                } else {
+                    "Open navigation"
+                })
+                .on_press(move |_| {
+                    let open = menu_state.read().mobile_navigation_open;
+                    menu_state.write().mobile_navigation_open = !open;
+                })
+                .child(svg_icon(
+                    Icon::PanelLeft,
+                    theme::token_color(palette, theme::ThemeToken::Text),
+                    20.,
+                )),
+        )
+        .child(
+            label()
+                .font_size(16.)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::token_color(palette, theme::ThemeToken::Text))
+                .text("Elephant"),
+        )
+        .child(rect().width(Size::fill()).height(Size::px(1.)))
+        .child(
+            rect()
+                .width(Size::px(36.))
+                .height(Size::px(36.))
+                .center()
+                .a11y_alt("Search")
+                .on_press(move |_| activate_rail_action(search_state, "search"))
+                .child(svg_icon(
+                    Icon::Search,
+                    theme::token_color(palette, theme::ThemeToken::Text),
+                    20.,
+                )),
+        )
+        .child(
+            rect()
+                .width(Size::px(36.))
+                .height(Size::px(36.))
+                .center()
+                .a11y_alt("Settings")
+                .on_press(move |_| activate_rail_action(settings_state, "settings"))
+                .child(svg_icon(
+                    Icon::Settings,
+                    theme::token_color(palette, theme::ThemeToken::Text),
+                    20.,
+                )),
+        )
+        .into_element()
 }
 
 fn native_view_icon(icon: addon_adapter::NativeViewIcon) -> Icon {
@@ -888,11 +1012,15 @@ pub(super) fn sidebar_nav(mut state: State<ShellState>, palette: theme::ThemePal
             }
         })
         .unwrap_or_default();
+    // A freshly created Freya workspace has metadata for shell preferences but
+    // no explicit sidebar attachments yet.  Treat that empty list as the
+    // default tree instead of hiding every root folder from the sidebar.
+    let restrict_folders_to_attachments = workspace_metadata_present && !attached_paths.is_empty();
     let entries = root_entries
         .iter()
         .filter(|entry| {
             sidebar_entry_visible(entry)
-                && (!workspace_metadata_present
+                && (!restrict_folders_to_attachments
                     || !entry.is_directory
                     || attached_paths.contains(&normalize_sidebar_path(&entry.path)))
         })
@@ -1138,7 +1266,6 @@ fn sidebar_entry(
         let mut expand_on_open = expanded_paths;
         let mut start_drag = sidebar_drag;
         let click_drag = sidebar_drag;
-        let count = entry.note_count;
         let drag_path = path.clone();
         let target_path = path.clone();
         let leave_target_path = path.clone();
@@ -1192,6 +1319,7 @@ fn sidebar_entry(
                 rect()
                     .expanded()
                     .height(Size::fill())
+                    .horizontal()
                     .cross_align(Alignment::Center)
                     .on_pointer_down(move |event: Event<PointerEventData>| {
                         if event.is_primary() {
@@ -1218,12 +1346,6 @@ fn sidebar_entry(
                             .text(title.clone()),
                     ),
             )
-            .maybe_child((count > 0).then(|| {
-                label()
-                    .font_size(12.)
-                    .color(theme::token_color(palette, theme::ThemeToken::Muted))
-                    .text(count.to_string())
-            }))
             .into_element()
     } else {
         let mut open_state = state;
@@ -1605,6 +1727,29 @@ mod tests {
             drag.finish(),
             Some(("Projects/Plan.md".to_string(), "Archive".to_string()))
         );
+    }
+
+    #[test]
+    fn rail_order_keeps_separators_and_filters_hidden_actions() {
+        assert_eq!(
+            visible_core_rail_order(
+                &[
+                    "sidebar-toggle".into(),
+                    "separator:notes".into(),
+                    "search".into(),
+                ],
+                &["sidebar-toggle".into()],
+            ),
+            vec!["sidebar-toggle", "separator:notes"]
+        );
+    }
+
+    #[test]
+    fn rail_drag_source_matches_tauri_draggable_controls() {
+        assert!(!rail_action_is_draggable("sidebar-toggle"));
+        assert!(rail_action_is_draggable("search"));
+        assert!(!rail_action_is_draggable("settings"));
+        assert!(!rail_action_is_draggable("vault"));
     }
 
     #[test]

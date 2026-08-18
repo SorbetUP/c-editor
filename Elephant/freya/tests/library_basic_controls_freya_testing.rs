@@ -82,6 +82,10 @@ fn click_library_card(runner: &mut TestingRunner, label: &str) {
         })
         .unwrap_or_else(|| panic!("no Freya library card has accessible label {label:?}"));
     click_node(runner, node);
+    runner.poll(
+        std::time::Duration::from_millis(10),
+        std::time::Duration::from_millis(260),
+    );
 }
 
 fn runner_for(fixture: &FixtureVault) -> TestingRunner {

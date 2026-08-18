@@ -4,6 +4,7 @@ use freya::prelude::*;
 use muya_core::NodeId;
 
 use crate::editor::EditorAction;
+use crate::theme;
 
 use super::super::ShellState;
 
@@ -13,6 +14,7 @@ pub(crate) fn task_marker(
     item_id: NodeId,
     checked: bool,
     marker: String,
+    palette: theme::ThemePalette,
 ) -> Element {
     let label_text = if checked {
         "Task checked"
@@ -25,23 +27,37 @@ pub(crate) fn task_marker(
         .width(Size::px(24.))
         .height(Size::px(24.))
         .center()
+        .background(theme::color(if checked {
+            palette.primary
+        } else {
+            palette.surface
+        }))
+        .border(
+            Border::new()
+                .fill(theme::color(palette.border_strong))
+                .width(2.),
+        )
+        .with_corner_radius(4.)
         .a11y_alt(label_text)
         .on_mouse_up(move |_| {
-            let result = marker_state
-                .write()
-                .editor
-                .as_mut()
-                .ok_or_else(|| "cannot toggle task without an open note".to_string())
-                .and_then(|editor| {
-                    editor
-                        .dispatch(EditorAction::SetTaskChecked {
-                            item: item_id,
-                            checked: !checked,
-                            auto_check: false,
-                        })
-                        .map(|_| ())
-                        .map_err(|error| error.to_string())
-                });
+            let result = {
+                let mut shell = marker_state.write();
+                shell
+                    .editor
+                    .as_mut()
+                    .ok_or_else(|| "cannot toggle task without an open note".to_string())
+                    .and_then(|editor| {
+                        editor
+                            .dispatch(EditorAction::SetTaskChecked {
+                                item: item_id,
+                                checked: !checked,
+                                auto_check: false,
+                            })
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    })
+                    .and_then(|_| shell.save_open_editor().map_err(|error| error.to_string()))
+            };
             match result {
                 Ok(()) => {
                     *marker_generation.write() += 1;
@@ -59,6 +75,16 @@ pub(crate) fn task_marker(
                 }
             }
         })
-        .child(label().font_size(16.).text(marker))
+        .child(
+            label()
+                .font_size(14.)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(if checked {
+                    palette.surface
+                } else {
+                    palette.text
+                }))
+                .text(if checked { "✓".to_owned() } else { marker }),
+        )
         .into_element()
 }

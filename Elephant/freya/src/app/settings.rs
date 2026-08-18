@@ -255,18 +255,28 @@ impl Component for SettingsPanelComponent {
         let search = Input::new(search_value)
             .width(Size::fill())
             .placeholder("Search all settings")
+            .theme_colors(
+                InputColorsThemePartial::new()
+                    .color(theme::token_color(palette, theme::ThemeToken::Text))
+                    .placeholder_color(theme::token_color(palette, theme::ThemeToken::Muted))
+                    .background(Color::TRANSPARENT)
+                    .focus_background(Color::TRANSPARENT)
+                    .border_fill(Color::TRANSPARENT)
+                    .focus_border_fill(Color::TRANSPARENT),
+            )
             .on_submit(move |query: String| {
                 search_state.write().settings.set_query(&query);
             });
 
         let mut escape_shell_state = self.shell_state;
+        let mut backdrop_shell_state = self.shell_state;
         rect()
-            .width(Size::fill())
-            .height(Size::fill())
-            .padding(Gaps::new_all(16.))
-            .background(theme::token_color(palette, theme::ThemeToken::Bg))
+            .position(Position::new_global())
+            .width(Size::window_percent(100.))
+            .height(Size::window_percent(100.))
             .color(theme::token_color(palette, theme::ThemeToken::Text))
-            .center()
+            .layer(Layer::Overlay)
+            .interactive(true)
             .a11y_alt("Settings backdrop")
             .on_global_key_down(move |event: Event<KeyboardEventData>| {
                 if event.key == Key::Named(NamedKey::Escape) {
@@ -275,53 +285,78 @@ impl Component for SettingsPanelComponent {
             })
             .child(
                 rect()
-                    .width(Size::fill())
-                    .max_width(Size::px(1020.))
-                    .height(Size::fill())
-                    .max_height(Size::px(780.))
-                    .background(theme::token_color(palette, theme::ThemeToken::Surface))
-                    .border(
-                        Border::new()
-                            .fill(theme::token_color(palette, theme::ThemeToken::Border))
-                            .width(1.),
-                    )
-                    .with_corner_radius(22.)
-                    .a11y_alt("ElephantNote settings")
-                    .child(settings_controls::settings_header(
-                        search,
-                        self.shell_state,
-                        palette,
-                    ))
+                    .position(Position::new_global())
+                    .width(Size::window_percent(100.))
+                    .height(Size::window_percent(100.))
+                    .background(Color::from_argb(120, 0, 0, 0))
+                    .on_mouse_up(move |_| backdrop_shell_state.write().settings_open = false)
+                    .layer(Layer::OverlayLevel(12)),
+            )
+            .child(
+                rect()
+                    .position(Position::new_global())
+                    .width(Size::window_percent(100.))
+                    .height(Size::window_percent(100.))
+                    .padding(Gaps::new_all(16.))
+                    .center()
+                    .layer(Layer::OverlayLevel(13))
                     .child(
                         rect()
                             .width(Size::fill())
-                            .height(Size::px(1.))
-                            .background(theme::token_color(palette, theme::ThemeToken::Border)),
-                    )
-                    .child(
-                        rect()
-                            .width(Size::fill())
+                            .max_width(Size::px(1020.))
                             .height(Size::fill())
-                            .horizontal()
-                            .child(settings_controls::section_navigation(
-                                &active_section,
-                                state,
-                                search_value,
+                            .max_height(Size::px(780.))
+                            .background(theme::token_color(palette, theme::ThemeToken::Surface))
+                            .border(
+                                Border::new()
+                                    .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                                    .width(1.),
+                            )
+                            .with_corner_radius(22.)
+                            .overflow(Overflow::Clip)
+                            .a11y_alt("ElephantNote settings")
+                            .child(settings_controls::settings_header(
+                                search,
+                                self.shell_state,
                                 palette,
                             ))
                             .child(
-                                rect().width(Size::px(1.)).height(Size::fill()).background(
-                                    theme::token_color(palette, theme::ThemeToken::Border),
-                                ),
+                                rect()
+                                    .width(Size::fill())
+                                    .height(Size::px(1.))
+                                    .background(theme::token_color(
+                                        palette,
+                                        theme::ThemeToken::Border,
+                                    )),
                             )
-                            .child(settings_controls::section_content(
-                                state,
-                                self.shell_state,
-                                &active_section,
-                                &snapshot.surface,
-                                &query,
-                                search_value,
-                            )),
+                            .child(
+                                rect()
+                                    .width(Size::fill())
+                                    .height(Size::fill())
+                                    .horizontal()
+                                    .child(settings_controls::section_navigation(
+                                        &active_section,
+                                        state,
+                                        search_value,
+                                        palette,
+                                    ))
+                                    .child(
+                                        rect().width(Size::px(1.)).height(Size::fill()).background(
+                                            theme::token_color(
+                                                palette,
+                                                theme::ThemeToken::Border,
+                                            ),
+                                        ),
+                                    )
+                                    .child(settings_controls::section_content(
+                                        state,
+                                        self.shell_state,
+                                        &active_section,
+                                        &snapshot.surface,
+                                        &query,
+                                        search_value,
+                                    )),
+                            ),
                     ),
             )
     }

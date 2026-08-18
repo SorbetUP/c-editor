@@ -43,9 +43,8 @@ impl ProviderFixture {
                         .expect("configure provider stream");
                     let body = read_request(&mut stream);
                     *thread_received.lock().expect("provider lock") = Some(body);
-                    let response_body = format!(
-                        "{{\"error\":{{\"message\":\"{PROVIDER_ERROR}\"}}}}"
-                    );
+                    let response_body =
+                        format!("{{\"error\":{{\"message\":\"{PROVIDER_ERROR}\"}}}}");
                     let response = format!(
                         "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                         response_body.len(), response_body
@@ -122,7 +121,10 @@ impl FixtureVault {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "elephant-freya-chat-error-{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         fs::create_dir_all(&root).expect("create Chat fixture");
         fs::write(root.join("Welcome.md"), "# Chat fixture\n").expect("write Chat fixture");
@@ -206,9 +208,14 @@ fn chat_sends_through_provider_shows_error_and_persists_history() {
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            assert!(error_visible(&runner), "provider error must be visible in Chat");
+            assert!(
+                error_visible(&runner),
+                "provider error must be visible in Chat"
+            );
             let request: Value = serde_json::from_str(
-                &provider.received().expect("provider must receive Chat request"),
+                &provider
+                    .received()
+                    .expect("provider must receive Chat request"),
             )
             .expect("provider request JSON");
             assert_eq!(request["model"], "fixture-model");

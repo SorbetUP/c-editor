@@ -23,7 +23,6 @@ use crate::{
 };
 
 use super::ShellState;
-use crate::navigation_contract::WorkspaceView;
 
 /// The two workspaces converted from the Vue surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -303,7 +302,7 @@ impl ExplorerState {
         }
         self.search.results = results;
         self.search.concepts = concepts;
-        self.search.selected_index = None;
+        self.search.selected_index = (!self.search.results.is_empty()).then_some(0);
         self.search.error = None;
         self.search.refresh_phase();
         true
@@ -558,12 +557,13 @@ impl ExplorerSearchState {
 /// matching the Vue `SearchModal` overlay contract.  The full Explorer
 /// workspace remains available for the explicit Graph route below.
 pub fn search_overlay(
-    shell: State<ShellState>,
+    _shell: State<ShellState>,
     state: State<ExplorerState>,
     query: State<String>,
     interactive: bool,
     backdrop_opacity: f32,
     content_opacity: f32,
+    palette: theme::ThemePalette,
 ) -> Element {
     let input_value = query.read().clone();
     let snapshot = state.read().clone();
@@ -576,28 +576,49 @@ pub fn search_overlay(
     } else {
         snapshot.search.query.clone()
     };
+    let mut input_key_state = state;
+    let input_query = query;
     let input = Input::new(query)
         .flat()
         .auto_focus(true)
         .width(Size::fill())
+        .on_pre_key_down(move |event: Event<KeyboardEventData>| match &event.key {
+            Key::Named(NamedKey::ArrowDown) => {
+                input_key_state.write().move_search_selection(1);
+                event.stop_propagation();
+                event.prevent_default();
+                false
+            }
+            Key::Named(NamedKey::ArrowUp) => {
+                input_key_state.write().move_search_selection(-1);
+                event.stop_propagation();
+                event.prevent_default();
+                false
+            }
+            Key::Named(NamedKey::Enter) => {
+                let value = input_query.read().clone();
+                input_key_state.write().submit_or_open_search(value);
+                event.stop_propagation();
+                event.prevent_default();
+                false
+            }
+            _ => true,
+        })
         .theme_colors(
             InputColorsThemePartial::new()
                 .color(if input_value.is_empty() {
                     Color::TRANSPARENT
                 } else {
-                    theme::color(theme::TEXT)
+                    theme::token_color(palette, theme::ThemeToken::Text)
                 })
-                .placeholder_color(theme::color(theme::MUTED))
+                .placeholder_color(theme::token_color(palette, theme::ThemeToken::Muted))
                 .background(Color::TRANSPARENT)
                 .focus_background(Color::TRANSPARENT)
                 .border_fill(Color::TRANSPARENT)
                 .focus_border_fill(Color::TRANSPARENT),
         )
         .placeholder(search_placeholder)
-        .on_submit({
-            let mut submit_state = state;
-            move |value: String| submit_state.write().submit_or_open_search(value)
-        });
+        ;
     let mut search_input = rect()
         // Keep the input identity stable while the debounced search result
         // state changes. Re-keying on the result query remounts the native
@@ -617,17 +638,6 @@ pub fn search_overlay(
         .child(input);
     let mut key_state = state;
     let mut key_query = query;
-    let mut mode_state = state;
-    let mode_name = snapshot.search.mode.as_str();
-    let mode = rect()
-        .height(Size::px(30.))
-        .padding(Gaps::new(0., 10., 0., 10.))
-        .center()
-        .background(theme::color(theme::SURFACE))
-        .with_corner_radius(7.)
-        .on_press(move |_| mode_state.write().cycle_search_mode())
-        .a11y_alt(format!("Search mode: {mode_name}"))
-        .child(label().font_size(12.).text(format!("Mode: {mode_name}")));
     let clear = if !input_value.trim().is_empty() {
         let mut clear_query = query;
         let mut clear_state = state;
@@ -647,7 +657,7 @@ pub fn search_overlay(
                 .child(
                     label()
                         .font_size(18.)
-                        .color(theme::color(theme::MUTED))
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
                         .text("×"),
                 ),
         )
@@ -668,60 +678,47 @@ pub fn search_overlay(
         ))
         .background(Color::TRANSPARENT)
         .with_corner_radius(22.)
-        .child(svg_icon(Icon::Search, Color::from_rgb(26, 35, 53), 22.))
+        .child(svg_icon(
+            Icon::Search,
+            theme::token_color(palette, theme::ThemeToken::Text),
+            22.,
+        ))
         .child(search_input)
-        .child(mode)
         .maybe_child(clear);
-    let mut search_tab_state = state;
-    let search_tab = rect()
-        .height(Size::px(28.))
-        .padding(Gaps::new(0., 10., 0., 10.))
-        .center()
-        .background(theme::color(theme::SOFT))
-        .with_corner_radius(7.)
-        .on_press(move |_| search_tab_state.write().surface = ExplorerSurface::Search)
-        .a11y_alt("Search workspace")
-        .child(label().font_size(12.).text("Search"));
-    let mut graph_tab_state = state;
-    let mut graph_shell_state = shell;
-    let graph_tab = rect()
-        .height(Size::px(28.))
-        .padding(Gaps::new(0., 10., 0., 10.))
-        .center()
-        .background(theme::color(theme::SURFACE))
-        .with_corner_radius(7.)
-        .on_press(move |_| {
-            graph_tab_state.write().surface = ExplorerSurface::Graph;
-            let mut shell = graph_shell_state.write();
-            shell.search_open = false;
-            shell.view = WorkspaceView::Graph;
-        })
-        .a11y_alt("Graph workspace")
-        .child(label().font_size(12.).text("Graph"));
-    let workspace_tabs = rect()
-        .width(Size::fill())
-        .height(Size::px(34.))
-        .padding(Gaps::new(6., 18., 0., 18.))
-        .horizontal()
-        .spacing(8.)
-        .child(search_tab)
-        .child(graph_tab);
+
+    let panel = if snapshot.search.phase == ExplorerPhase::Idle {
+        None
+    } else {
+        let content = if snapshot.search.phase == ExplorerPhase::Results {
+            super::search_overlay_view::render(state, &snapshot, palette)
+        } else {
+            search_state_content(state, &snapshot)
+        };
+        Some(
+            rect()
+                .width(Size::fill())
+                .height(Size::px(560.))
+                .max_height(Size::window_percent(60.))
+                .child(content),
+        )
+    };
     let modal = rect()
         .vertical()
-        .position(Position::new_global().left(295.).top(119.))
-        .width(Size::px(690.))
-        .height(if snapshot.search.phase == ExplorerPhase::Idle {
-            Size::px(106.)
-        } else {
-            Size::px(316.)
-        })
+        .width(Size::fill())
+        .max_width(Size::px(720.))
         // The shell owns the translucent glass surface; the bar stays
         // transparent so the same surface covers both empty and result states.
-        .background(super::search_overlay_view::glass_surface())
-        .color(theme::color(theme::TEXT))
+        .background(super::search_overlay_view::glass_surface(palette))
+        .color(theme::token_color(palette, theme::ThemeToken::Text))
         .with_corner_radius(28.)
+        .overflow(Overflow::Clip)
+        .a11y_alt("Search dialog")
         .opacity(content_opacity)
-        .border(Border::new().fill(theme::color(theme::BORDER)).width(1.))
+        .border(
+            Border::new()
+                .fill(theme::token_color(palette, theme::ThemeToken::Border))
+                .width(1.),
+        )
         .shadow(
             Shadow::new()
                 .y(30.)
@@ -731,44 +728,37 @@ pub fn search_overlay(
         .layer(Layer::OverlayLevel(
             super::search_overlay_view::SEARCH_MODAL_LAYER,
         ))
-        .on_global_key_down(move |event: Event<KeyboardEventData>| {
-            if event.key != Key::Named(NamedKey::Escape) {
-                return;
-            }
-            let had_query = !key_query.read().trim().is_empty();
-            key_query.set(String::new());
-            if had_query {
-                key_state.write().clear_search();
-            } else {
-                key_state.write().close_search();
-            }
-        })
-        .child(workspace_tabs)
-        .child(search_bar);
-    let panel = if snapshot.search.phase == ExplorerPhase::Idle {
-        None
-    } else {
-        let content = if snapshot.search.phase == ExplorerPhase::Results {
-            super::search_overlay_view::render(state, &snapshot)
-        } else {
-            search_state_content(state, &snapshot)
-        };
-        Some(
-            rect()
-                .position(Position::new_global().left(295.).top(191.))
-                .width(Size::px(690.))
-                .height(Size::px(210.))
-                .opacity(content_opacity)
-                .layer(Layer::OverlayLevel(
-                    super::search_overlay_view::SEARCH_PANEL_LAYER,
-                ))
-                .child(content),
-        )
-    };
+        .child(search_bar)
+        .maybe_child(panel);
+    let mut backdrop_state = state;
     rect()
         .position(Position::new_global())
+        .width(Size::fill())
+        .height(Size::fill())
+        .vertical()
+        .cross_align(Alignment::Center)
+        .padding(Gaps::new(0., 12., 0., 12.))
         .layer(Layer::Overlay)
         .interactive(interactive)
+        .on_global_key_down(move |event: Event<KeyboardEventData>| {
+            match event.key {
+                Key::Named(NamedKey::Enter) => {
+                    let value = key_query.read().clone();
+                    key_state.write().submit_or_open_search(value);
+                    event.stop_propagation();
+                }
+                Key::Named(NamedKey::Escape) => {
+                    let had_query = !key_query.read().trim().is_empty();
+                    key_query.set(String::new());
+                    if had_query {
+                        key_state.write().clear_search();
+                    } else {
+                        key_state.write().close_search();
+                    }
+                }
+                _ => {}
+            }
+        })
         .child(
             rect()
                 .position(Position::new_global().left(0.).top(0.))
@@ -778,12 +768,17 @@ pub fn search_overlay(
                 // premultiplied alpha rasterization uses 31/255 here.
                 .background(Color::from_argb(31, 15, 23, 42))
                 .opacity(backdrop_opacity)
+                .on_mouse_up(move |_| backdrop_state.write().close_search())
                 .layer(Layer::OverlayLevel(
                     super::search_overlay_view::SEARCH_BACKDROP_LAYER,
                 )),
         )
+        .child(
+            rect()
+                .width(Size::fill())
+                .height(Size::window_percent(12.)),
+        )
         .child(modal)
-        .maybe_child(panel)
         .into_element()
 }
 
@@ -793,6 +788,7 @@ pub fn explorer_view(
     graph_query: State<String>,
     graph_canvas: State<super::graph_canvas::GraphCanvasState>,
     overlay_open: bool,
+    palette: theme::ThemePalette,
 ) -> Element {
     let snapshot = state.read().clone();
 
@@ -831,8 +827,8 @@ pub fn explorer_view(
     rect()
         .width(Size::fill())
         .height(Size::fill())
-        .background(theme::color(theme::BG))
-        .color(theme::color(theme::TEXT))
+        .background(theme::color(palette.bg))
+        .color(theme::color(palette.text))
         .spacing(10.)
         .maybe_child((!overlay_open).then(|| explorer_header(state, snapshot.surface)))
         .maybe_child(content)

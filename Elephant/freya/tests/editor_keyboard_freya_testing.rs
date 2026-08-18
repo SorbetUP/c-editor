@@ -59,6 +59,17 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
     ));
 }
 
+fn click_paragraph_edge(runner: &mut TestingRunner, start: bool) {
+    let paragraph = require_label(runner, "Paragraph");
+    let area = paragraph.layout().area;
+    let x = if start {
+        area.min_x() + 1.
+    } else {
+        area.max_x() - 1.
+    };
+    runner.click_cursor((x as f64, ((area.min_y() + area.max_y()) / 2.) as f64));
+}
+
 fn move_caret_to(runner: &mut TestingRunner, direction: NamedKey) {
     for _ in 0..32 {
         runner.press_key(Key::Named(direction));
@@ -112,6 +123,9 @@ fn editor_exposes_stable_production_accessibility_targets() {
     assert_eq!(labeled_nodes(&runner, "Editor scroll").len(), 1);
     assert_eq!(labeled_nodes(&runner, "Paragraph").len(), 1);
     assert_eq!(labeled_nodes(&runner, "Close note").len(), 1);
+    assert!(labeled_nodes(&runner, "Editor footer").is_empty());
+    assert!(labeled_nodes(&runner, "Decrease editor text size").is_empty());
+    assert!(labeled_nodes(&runner, "Use light editor theme").is_empty());
 }
 
 #[test]
@@ -132,6 +146,49 @@ fn enter_splits_a_real_muya_paragraph_through_the_editable_node() {
     let paragraphs = paragraph_texts(&runner);
     assert_eq!(paragraphs.len(), 2, "Enter must create two rendered blocks");
     assert_eq!(paragraphs.concat(), "alpha");
+}
+
+#[test]
+fn enter_then_type_targets_the_new_muya_paragraph() {
+    let fixture = FixtureVault::new("alpha");
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    open_note(&mut runner);
+    click_label(&mut runner, "Paragraph");
+    runner.press_key(Key::Named(NamedKey::Enter));
+    runner.write_text("beta");
+
+    assert_eq!(paragraph_texts(&runner), ["alpha", "beta"]);
+}
+
+#[test]
+fn pointer_click_places_the_caret_at_the_clicked_line_position() {
+    let fixture = FixtureVault::new("alpha beta");
+    let root = fixture.path().to_path_buf();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    open_note(&mut runner);
+    click_paragraph_edge(&mut runner, true);
+    let paragraph = require_label(&runner, "Paragraph");
+    let area = paragraph.layout().area;
+    runner.move_cursor((area.max_x() as f64, area.max_y() as f64));
+    runner.write_text("LEFT");
+    assert_eq!(paragraph_texts(&runner), ["LEFTalpha beta"]);
+
+    click_paragraph_edge(&mut runner, false);
+    runner.write_text("RIGHT");
+    assert_eq!(paragraph_texts(&runner), ["LEFTalpha betaRIGHT"]);
 }
 
 #[test]

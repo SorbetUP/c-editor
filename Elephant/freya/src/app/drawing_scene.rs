@@ -1,91 +1,4 @@
-use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-
-fn default_stroke_color() -> String {
-    "#000000".to_owned()
-}
-fn default_background_color() -> String {
-    "transparent".to_owned()
-}
-fn default_stroke_width() -> f32 {
-    1.
-}
-fn default_opacity() -> f32 {
-    100.
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DrawingScene {
-    #[serde(rename = "type", default)]
-    pub scene_type: String,
-    #[serde(default)]
-    pub elements: Vec<DrawingElement>,
-    #[serde(rename = "appState", default)]
-    pub app_state: Value,
-    #[serde(default)]
-    pub files: Value,
-    #[serde(flatten)]
-    pub extra: Map<String, Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DrawingElement {
-    #[serde(default)]
-    pub id: String,
-    #[serde(rename = "type", default)]
-    pub kind: String,
-    #[serde(default)]
-    pub x: f32,
-    #[serde(default)]
-    pub y: f32,
-    #[serde(default)]
-    pub width: f32,
-    #[serde(default)]
-    pub height: f32,
-    #[serde(default)]
-    pub points: Vec<[f32; 2]>,
-    #[serde(default)]
-    pub text: String,
-    #[serde(rename = "strokeColor", default = "default_stroke_color")]
-    pub stroke_color: String,
-    #[serde(rename = "backgroundColor", default = "default_background_color")]
-    pub background_color: String,
-    #[serde(rename = "strokeWidth", default = "default_stroke_width")]
-    pub stroke_width: f32,
-    #[serde(default)]
-    pub stroke_style: String,
-    #[serde(rename = "fillStyle", default)]
-    pub fill_style: String,
-    #[serde(default = "default_opacity")]
-    pub opacity: f32,
-    #[serde(default)]
-    pub angle: f32,
-    #[serde(rename = "fontSize", default)]
-    pub font_size: f32,
-    #[serde(rename = "endArrowhead", default)]
-    pub end_arrowhead: Option<String>,
-    #[serde(rename = "startArrowhead", default)]
-    pub start_arrowhead: Option<String>,
-    #[serde(rename = "isDeleted", default)]
-    pub is_deleted: bool,
-    #[serde(flatten)]
-    pub extra: Map<String, Value>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Viewport {
-    pub zoom: f32,
-    pub pan: [f32; 2],
-}
-
-impl Default for Viewport {
-    fn default() -> Self {
-        Self {
-            zoom: 1.,
-            pan: [0., 0.],
-        }
-    }
-}
+pub use elephant_draw::{rgba, DrawingElement, DrawingScene, Viewport};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderableElement {
@@ -113,6 +26,7 @@ enum Interaction {
 pub struct DrawingCanvasState {
     pub document: DrawingScene,
     pub viewport: Viewport,
+    pub active_tool: String,
     selected: Option<usize>,
     interaction: Interaction,
     pub revision: u64,
@@ -132,6 +46,7 @@ impl DrawingCanvasState {
         Self {
             document,
             viewport: Viewport::default(),
+            active_tool: "selection".to_owned(),
             selected: None,
             interaction: Interaction::None,
             revision: 0,
@@ -140,6 +55,26 @@ impl DrawingCanvasState {
 
     pub fn serialize_json(&self) -> Result<String, String> {
         serde_json::to_string_pretty(&self.document).map_err(|error| error.to_string())
+    }
+
+    pub fn set_active_tool_label(&mut self, label: &str) {
+        let next = match label {
+            "Freedraw" | "Freehand" | "Pencil" => "freedraw",
+            "Rectangle" => "rectangle",
+            "Diamond" => "diamond",
+            "Ellipse" => "ellipse",
+            "Arrow" => "arrow",
+            "Line" => "line",
+            "Text" => "text",
+            "Eraser" => "eraser",
+            "Hand" => "hand",
+            _ => "selection",
+        }
+        .to_owned();
+        if self.active_tool != next {
+            self.active_tool = next;
+            self.revision = self.revision.wrapping_add(1);
+        }
     }
 
     pub fn selected_element_id(&self) -> Option<&str> {
@@ -207,6 +142,20 @@ impl DrawingCanvasState {
         }
     }
 
+    pub(crate) fn erase_at(&mut self, point: [f32; 2]) -> bool {
+        let world = self.to_world(point);
+        if let Some(index) = self.hit_test(world) {
+            if let Some(element) = self.document.elements.get_mut(index) {
+                if !element.is_deleted {
+                    element.is_deleted = true;
+                    self.revision = self.revision.wrapping_add(1);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub(crate) fn end_pointer(&mut self) {
         self.interaction = Interaction::None;
     }
@@ -238,90 +187,4 @@ impl DrawingCanvasState {
             .find(|(_, element)| !element.is_deleted && element.hit_test(point))
             .map(|(index, _)| index)
     }
-}
-
-impl DrawingElement {
-    pub fn bounds(&self) -> (f32, f32, f32, f32) {
-        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw") && !self.points.is_empty() {
-            let min_x = self
-                .points
-                .iter()
-                .map(|point| point[0])
-                .fold(f32::INFINITY, f32::min);
-            let min_y = self
-                .points
-                .iter()
-                .map(|point| point[1])
-                .fold(f32::INFINITY, f32::min);
-            let max_x = self
-                .points
-                .iter()
-                .map(|point| point[0])
-                .fold(f32::NEG_INFINITY, f32::max);
-            let max_y = self
-                .points
-                .iter()
-                .map(|point| point[1])
-                .fold(f32::NEG_INFINITY, f32::max);
-            return (self.x + min_x, self.y + min_y, max_x - min_x, max_y - min_y);
-        }
-        (self.x, self.y, self.width, self.height)
-    }
-
-    fn hit_test(&self, point: [f32; 2]) -> bool {
-        let (x, y, width, height) = self.bounds();
-        let padding = self.stroke_width.max(6.);
-        if matches!(self.kind.as_str(), "line" | "arrow" | "freedraw") && self.points.len() >= 2 {
-            return self.points.windows(2).any(|segment| {
-                distance_to_segment(
-                    point,
-                    [self.x + segment[0][0], self.y + segment[0][1]],
-                    [self.x + segment[1][0], self.y + segment[1][1]],
-                ) <= padding
-            });
-        }
-        point[0] >= x - padding
-            && point[0] <= x + width + padding
-            && point[1] >= y - padding
-            && point[1] <= y + height + padding
-    }
-}
-
-fn distance_to_segment(point: [f32; 2], start: [f32; 2], end: [f32; 2]) -> f32 {
-    let vector = [end[0] - start[0], end[1] - start[1]];
-    let length_squared = vector[0] * vector[0] + vector[1] * vector[1];
-    if length_squared <= f32::EPSILON {
-        return ((point[0] - start[0]).powi(2) + (point[1] - start[1]).powi(2)).sqrt();
-    }
-    let t = (((point[0] - start[0]) * vector[0] + (point[1] - start[1]) * vector[1])
-        / length_squared)
-        .clamp(0., 1.);
-    let projected = [start[0] + t * vector[0], start[1] + t * vector[1]];
-    ((point[0] - projected[0]).powi(2) + (point[1] - projected[1]).powi(2)).sqrt()
-}
-
-pub(crate) fn rgba(value: &str, opacity: f32) -> [u8; 4] {
-    let value = value.trim();
-    if value.eq_ignore_ascii_case("transparent") || value.is_empty() {
-        return [0, 0, 0, 0];
-    }
-    let hex = value.strip_prefix('#').unwrap_or(value);
-    let (hex, alpha) = match hex.len() {
-        3 => {
-            let expanded = hex.chars().flat_map(|c| [c, c]).collect::<String>();
-            (expanded, 255)
-        }
-        6 => (hex.to_owned(), 255),
-        8 => (
-            hex[..6].to_owned(),
-            u8::from_str_radix(&hex[6..], 16).unwrap_or(255),
-        ),
-        _ => return [0, 0, 0, 0],
-    };
-    [
-        u8::from_str_radix(&hex[0..2], 16).unwrap_or(0),
-        u8::from_str_radix(&hex[2..4], 16).unwrap_or(0),
-        u8::from_str_radix(&hex[4..6], 16).unwrap_or(0),
-        ((f32::from(alpha) * (opacity.clamp(0., 100.) / 100.)).round()) as u8,
-    ]
 }

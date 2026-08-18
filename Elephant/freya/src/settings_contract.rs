@@ -436,6 +436,115 @@ pub const PERSISTED_SURFACES: &[PersistedSurface] = &[
     },
 ];
 
+pub const LANGUAGE_PREFERENCE_KEY: &str = "language";
+pub const LEGACY_LANGUAGE_STORAGE_KEY: &str = "elephantnote:tauri:language";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanguageOption {
+    pub code: &'static str,
+    pub native_name: &'static str,
+    pub display_name: &'static str,
+}
+
+/// Locales backed by the existing app message bundles.  The web selector also
+/// lists arbitrary ISO-639-1 entries when an external pack exists; Freya has
+/// no translation-pack loader yet, so it must not advertise those as active.
+pub const SUPPORTED_LANGUAGE_OPTIONS: &[LanguageOption] = &[
+    LanguageOption {
+        code: "en",
+        native_name: "English",
+        display_name: "English",
+    },
+    LanguageOption {
+        code: "fr",
+        native_name: "Français",
+        display_name: "French",
+    },
+    LanguageOption {
+        code: "es",
+        native_name: "Español",
+        display_name: "Spanish",
+    },
+    LanguageOption {
+        code: "de",
+        native_name: "Deutsch",
+        display_name: "German",
+    },
+    LanguageOption {
+        code: "it",
+        native_name: "Italiano",
+        display_name: "Italian",
+    },
+    LanguageOption {
+        code: "pt",
+        native_name: "Português",
+        display_name: "Portuguese",
+    },
+    LanguageOption {
+        code: "nl",
+        native_name: "Nederlands",
+        display_name: "Dutch",
+    },
+    LanguageOption {
+        code: "pl",
+        native_name: "Polski",
+        display_name: "Polish",
+    },
+    LanguageOption {
+        code: "ru",
+        native_name: "Русский",
+        display_name: "Russian",
+    },
+    LanguageOption {
+        code: "uk",
+        native_name: "Українська",
+        display_name: "Ukrainian",
+    },
+    LanguageOption {
+        code: "tr",
+        native_name: "Türkçe",
+        display_name: "Turkish",
+    },
+    LanguageOption {
+        code: "ja",
+        native_name: "日本語",
+        display_name: "Japanese",
+    },
+    LanguageOption {
+        code: "ko",
+        native_name: "한국어",
+        display_name: "Korean",
+    },
+    LanguageOption {
+        code: "zh-CN",
+        native_name: "简体中文",
+        display_name: "Simplified Chinese",
+    },
+    LanguageOption {
+        code: "zh-TW",
+        native_name: "繁體中文",
+        display_name: "Traditional Chinese",
+    },
+    LanguageOption {
+        code: "ar",
+        native_name: "العربية",
+        display_name: "Arabic",
+    },
+];
+
+pub fn is_supported_language(value: &str) -> bool {
+    value == "system"
+        || SUPPORTED_LANGUAGE_OPTIONS
+            .iter()
+            .any(|option| option.code == value)
+}
+
+pub fn language_option(value: &str) -> Option<&'static LanguageOption> {
+    SUPPORTED_LANGUAGE_OPTIONS
+        .iter()
+        .find(|option| option.code == value)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ThemeFamilyContract {
     pub id: &'static str,
@@ -579,6 +688,7 @@ pub struct SettingsState {
     pub active_section: String,
     pub query: String,
     pub theme_expanded: bool,
+    pub language_expanded: bool,
     pub addon_page: AddonPage,
     pub selected_addon_id: Option<String>,
     pub installed_only: bool,
@@ -591,6 +701,7 @@ impl Default for SettingsState {
             active_section: "appearance".to_owned(),
             query: String::new(),
             theme_expanded: true,
+            language_expanded: false,
             addon_page: AddonPage::Addons,
             selected_addon_id: None,
             installed_only: false,
@@ -623,6 +734,10 @@ impl SettingsState {
 
     pub fn toggle_theme_expansion(&mut self) {
         self.theme_expanded = !self.theme_expanded;
+    }
+
+    pub fn toggle_language_expansion(&mut self) {
+        self.language_expanded = !self.language_expanded;
     }
 
     pub fn toggle_trash(&mut self) {

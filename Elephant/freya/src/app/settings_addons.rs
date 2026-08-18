@@ -22,7 +22,7 @@ pub(crate) fn addons_settings(
         .padding(Gaps::new(6., 9., 6., 9.))
         .with_corner_radius(7.)
         .a11y_alt("Refresh addons")
-        .on_press(move |_| refresh_addons(refresh_state, refresh_shell))
+        .on_mouse_up(move |_| refresh_addons(refresh_state, refresh_shell))
         .child(label().text("Refresh"));
     let install_state = settings_state;
     let install_shell = shell_state;
@@ -30,7 +30,7 @@ pub(crate) fn addons_settings(
         .padding(Gaps::new(6., 9., 6., 9.))
         .with_corner_radius(7.)
         .a11y_alt("Install addon package")
-        .on_press(move |_| install_addon(install_state, install_shell))
+        .on_mouse_up(move |_| install_addon(install_state, install_shell))
         .child(label().text("Install package"));
     let actions = rect()
         .horizontal()
@@ -122,7 +122,7 @@ fn addon_row(
             if enabled { "Disable" } else { "Enable" },
             name
         ))
-        .on_press(move |_| toggle_addon(toggle_state, toggle_shell, id.clone(), !enabled))
+        .on_mouse_up(move |_| toggle_addon(toggle_state, toggle_shell, id.clone(), !enabled))
         .child(label().text(if enabled {
             "Registry enabled"
         } else {
@@ -135,7 +135,7 @@ fn addon_row(
         .padding(Gaps::new(6., 9., 6., 9.))
         .with_corner_radius(7.)
         .a11y_alt(format!("Uninstall {name} addon"))
-        .on_press(move |_| uninstall_addon(uninstall_state, uninstall_shell, uninstall_id.clone()))
+        .on_mouse_up(move |_| uninstall_addon(uninstall_state, uninstall_shell, uninstall_id.clone()))
         .child(label().text("Uninstall"));
     let controls = rect()
         .horizontal()

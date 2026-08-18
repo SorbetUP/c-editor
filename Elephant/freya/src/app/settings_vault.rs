@@ -29,7 +29,7 @@ pub(crate) fn vault_settings(
         .padding(Gaps::new(6., 9., 6., 9.))
         .with_corner_radius(7.)
         .a11y_alt("Refresh vault trash")
-        .on_press(move |_| refresh_trash(settings_for_refresh, shell_for_refresh))
+        .on_mouse_up(move |_| refresh_trash(settings_for_refresh, shell_for_refresh))
         .child(label().text("Refresh trash"));
 
     let choose_state = shell_state;
@@ -37,7 +37,7 @@ pub(crate) fn vault_settings(
         .padding(Gaps::new(8., 12., 8., 12.))
         .with_corner_radius(8.)
         .a11y_alt("Open another vault")
-        .on_press(move |_| choose_vault(choose_state))
+        .on_mouse_up(move |_| choose_vault(choose_state))
         .child(label().text("Open another vault"));
 
     let mut registry_rows = rect()
@@ -58,7 +58,7 @@ pub(crate) fn vault_settings(
                 .padding(Gaps::new(5., 8., 5., 8.))
                 .with_corner_radius(7.)
                 .a11y_alt(format!("Activate {activate_name}"))
-                .on_press(move |_| activate_state.write().activate_vault(&id))
+                .on_mouse_up(move |_| activate_state.write().activate_vault(&id))
                 .child(label().text("Activate"))
                 .into_element()
         });
@@ -69,7 +69,7 @@ pub(crate) fn vault_settings(
             .padding(Gaps::new(5., 8., 5., 8.))
             .with_corner_radius(7.)
             .a11y_alt(format!("Remove {remove_name} from list"))
-            .on_press(move |_| remove_state.write().remove_vault(&remove_id))
+            .on_mouse_up(move |_| remove_state.write().remove_vault(&remove_id))
             .child(label().text("Remove"));
         registry_rows = registry_rows.child(
             rect()
@@ -162,7 +162,7 @@ pub(crate) fn vault_settings(
                                 } else {
                                     "Expand vault trash"
                                 })
-                                .on_press(move |_| {
+                                .on_mouse_up(move |_| {
                                     toggle_state.write().toggle_trash_expanded();
                                 })
                                 .child(label().text(if settings.settings.trash_expanded {
@@ -195,14 +195,14 @@ pub(crate) fn vault_settings(
                 .padding(Gaps::new(7., 10., 7., 10.))
                 .with_corner_radius(7.)
                 .a11y_alt("Confirm empty vault trash")
-                .on_press(move |_| empty_trash(action_state, shell_state))
+                .on_mouse_up(move |_| empty_trash(action_state, shell_state))
                 .child(label().text("Confirm empty trash"))
         } else {
             rect()
                 .padding(Gaps::new(7., 10., 7., 10.))
                 .with_corner_radius(7.)
                 .a11y_alt("Empty vault trash")
-                .on_press(move |_| action_state.write().request_empty_trash())
+                .on_mouse_up(move |_| action_state.write().request_empty_trash())
                 .child(label().text("Empty trash"))
         };
         trash_panel = trash_panel.child(action);
@@ -301,7 +301,7 @@ fn trash_row(
                 .padding(Gaps::new(6., 9., 6., 9.))
                 .with_corner_radius(7.)
                 .a11y_alt(format!("Restore {}", item.original_path))
-                .on_press(move |_| restore_trash(restore_state, shell_state, trash_path.clone()))
+                .on_mouse_up(move |_| restore_trash(restore_state, shell_state, trash_path.clone()))
                 .child(label().text("Restore")),
         )
         .into_element()

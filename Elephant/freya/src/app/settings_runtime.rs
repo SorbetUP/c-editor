@@ -4,7 +4,10 @@
 //! defining a Freya-only schema. The JSON object remains forward-compatible:
 //! unknown keys are preserved when a supported setting is changed.
 
-use crate::settings_contract::{DefaultValue, UiValueTransform, ValueKind, SETTINGS_PREFERENCES};
+use crate::settings_contract::{
+    is_supported_language, DefaultValue, UiValueTransform, ValueKind, LANGUAGE_PREFERENCE_KEY,
+    LEGACY_LANGUAGE_STORAGE_KEY, SETTINGS_PREFERENCES,
+};
 use serde_json::{Map, Value};
 use std::{env, fs, io, path::PathBuf};
 
@@ -58,6 +61,9 @@ impl SettingsRuntimeState {
     }
 
     pub fn text_value(&self, key: &str) -> String {
+        if key == LANGUAGE_PREFERENCE_KEY {
+            return self.language_preference();
+        }
         let Some(contract) = contract_for(key) else {
             return self
                 .preferences
@@ -74,7 +80,38 @@ impl SettingsRuntimeState {
     }
 
     pub fn has_key(&self, key: &str) -> bool {
+        if key == LANGUAGE_PREFERENCE_KEY {
+            return self.preferences.contains_key(LANGUAGE_PREFERENCE_KEY)
+                || self.preferences.contains_key(LEGACY_LANGUAGE_STORAGE_KEY);
+        }
         self.preferences.contains_key(key)
+    }
+
+    pub fn language_preference(&self) -> String {
+        let value = self
+            .preferences
+            .get(LANGUAGE_PREFERENCE_KEY)
+            .or_else(|| self.preferences.get(LEGACY_LANGUAGE_STORAGE_KEY))
+            .and_then(Value::as_str)
+            .unwrap_or("system");
+        if is_supported_language(value) {
+            value.to_owned()
+        } else {
+            "system".to_owned()
+        }
+    }
+
+    pub fn language_error(&self) -> Option<String> {
+        let value = self
+            .preferences
+            .get(LANGUAGE_PREFERENCE_KEY)
+            .or_else(|| self.preferences.get(LEGACY_LANGUAGE_STORAGE_KEY))
+            .and_then(Value::as_str)?;
+        (!is_supported_language(value)).then(|| {
+            format!(
+                "Language preference error: unsupported language `{value}`. Choose System or a supported language."
+            )
+        })
     }
 
     pub fn string_list_value(&self, key: &str) -> Vec<String> {
@@ -130,6 +167,10 @@ impl SettingsRuntimeState {
     }
 
     pub fn set_text_preference(&mut self, key: &str, value: String) {
+        if key == LANGUAGE_PREFERENCE_KEY {
+            self.set_language_preference(value);
+            return;
+        }
         let Some(contract) = contract_for(key) else {
             return;
         };
@@ -143,6 +184,32 @@ impl SettingsRuntimeState {
         self.preferences
             .insert(key.to_owned(), Value::String(value));
         self.persist();
+    }
+
+    pub fn set_language_preference(&mut self, value: String) {
+        let value = value.trim().to_owned();
+        if !is_supported_language(&value) {
+            let error = format!(
+                "Language preference error: unsupported language `{value}`. Choose System or a supported language."
+            );
+            self.feedback = Some(error.clone());
+            eprintln!("[freya][settings] action=language-failure error={error}");
+            return;
+        }
+
+        self.preferences.insert(
+            LANGUAGE_PREFERENCE_KEY.to_owned(),
+            Value::String(value.clone()),
+        );
+        self.preferences
+            .insert(LEGACY_LANGUAGE_STORAGE_KEY.to_owned(), Value::String(value));
+        self.persist();
+        if self.feedback.as_deref() == Some("Settings saved") {
+            self.feedback = Some(
+                "Language preference saved. Freya translations are not available yet; interface labels remain in English."
+                    .to_owned(),
+            );
+        }
     }
 
     pub fn set_integer_preference(&mut self, key: &str, value: i64) {

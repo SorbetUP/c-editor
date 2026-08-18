@@ -1,10 +1,12 @@
 use elephant_freya::app::app_with_vault;
+use freya::prelude::{Code, Key, Modifiers, ModifiersExt};
+use freya_testing::prelude::{KeyboardEventName, PlatformEvent};
 use freya_testing::{TestingNode, TestingRunner};
 use serde_json::json;
 use std::{
     fs,
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 struct FixtureVault {
@@ -72,6 +74,24 @@ fn click_label(runner: &mut TestingRunner, label: &str) {
         })
         .unwrap_or_else(|| panic!("missing Freya accessibility label {label:?}"));
     runner.click_cursor(node.layout().area.center().to_f64());
+    runner.poll(Duration::from_millis(10), Duration::from_millis(260));
+}
+
+fn press_key(runner: &mut TestingRunner, key: Key, modifiers: Modifiers) {
+    runner.send_event(PlatformEvent::Keyboard {
+        name: KeyboardEventName::KeyDown,
+        key,
+        code: Code::Unidentified,
+        modifiers,
+    });
+    runner.sync_and_update();
+}
+
+#[test]
+fn drawing_tool_svg_sources_use_valid_raw_string_quotes() {
+    let source = include_str!("../src/app/drawing.rs");
+    assert!(!source.contains(r#"viewBox=\""#));
+    assert_eq!(source.matches("viewBox=\"0 0 24 24\"").count(), 11);
 }
 
 #[test]
@@ -98,6 +118,9 @@ fn clicking_a_real_drawing_does_not_open_the_markdown_editor() {
         1,
         "Freya must mount the native drawing canvas for the real scene"
     );
+    assert_eq!(labeled_nodes(&runner, "Back to library").len(), 1);
+    assert_eq!(labeled_nodes(&runner, "Save drawing").len(), 1);
+    assert_eq!(labeled_nodes(&runner, "Close drawing").len(), 1);
     assert!(
         scene_path.is_file(),
         "opening must not delete the source scene"
@@ -112,6 +135,60 @@ fn clicking_a_real_drawing_does_not_open_the_markdown_editor() {
             .contains("elephant-freya-drawing-test"),
         "the real Excalidraw JSON must remain the source of truth"
     );
+
+    click_label(&mut runner, "Close drawing");
+    assert!(labeled_nodes(&runner, "DrawingCanvas").is_empty());
+}
+
+#[test]
+fn drawing_toolbar_selects_tools_and_supports_save_and_escape_shortcuts() {
+    let fixture = FixtureVault::new("toolbar-shortcuts");
+    let scene_path = fixture.seed_scene("Shortcuts.excalidraw");
+    let root = fixture.root.clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Shortcuts");
+    runner.sync_and_update();
+
+    assert_eq!(
+        labeled_nodes(&runner, "Drawing toolbar active tool: Selection").len(),
+        1
+    );
+    assert_eq!(labeled_nodes(&runner, "Rectangle tool (2)").len(), 1);
+    click_label(&mut runner, "Rectangle tool (2)");
+    assert_eq!(
+        labeled_nodes(&runner, "Drawing toolbar active tool: Rectangle").len(),
+        1
+    );
+
+    press_key(
+        &mut runner,
+        Key::Character("7".to_owned()),
+        Modifiers::default(),
+    );
+    assert_eq!(
+        labeled_nodes(&runner, "Drawing toolbar active tool: Freedraw").len(),
+        1
+    );
+    press_key(
+        &mut runner,
+        Key::Character("s".to_owned()),
+        Modifiers::ctrl_or_meta(),
+    );
+    assert!(scene_path.is_file());
+    assert_eq!(labeled_nodes(&runner, "Library error").len(), 0);
+
+    press_key(
+        &mut runner,
+        Key::Named(freya::prelude::NamedKey::Escape),
+        Modifiers::default(),
+    );
+    assert!(labeled_nodes(&runner, "DrawingCanvas").is_empty());
 }
 
 #[test]
@@ -247,4 +324,46 @@ fn create_drawing_action_persists_real_scene_and_mounts_native_renderer() {
         created_scenes, 1,
         "the native layer must create one real scene"
     );
+}
+
+#[test]
+fn drawing_toolbar_exposes_excalidraw_tools_and_keyboard_route_controls() {
+    let fixture = FixtureVault::new("toolbar");
+    fixture.seed_scene("Toolbar.excalidraw");
+    let root = fixture.root.clone();
+    let (mut runner, ()) = TestingRunner::new(
+        move || app_with_vault(root.clone()),
+        (1280., 840.).into(),
+        |_| (),
+        1.,
+    );
+
+    click_label(&mut runner, "Toolbar");
+    runner.sync_and_update();
+
+    assert_eq!(labeled_nodes(&runner, "Drawing tools").len(), 1);
+    for (tool, shortcut) in [
+        ("Selection", "1"),
+        ("Hand", "H"),
+        ("Rectangle", "2"),
+        ("Ellipse", "4"),
+        ("Diamond", "3"),
+        ("Arrow", "5"),
+        ("Line", "6"),
+        ("Freedraw", "7"),
+        ("Text", "8"),
+        ("Image", "9"),
+        ("Eraser", "0"),
+    ] {
+        assert_eq!(
+            labeled_nodes(&runner, &format!("{tool} tool ({shortcut})")).len(),
+            1,
+            "toolbar must expose the {tool} tool and its shortcut"
+        );
+    }
+
+    click_label(&mut runner, "Rectangle tool (2)");
+    click_label(&mut runner, "Close drawing");
+    runner.sync_and_update();
+    assert!(labeled_nodes(&runner, "DrawingCanvas").is_empty());
 }

@@ -79,8 +79,9 @@ pub(super) fn search_results_content(
                     .height(Size::px(68.))
                     .padding(Gaps::new(12., 16., 12., 16.))
                     .horizontal()
-                    .spacing(12.)
+                    .spacing(8.)
                     .cross_align(Alignment::Center)
+                    .overflow(Overflow::Clip)
                     .a11y_alt(format!("Open setting {label_text}"))
                     .on_mouse_up(move |_| {
                         *query_state.write() = String::new();
@@ -88,32 +89,57 @@ pub(super) fn search_results_content(
                     })
                     .child(
                         rect()
-                            .width(Size::fill())
+                            .width(Size::flex(1.))
+                            .min_width(Size::px(0.))
+                            .max_width(Size::percent(70.))
+                            .height(Size::fill())
                             .spacing(3.)
                             .child(
                                 label()
+                                    .width(Size::fill())
                                     .font_size(12.5)
                                     .font_weight(FontWeight::BOLD)
                                     .text(label_text),
                             )
                             .child(
                                 label()
+                                    .width(Size::fill())
                                     .font_size(10.5)
                                     .color(theme::token_color(palette, theme::ThemeToken::Muted))
                                     .text(entry.description),
                             ),
                     )
                     .child(
-                        label()
-                            .font_size(9.5)
-                            .color(theme::token_color(palette, theme::ThemeToken::Muted))
-                            .text(section_label),
+                        rect()
+                            .width(Size::px(64.))
+                            .height(Size::fill())
+                            .center()
+                            .child(
+                                label()
+                                    .width(Size::fill())
+                                    .font_size(9.5)
+                                    .color(theme::token_color(
+                                        palette,
+                                        theme::ThemeToken::Muted,
+                                    ))
+                                    .a11y_alt(format!("Setting category {section_label}"))
+                                    .text(section_label),
+                            ),
                     )
                     .child(
-                        label()
-                            .font_size(15.)
-                            .color(theme::token_color(palette, theme::ThemeToken::Muted))
-                            .text("›"),
+                        rect()
+                            .width(Size::px(16.))
+                            .height(Size::fill())
+                            .center()
+                            .child(
+                                label()
+                                    .font_size(15.)
+                                    .color(theme::token_color(
+                                        palette,
+                                        theme::ThemeToken::Muted,
+                                    ))
+                                    .text("›"),
+                            ),
                     ),
             );
         }

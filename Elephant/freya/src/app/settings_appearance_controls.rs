@@ -3,7 +3,7 @@
 use freya::prelude::*;
 
 use crate::{
-    settings_contract::{CORE_ICON_RAIL_ITEMS, THEME_FAMILIES},
+    settings_contract::{CORE_ICON_RAIL_ITEMS, SUPPORTED_LANGUAGE_OPTIONS, THEME_FAMILIES},
     theme,
 };
 
@@ -20,6 +20,7 @@ pub(super) fn appearance_settings(
         .find(|family| current_theme == family.light || current_theme == family.dark)
         .unwrap_or(&THEME_FAMILIES[0]);
     let dark = current_theme == active_family.dark;
+    let two_theme_columns = Platform::get().root_size.read().width >= 960.;
 
     let mut controls = vec![
         color_mode(
@@ -29,12 +30,14 @@ pub(super) fn appearance_settings(
             active_family.dark,
             dark,
         ),
+        language_settings(state),
         theme_selector(
             state,
             shell_state,
             &current_theme,
             dark,
             snapshot.settings.theme_expanded,
+            two_theme_columns,
         ),
     ];
 
@@ -57,6 +60,219 @@ pub(super) fn appearance_settings(
         "Floating surfaces",
     ));
     controls
+}
+
+fn language_settings(state: State<SettingsViewState>) -> Element {
+    let snapshot = state.read().clone();
+    let palette = snapshot.effects().palette();
+    let current = snapshot.runtime.language_preference();
+    let expanded = snapshot.settings.language_expanded;
+    let current_text = language_text(&current);
+    let mut toggle_state = state;
+    let toggle_label = if expanded {
+        "Collapse language options"
+    } else {
+        "Expand language options"
+    };
+
+    let header = rect()
+        .width(Size::fill())
+        .height(Size::px(42.))
+        .horizontal()
+        .main_align(Alignment::SpaceBetween)
+        .cross_align(Alignment::Center)
+        .child(
+            rect()
+                .spacing(3.)
+                .child(
+                    label()
+                        .font_size(13.)
+                        .font_weight(FontWeight::BOLD)
+                        .text("Language"),
+                )
+                .child(
+                    label()
+                        .font_size(11.5)
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                        .text("Store a language preference; Freya translations are not available yet."),
+                ),
+        )
+        .child(
+            rect()
+                .horizontal()
+                .spacing(8.)
+                .cross_align(Alignment::Center)
+                .child(
+                    label()
+                        .font_size(11.)
+                        .a11y_alt(format!("Current language: {current_text}"))
+                        .text(current_text),
+                )
+                .child(
+                    rect()
+                        .width(Size::px(29.))
+                        .height(Size::px(29.))
+                        .center()
+                        .with_corner_radius(8.)
+                        .a11y_alt(toggle_label)
+                        .on_mouse_up(move |_| {
+                            toggle_state.write().settings.toggle_language_expansion();
+                        })
+                        .child(label().font_size(14.).text(if expanded {
+                            "⌃"
+                        } else {
+                            "⌄"
+                        })),
+                ),
+        );
+
+    let mut control = rect()
+        .width(Size::fill())
+        .padding(Gaps::new(13., 18., 13., 18.))
+        .background(theme::token_color(palette, theme::ThemeToken::Surface))
+        .spacing(10.)
+        .a11y_alt("Language")
+        .child(header);
+
+    if expanded {
+        let mut options = vec![(
+            "system".to_owned(),
+            "System".to_owned(),
+            system_language_code(),
+        )];
+        options.extend(SUPPORTED_LANGUAGE_OPTIONS.iter().map(|option| {
+            (
+                option.code.to_owned(),
+                option.native_name.to_owned(),
+                option.display_name.to_owned(),
+            )
+        }));
+
+        let mut options_list = rect().width(Size::fill()).spacing(6.);
+        for (code, native_name, display_name) in options {
+            options_list = options_list.child(language_choice(
+                state,
+                code.clone(),
+                native_name,
+                display_name,
+                code == current,
+                palette,
+            ));
+        }
+        control = control.child(options_list);
+    }
+
+    if let Some(error) = snapshot.runtime.language_error() {
+        control = control.child(
+            rect().a11y_alt("Language preference error").child(
+                label()
+                    .color(theme::token_color(palette, theme::ThemeToken::Danger))
+                    .text(error),
+            ),
+        );
+    }
+    if let Some(feedback) = snapshot.runtime.feedback {
+        if feedback.contains("Language") {
+            control = control.child(
+                rect().a11y_alt("Language status").child(
+                    label()
+                        .color(theme::token_color(palette, theme::ThemeToken::Muted))
+                        .text(feedback),
+                ),
+            );
+        }
+    }
+
+    control.into_element()
+}
+
+fn language_choice(
+    state: State<SettingsViewState>,
+    code: String,
+    native_name: String,
+    display_name: String,
+    selected: bool,
+    palette: theme::ThemePalette,
+) -> Element {
+    let text = if code == "system" {
+        format!("System language · {display_name}")
+    } else {
+        format!("{native_name} · {display_name}")
+    };
+    let alt = if selected {
+        format!("Selected language: {text}")
+    } else if code == "system" {
+        format!("Use {text}")
+    } else {
+        format!("Use {text} language")
+    };
+    let mut state = state;
+    let selected_code = code.clone();
+    rect()
+        .width(Size::fill())
+        .height(Size::px(32.))
+        .padding(Gaps::new(0., 10., 0., 10.))
+        .center()
+        .background(theme::token_color(
+            palette,
+            if selected {
+                theme::ThemeToken::Primary
+            } else {
+                theme::ThemeToken::Soft
+            },
+        ))
+        .with_corner_radius(8.)
+        .a11y_alt(alt)
+        .on_mouse_up(move |event: Event<MouseEventData>| {
+            event.stop_propagation();
+            state
+                .write()
+                .runtime
+                .set_language_preference(selected_code.clone());
+            state.write().settings.language_expanded = false;
+        })
+        .child(
+            label()
+                .font_size(11.)
+                .color(theme::token_color(
+                    palette,
+                    if selected {
+                        theme::ThemeToken::Text
+                    } else {
+                        theme::ThemeToken::Muted
+                    },
+                ))
+                .text(text),
+        )
+        .into_element()
+}
+
+fn language_text(code: &str) -> String {
+    if code == "system" {
+        format!("System language · {}", system_language_code())
+    } else if let Some(option) = crate::settings_contract::language_option(code) {
+        format!("{} · {}", option.native_name, option.display_name)
+    } else {
+        format!("Unsupported · {code}")
+    }
+}
+
+fn system_language_code() -> String {
+    for key in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        let Ok(raw) = std::env::var(key) else {
+            continue;
+        };
+        let normalized = raw.split('.').next().unwrap_or_default().replace('_', "-");
+        if let Some(option) = SUPPORTED_LANGUAGE_OPTIONS.iter().find(|option| {
+            normalized == option.code
+                || normalized
+                    .strip_prefix(option.code)
+                    .is_some_and(|rest| rest.starts_with('-'))
+        }) {
+            return option.code.to_owned();
+        }
+    }
+    "en".to_owned()
 }
 
 fn color_mode(
@@ -129,6 +345,7 @@ fn theme_selector(
     current_theme: &str,
     dark: bool,
     expanded: bool,
+    two_columns: bool,
 ) -> Element {
     let palette = state.read().effects().palette();
     let mut toggle_state = state;
@@ -175,12 +392,18 @@ fn theme_selector(
         );
 
     if expanded {
+        let columns = if two_columns { 2 } else { 1 };
         let mut grid = rect().width(Size::fill()).spacing(9.);
-        for pair in THEME_FAMILIES.chunks(2) {
+        for pair in THEME_FAMILIES.chunks(columns) {
             let mut row = rect().width(Size::fill()).horizontal().spacing(9.);
             for family in pair {
                 let theme_id = if dark { family.dark } else { family.light };
-                row = row.child(rect().width(Size::fill()).child(super::theme_variant(
+                let card_width = if two_columns {
+                    Size::percent(49.)
+                } else {
+                    Size::fill()
+                };
+                row = row.child(rect().width(card_width).child(super::theme_variant(
                     state,
                     shell_state,
                     family.name,
@@ -189,7 +412,7 @@ fn theme_selector(
                     current_theme == theme_id,
                 )));
             }
-            if pair.len() == 1 {
+            if two_columns && pair.len() == 1 {
                 row = row.child(rect().width(Size::fill()));
             }
             grid = grid.child(row);

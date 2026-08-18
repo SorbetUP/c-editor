@@ -29,8 +29,10 @@ pub struct EditorPreferences {
 impl Default for EditorPreferences {
     fn default() -> Self {
         Self {
-            auto_save: false,
-            auto_save_delay_ms: 5000,
+            // Tauri enables autosave on shell startup when the preference is
+            // absent. Freya must preserve that user-visible contract.
+            auto_save: true,
+            auto_save_delay_ms: 160,
         }
     }
 }
@@ -124,5 +126,17 @@ impl Future for Delay {
             });
         }
         Poll::Pending
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditorPreferences;
+
+    #[test]
+    fn missing_preferences_match_tauri_autosave_startup_policy() {
+        let preferences = EditorPreferences::default();
+        assert!(preferences.auto_save);
+        assert_eq!(preferences.auto_save_delay_ms, 160);
     }
 }

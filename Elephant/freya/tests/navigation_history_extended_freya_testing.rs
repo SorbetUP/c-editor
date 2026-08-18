@@ -175,8 +175,7 @@ fn folder_back_restores_root_and_forward_restores_folder() {
     click_label(&mut runner, "Retour");
     runner.sync_and_update();
     assert!(
-        !library_cards(&runner, "Root").is_empty()
-            && !library_cards(&runner, "Other").is_empty(),
+        !library_cards(&runner, "Root").is_empty() && !library_cards(&runner, "Other").is_empty(),
         "FH-003: Back from Projects must restore the root library cards"
     );
     assert!(nodes(&runner, "NoteEditorHost").is_empty());

@@ -6,7 +6,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{navigation_contract::SidebarWidth, vault_layout};
+use crate::{
+    navigation_contract::{SidebarWidth, ICON_RAIL_SEPARATOR_PREFIX},
+    vault_layout,
+};
 
 use super::ShellState;
 
@@ -75,8 +78,10 @@ pub(super) fn read_shell_preferences(root: &Path) -> Result<ShellPreferences, St
     if let Some(order) = shell.get("railOrder").and_then(Value::as_array) {
         preferences.rail_order_persisted = true;
         let mut normalized = Vec::new();
-        for id in order.iter().filter_map(Value::as_str) {
-            if DEFAULT_RAIL_ORDER.contains(&id) && !normalized.iter().any(|item| item == id) {
+        for id in order.iter().filter_map(Value::as_str).map(str::trim) {
+            if (DEFAULT_RAIL_ORDER.contains(&id) || id.starts_with(ICON_RAIL_SEPARATOR_PREFIX))
+                && !normalized.iter().any(|item| item == id)
+            {
                 normalized.push(id.to_string());
             }
         }
