@@ -1,12 +1,13 @@
 //! Functional adapter for the official code-execution addon service.
 //!
-//! The editor view only supplies a language and source text.  Process
+//! The editor view only supplies a language and source text. Process
 //! discovery, the versioned service protocol, bounded execution and result
 //! normalization stay here so the renderer never becomes an interpreter.
 
+use crate::resource_locator;
 use serde_json::{json, Value};
 use std::{
-    env, fs,
+    fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -244,49 +245,17 @@ fn interpreter(language: &str) -> Interpreter {
 }
 
 fn service_executable() -> Result<PathBuf, String> {
-    if let Some(path) = env::var_os("ELEPHANT_CODE_EXECUTION_SERVICE") {
-        let path = PathBuf::from(path);
-        return path.is_file().then_some(path.clone()).ok_or_else(|| {
-            format!(
-                "ELEPHANT_CODE_EXECUTION_SERVICE is not a file: {}",
-                path.display()
-            )
-        });
-    }
-    let platform = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        "macos-aarch64"
-    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        "macos-x86_64"
-    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        "linux-x86_64"
-    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        "windows-x86_64"
-    } else {
-        return Err("No packaged Code execution service is available for this platform".to_owned());
-    };
-    let file = if cfg!(target_os = "windows") {
-        "elephant-code-execution.exe"
-    } else {
-        "elephant-code-execution"
-    };
-    [
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../addons/official/code-execution/native")
-            .join(platform)
-            .join(file),
-        PathBuf::from("resources/official-addons/official/code-execution/native")
-            .join(platform)
-            .join(file),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-    .ok_or_else(|| "Packaged Elephant Code execution service executable was not found".to_owned())
+    resource_locator::native_service(
+        "ELEPHANT_CODE_EXECUTION_SERVICE",
+        "code-execution",
+        "elephant-code-execution",
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{env, time::{SystemTime, UNIX_EPOCH}};
 
     #[test]
     fn language_aliases_use_the_official_interpreter_contract() {
