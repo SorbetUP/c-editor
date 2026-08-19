@@ -17,7 +17,7 @@
     "frontendDist": "../../../build/out/renderer"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
