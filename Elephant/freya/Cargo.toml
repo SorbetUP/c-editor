@@ -15,6 +15,7 @@ elephantnote-knowledge-core = { path = "../backend/knowledge-core" }
 elephant-draw = { path = "../feature-incoming/Draw" }
 elephant-note = { path = "../feature-incoming/Note" }
 freya = { version = "0.4.1", features = ["sdk"] }
+futures-timer = "3"
 muya-core = { path = "../crates/muya-core" }
 notify = "6"
 rusqlite = { version = "0.32", features = ["bundled", "bundled-full"] }
