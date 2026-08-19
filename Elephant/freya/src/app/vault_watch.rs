@@ -1,20 +1,25 @@
 //! Native filesystem watch boundary for Freya.
 //!
 //! The previous implementation fingerprinted the current directory every
-//! 500 ms. That performed repeated `read_dir + metadata + hash` work while the
-//! vault was idle and still missed useful recursive events. This bridge uses
-//! the same `notify` family as the Tauri backend, watches the active vault
-//! recursively, coalesces event bursts, and asks `ShellState` to refresh the
-//! visible directory/open note from the real filesystem.
+//! 500 ms. This bridge uses `notify`, watches the active vault recursively,
+//! coalesces event bursts, refreshes the visible shell, and sends filesystem
+//! deltas to the persistent FTS index on a serialized background worker.
 
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, TryRecvError},
+    sync::{
+        mpsc::{self, Receiver, TryRecvError},
+        Arc, Mutex,
+    },
+    thread,
     time::Duration,
 };
 
 use freya::{prelude::*, sdk::use_timeout};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
+
+use crate::{search_backend, vault_adapter::VaultAdapter};
 
 use super::ShellState;
 
@@ -26,11 +31,24 @@ enum WatchMessage {
     Error(String),
 }
 
-#[derive(Default)]
 struct WatchBridge {
     root: Option<PathBuf>,
     watcher: Option<RecommendedWatcher>,
     receiver: Option<Receiver<WatchMessage>>,
+    index_lock: Arc<Mutex<()>>,
+    index_results: Arc<Mutex<Vec<Result<search_backend::IncrementalRefresh, String>>>>,
+}
+
+impl Default for WatchBridge {
+    fn default() -> Self {
+        Self {
+            root: None,
+            watcher: None,
+            receiver: None,
+            index_lock: Arc::new(Mutex::new(())),
+            index_results: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
 }
 
 impl WatchBridge {
@@ -48,6 +66,9 @@ impl WatchBridge {
         self.watcher = None;
         self.receiver = None;
         self.root = root.clone();
+        if let Ok(mut results) = self.index_results.lock() {
+            results.clear();
+        }
         let Some(root) = root else {
             return Ok(());
         };
@@ -83,27 +104,53 @@ impl WatchBridge {
         let Some(receiver) = self.receiver.as_ref() else {
             return DrainResult::default();
         };
+        let mut paths = BTreeSet::new();
         let mut result = DrainResult::default();
         loop {
             match receiver.try_recv() {
                 Ok(WatchMessage::Changed(path)) => {
-                    result.changed = true;
                     result.events = result.events.saturating_add(1);
-                    result.last_path = Some(path);
+                    paths.insert(path);
                 }
                 Ok(WatchMessage::Error(error)) => result.error = Some(error),
                 Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
             }
         }
+        result.paths = paths.into_iter().collect();
         result
+    }
+
+    fn start_index_refresh(&self, vault: VaultAdapter, paths: Vec<PathBuf>) {
+        if paths.is_empty() {
+            return;
+        }
+        let lock = Arc::clone(&self.index_lock);
+        let results = Arc::clone(&self.index_results);
+        let _ = thread::Builder::new()
+            .name("elephant-search-index-refresh".to_owned())
+            .spawn(move || {
+                let result = match lock.lock() {
+                    Ok(_guard) => search_backend::refresh_paths(&vault, &paths),
+                    Err(_) => Err("Search index refresh lock is poisoned".to_owned()),
+                };
+                if let Ok(mut pending) = results.lock() {
+                    pending.push(result);
+                }
+            });
+    }
+
+    fn take_index_results(&self) -> Vec<Result<search_backend::IncrementalRefresh, String>> {
+        let Ok(mut results) = self.index_results.lock() else {
+            return vec![Err("Search index result lock is poisoned".to_owned())];
+        };
+        std::mem::take(&mut *results)
     }
 }
 
 #[derive(Default)]
 struct DrainResult {
-    changed: bool,
     events: usize,
-    last_path: Option<PathBuf>,
+    paths: Vec<PathBuf>,
     error: Option<String>,
 }
 
@@ -156,23 +203,50 @@ impl Component for VaultWatcherHost {
                 return;
             }
             timeout_for_drain.reset();
+
+            for result in bridge_for_drain.read().take_index_results() {
+                match result {
+                    Ok(refresh) => eprintln!(
+                        "[freya][vault-watch] action=index-refresh-complete upserted={} removed={} rebuilt={}",
+                        refresh.upserted, refresh.removed, refresh.rebuilt
+                    ),
+                    Err(error) => {
+                        eprintln!("[freya][vault-watch] action=index-refresh-failure error={error}");
+                        state_for_drain.write().error =
+                            Some(format!("Search index refresh failed: {error}"));
+                    }
+                }
+            }
+
             let drained = bridge_for_drain.write().drain();
             if let Some(error) = drained.error {
                 eprintln!("[freya][vault-watch] action=event-failure error={error}");
                 state_for_drain.write().error = Some(format!("Vault watcher failed: {error}"));
             }
-            if drained.changed {
-                state_for_drain.write().refresh_current_directory_from_external();
-                eprintln!(
-                    "[freya][vault-watch] action=refresh events={} path={}",
-                    drained.events,
-                    drained
-                        .last_path
-                        .as_deref()
-                        .map(|path| path.display().to_string())
-                        .unwrap_or_default()
-                );
+            if drained.paths.is_empty() {
+                return;
             }
+
+            let vault = state_for_drain.read().vault.clone();
+            if let Some(vault) = vault {
+                bridge_for_drain
+                    .read()
+                    .start_index_refresh(vault, drained.paths.clone());
+            }
+
+            state_for_drain
+                .write()
+                .refresh_current_directory_from_external();
+            eprintln!(
+                "[freya][vault-watch] action=refresh events={} unique_paths={} last_path={}",
+                drained.events,
+                drained.paths.len(),
+                drained
+                    .paths
+                    .last()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default()
+            );
         });
 
         rect()
@@ -185,7 +259,10 @@ impl Component for VaultWatcherHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, thread, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs, thread,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn temp_root(label: &str) -> PathBuf {
         let stamp = SystemTime::now()
@@ -206,7 +283,7 @@ mod tests {
         let mut observed = false;
         for _ in 0..100 {
             let result = bridge.drain();
-            if result.changed {
+            if !result.paths.is_empty() {
                 observed = true;
                 break;
             }
@@ -217,9 +294,27 @@ mod tests {
     }
 
     #[test]
+    fn watcher_coalesces_duplicate_paths_in_one_ui_drain() {
+        let root = temp_root("coalesce");
+        let mut bridge = WatchBridge::default();
+        bridge.configure(Some(&root)).unwrap();
+        let note = root.join("Alpha.md");
+        fs::write(&note, "one").unwrap();
+        fs::write(&note, "two").unwrap();
+        thread::sleep(Duration::from_millis(100));
+        let result = bridge.drain();
+        let count = result.paths.iter().filter(|path| *path == &note).count();
+        assert!(count <= 1, "duplicate watcher paths must be coalesced");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn hidden_and_temporary_paths_are_filtered() {
         let root = Path::new("/vault");
-        assert!(should_ignore(root, Path::new("/vault/.elephantnote/index.sqlite")));
+        assert!(should_ignore(
+            root,
+            Path::new("/vault/.elephantnote/index.sqlite")
+        ));
         assert!(should_ignore(root, Path::new("/vault/.assets/image.png")));
         assert!(should_ignore(root, Path::new("/vault/note.md.tmp")));
         assert!(!should_ignore(root, Path::new("/vault/Folder/note.md")));
