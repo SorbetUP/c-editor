@@ -7,8 +7,9 @@
 use std::path::Path;
 
 use super::{
-    production_entries, types::VaultDescriptor, AdapterError, AdapterResult, DeleteResult,
-    EmptyTrashResult, RestoreResult, TrashEntry,
+    config, production_entries,
+    types::{self, VaultDescriptor},
+    AdapterError, AdapterResult, DeleteResult, EmptyTrashResult, RestoreResult, TrashEntry,
 };
 
 pub(super) fn delete(
@@ -21,8 +22,12 @@ pub(super) fn delete(
     serde_json::from_value(value).map_err(AdapterError::from)
 }
 
-pub(super) fn list(_root: &Path, descriptor: &VaultDescriptor) -> AdapterResult<Vec<TrashEntry>> {
-    let values = production_entries::list_trash(descriptor).map_err(AdapterError::from)?;
+/// Keep the historical Freya adapter signature while delegating the operation
+/// to production. `list_trash` only consumes the descriptor path, so rebuilding
+/// the descriptor from the already-canonical adapter root is lossless here.
+pub(super) fn list(root: &Path) -> AdapterResult<Vec<TrashEntry>> {
+    let descriptor = descriptor_for_root(root);
+    let values = production_entries::list_trash(&descriptor).map_err(AdapterError::from)?;
     values
         .into_iter()
         .map(|value| serde_json::from_value(value).map_err(AdapterError::from))
@@ -39,19 +44,38 @@ pub(super) fn restore(
     serde_json::from_value(value).map_err(AdapterError::from)
 }
 
-pub(super) fn empty(_root: &Path, descriptor: &VaultDescriptor) -> AdapterResult<EmptyTrashResult> {
-    let value = production_entries::empty_trash(descriptor).map_err(AdapterError::from)?;
+pub(super) fn empty(root: &Path) -> AdapterResult<EmptyTrashResult> {
+    let descriptor = descriptor_for_root(root);
+    let value = production_entries::empty_trash(&descriptor).map_err(AdapterError::from)?;
     serde_json::from_value(value).map_err(AdapterError::from)
+}
+
+fn descriptor_for_root(root: &Path) -> VaultDescriptor {
+    let name = config::basename(root);
+    VaultDescriptor {
+        id: types::slug_id(&name),
+        name,
+        path: root.to_string_lossy().replace('\\', "/"),
+        icon: String::new(),
+        last_opened_at: config::now_string(),
+        enabled: true,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::vault_adapter::VaultAdapter;
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn fixture() -> (std::path::PathBuf, VaultAdapter) {
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let root = std::env::temp_dir().join(format!("elephant-trash-shared-{stamp}"));
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("Note.md"), "# Note\n").unwrap();
@@ -65,13 +89,13 @@ mod tests {
         let deleted = delete(vault.descriptor(), &root, "Note.md").unwrap();
         assert!(deleted.deleted);
         assert_eq!(deleted.original_path, "Note.md");
-        let items = list(&root, vault.descriptor()).unwrap();
+        let items = list(&root).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].restore_token, deleted.restore_token);
         let restored = restore(vault.descriptor(), &root, &deleted.trash_path).unwrap();
         assert!(restored.restored);
         assert!(root.join("Note.md").is_file());
-        let emptied = empty(&root, vault.descriptor()).unwrap();
+        let emptied = empty(&root).unwrap();
         assert!(emptied.emptied);
         let _ = fs::remove_dir_all(root);
     }
