@@ -1,90 +1,121 @@
-//! Small polling boundary for external vault changes.
+//! Native filesystem watch boundary for Freya.
 //!
-//! The watcher never owns library state or renders a replacement list.  It
-//! only produces a deterministic directory fingerprint and asks `ShellState`
-//! to reload the current page when the real filesystem changes.
+//! The previous implementation fingerprinted the current directory every
+//! 500 ms. That performed repeated `read_dir + metadata + hash` work while the
+//! vault was idle and still missed useful recursive events. This bridge uses
+//! the same `notify` family as the Tauri backend, watches the active vault
+//! recursively, coalesces event bursts, and asks `ShellState` to refresh the
+//! visible directory/open note from the real filesystem.
 
 use std::{
-    collections::hash_map::DefaultHasher,
-    fs,
-    hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver, TryRecvError},
     time::Duration,
 };
 
 use freya::{prelude::*, sdk::use_timeout};
+use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 
 use super::ShellState;
 
-const POLL_INTERVAL: Duration = Duration::from_millis(500);
+const UI_DRAIN_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct DirectoryFingerprint {
-    pub(super) digest: u64,
-    pub(super) entries: usize,
+#[derive(Debug)]
+enum WatchMessage {
+    Changed(PathBuf),
+    Error(String),
 }
 
-pub(super) fn fingerprint(
-    root: &Path,
-    relative_path: &str,
-) -> Result<DirectoryFingerprint, String> {
-    let directory = safe_directory(root, relative_path)?;
-    let mut records = Vec::new();
-    for entry in fs::read_dir(&directory).map_err(|error| {
-        format!(
-            "Read watched vault directory {}: {error}",
-            directory.display()
-        )
-    })? {
-        let entry = entry.map_err(|error| format!("Read watched vault entry: {error}"))?;
-        let name = entry.file_name();
-        if name.to_string_lossy().starts_with('.') {
-            continue;
+#[derive(Default)]
+struct WatchBridge {
+    root: Option<PathBuf>,
+    watcher: Option<RecommendedWatcher>,
+    receiver: Option<Receiver<WatchMessage>>,
+}
+
+impl WatchBridge {
+    fn configure(&mut self, root: Option<&Path>) -> Result<(), String> {
+        let root = root
+            .map(|root| {
+                std::fs::canonicalize(root)
+                    .map_err(|error| format!("Vault is unavailable: {error}"))
+            })
+            .transpose()?;
+        if self.root == root {
+            return Ok(());
         }
-        let metadata = entry
-            .metadata()
-            .map_err(|error| format!("Read watched vault metadata: {error}"))?;
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|value| (value.as_secs(), value.subsec_nanos()))
-            .unwrap_or_default();
-        records.push((
-            name.to_string_lossy().into_owned(),
-            metadata.is_dir(),
-            metadata.len(),
-            modified,
-        ));
+
+        self.watcher = None;
+        self.receiver = None;
+        self.root = root.clone();
+        let Some(root) = root else {
+            return Ok(());
+        };
+
+        let (sender, receiver) = mpsc::channel::<WatchMessage>();
+        let root_for_callback = root.clone();
+        let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
+            match event {
+                Ok(event) => {
+                    for path in event.paths {
+                        if should_ignore(&root_for_callback, &path) {
+                            continue;
+                        }
+                        let _ = sender.send(WatchMessage::Changed(path));
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(WatchMessage::Error(error.to_string()));
+                }
+            }
+        })
+        .map_err(|error| format!("Create vault watcher: {error}"))?;
+        watcher
+            .watch(&root, RecursiveMode::Recursive)
+            .map_err(|error| format!("Watch vault {}: {error}", root.display()))?;
+        self.watcher = Some(watcher);
+        self.receiver = Some(receiver);
+        eprintln!("[freya][vault-watch] action=watch-start root={}", root.display());
+        Ok(())
     }
-    records.sort();
-    let mut hasher = DefaultHasher::new();
-    records.hash(&mut hasher);
-    Ok(DirectoryFingerprint {
-        digest: hasher.finish(),
-        entries: records.len(),
-    })
+
+    fn drain(&mut self) -> DrainResult {
+        let Some(receiver) = self.receiver.as_ref() else {
+            return DrainResult::default();
+        };
+        let mut result = DrainResult::default();
+        loop {
+            match receiver.try_recv() {
+                Ok(WatchMessage::Changed(path)) => {
+                    result.changed = true;
+                    result.events = result.events.saturating_add(1);
+                    result.last_path = Some(path);
+                }
+                Ok(WatchMessage::Error(error)) => result.error = Some(error),
+                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+            }
+        }
+        result
+    }
 }
 
-fn safe_directory(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
-    let root = fs::canonicalize(root).map_err(|error| format!("Vault is unavailable: {error}"))?;
-    let relative = Path::new(relative_path);
-    if relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return Err(format!(
-            "Watched directory escapes the vault: {relative_path}"
-        ));
-    }
-    let directory = root.join(relative);
-    let canonical = fs::canonicalize(&directory)
-        .map_err(|error| format!("Watched directory is unavailable: {error}"))?;
-    canonical
-        .starts_with(&root)
-        .then_some(canonical)
-        .ok_or_else(|| format!("Watched directory escapes the vault: {relative_path}"))
+#[derive(Default)]
+struct DrainResult {
+    changed: bool,
+    events: usize,
+    last_path: Option<PathBuf>,
+    error: Option<String>,
+}
+
+fn should_ignore(root: &Path, path: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative.components().any(|component| {
+        let value = component.as_os_str().to_string_lossy();
+        value.starts_with('.') || value == "node_modules"
+    }) || path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with('~') || name.ends_with(".tmp"))
 }
 
 #[derive(PartialEq)]
@@ -94,66 +125,52 @@ pub(super) struct VaultWatcherHost {
 
 impl Component for VaultWatcherHost {
     fn render(&self) -> impl IntoElement {
-        let snapshot = self.state.read().clone();
-        let scope = snapshot
-            .vault
-            .as_ref()
-            .map(|vault| {
-                format!(
-                    "{}:{}",
-                    vault.root().display(),
-                    snapshot.library.current_path.as_str()
-                )
-            })
-            .unwrap_or_default();
-        let root = snapshot
+        let root = self
+            .state
+            .read()
             .vault
             .as_ref()
             .map(|vault| vault.root().to_path_buf());
-        let relative_path = snapshot.library.current_path.as_str().to_owned();
-        let initial_fingerprint = root
+        let scope = root
             .as_ref()
-            .and_then(|root| fingerprint(root, &relative_path).ok());
-        let fingerprint_state = use_state(move || initial_fingerprint);
-        let initial_scope = scope.clone();
-        let scope_state = use_state(move || initial_scope);
-        let timeout = use_timeout(|| POLL_INTERVAL);
+            .map(|root| root.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let bridge = use_state(WatchBridge::default);
+        let timeout = use_timeout(|| UI_DRAIN_INTERVAL);
 
-        let mut scope_state_for_effect = scope_state;
-        let mut fingerprint_for_scope = fingerprint_state;
-        let current_scope = scope.clone();
+        let mut bridge_for_scope = bridge;
+        let root_for_scope = root.clone();
+        let mut state_for_scope = self.state;
         use_side_effect_with_deps(&scope, move |_| {
-            if scope_state_for_effect.peek().clone() != current_scope {
-                scope_state_for_effect.set(current_scope.clone());
-                fingerprint_for_scope.set(None);
+            if let Err(error) = bridge_for_scope.write().configure(root_for_scope.as_deref()) {
+                eprintln!("[freya][vault-watch] action=watch-failure error={error}");
+                state_for_scope.write().error = Some(error);
             }
         });
 
-        let mut timeout_for_poll = timeout;
-        let mut fingerprint_for_poll = fingerprint_state;
-        let mut poll_state = self.state;
+        let mut timeout_for_drain = timeout;
+        let mut bridge_for_drain = bridge;
+        let mut state_for_drain = self.state;
         use_side_effect(move || {
-            if !timeout_for_poll.elapsed() {
+            if !timeout_for_drain.elapsed() {
                 return;
             }
-            timeout_for_poll.reset();
-            let Some(root) = root.as_ref() else {
-                return;
-            };
-            let next = match fingerprint(root, &relative_path) {
-                Ok(value) => value,
-                Err(error) => {
-                    eprintln!("[freya][vault-watch] action=poll-failure error={error}");
-                    return;
-                }
-            };
-            let previous = fingerprint_for_poll.peek().clone();
-            fingerprint_for_poll.set(Some(next.clone()));
-            if previous.is_some() && previous.as_ref() != Some(&next) {
-                poll_state.write().refresh_current_directory_from_external();
+            timeout_for_drain.reset();
+            let drained = bridge_for_drain.write().drain();
+            if let Some(error) = drained.error {
+                eprintln!("[freya][vault-watch] action=event-failure error={error}");
+                state_for_drain.write().error = Some(format!("Vault watcher failed: {error}"));
+            }
+            if drained.changed {
+                state_for_drain.write().refresh_current_directory_from_external();
                 eprintln!(
-                    "[freya][vault-watch] action=refresh path={} entries={}",
-                    relative_path, next.entries
+                    "[freya][vault-watch] action=refresh events={} path={}",
+                    drained.events,
+                    drained
+                        .last_path
+                        .as_deref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_default()
                 );
             }
         });
@@ -168,26 +185,43 @@ impl Component for VaultWatcherHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fs, time::SystemTime};
+    use std::{fs, thread, time::{SystemTime, UNIX_EPOCH}};
+
+    fn temp_root(label: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("elephant-freya-watch-{label}-{stamp}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
 
     #[test]
-    fn fingerprint_changes_for_real_file_addition_and_content_change() {
-        let root = std::env::temp_dir().join(format!(
-            "elephant-freya-watch-{}",
-            SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&root).unwrap();
+    fn notify_bridge_observes_real_file_changes_without_directory_polling() {
+        let root = temp_root("notify");
+        let mut bridge = WatchBridge::default();
+        bridge.configure(Some(&root)).unwrap();
         fs::write(root.join("Alpha.md"), "alpha").unwrap();
-        let first = fingerprint(&root, "").unwrap();
-        fs::write(root.join("Beta.md"), "beta").unwrap();
-        let second = fingerprint(&root, "").unwrap();
-        assert_ne!(first, second);
-        fs::write(root.join("Beta.md"), "changed").unwrap();
-        let third = fingerprint(&root, "").unwrap();
-        assert_ne!(second, third);
+        let mut observed = false;
+        for _ in 0..100 {
+            let result = bridge.drain();
+            if result.changed {
+                observed = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(observed, "notify watcher must observe a physical note write");
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn hidden_and_temporary_paths_are_filtered() {
+        let root = Path::new("/vault");
+        assert!(should_ignore(root, Path::new("/vault/.elephantnote/index.sqlite")));
+        assert!(should_ignore(root, Path::new("/vault/.assets/image.png")));
+        assert!(should_ignore(root, Path::new("/vault/note.md.tmp")));
+        assert!(!should_ignore(root, Path::new("/vault/Folder/note.md")));
     }
 }
