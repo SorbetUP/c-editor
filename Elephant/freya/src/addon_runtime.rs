@@ -2,10 +2,12 @@
 
 use crate::{
     addon_adapter::{self, InstalledAddon},
+    addon_host,
     addon_worker::{AddonWorker, AddonWorkerConfig},
+    resource_locator,
     vault_layout,
 };
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt, fs,
@@ -23,7 +25,12 @@ pub struct RuntimeManager {
 
 impl Default for RuntimeManager {
     fn default() -> Self {
-        Self::new("node")
+        // Development builds may deliberately fall back to system Node through
+        // ResourceLocator. Release lookup is bundle-first and fails visibly if
+        // a runtime is missing.
+        let node_executable = resource_locator::node_runtime()
+            .unwrap_or_else(|error| PathBuf::from(format!("__elephant_missing_node__:{error}")));
+        Self::new(node_executable)
     }
 }
 
@@ -151,7 +158,11 @@ impl RuntimeManager {
             manifest,
         ))
         .map_err(|error| visible_error("Start", &addon.manifest.id, &error.to_string()))?;
-        let mut broker = host_rpc;
+        let root = root.to_path_buf();
+        let addon_for_broker = addon.clone();
+        let mut broker = move |method: &str, params: &Value| {
+            addon_host::handle(&root, &addon_for_broker, method, params)
+        };
         if let Err(error) = worker.activate_with_broker(&mut broker) {
             let message = visible_error("Activate", &addon.manifest.id, &error.to_string());
             log(
@@ -178,7 +189,22 @@ impl RuntimeManager {
             return Ok(());
         };
         let pid = worker.pid();
-        let mut broker = host_rpc;
+        let root = self.vault_root.clone();
+        let addon = root
+            .as_deref()
+            .and_then(|root| installed_addon(root, addon_id).ok());
+        let mut broker = move |method: &str, params: &Value| {
+            match (root.as_deref(), addon.as_ref()) {
+                (Some(root), Some(addon)) => addon_host::handle(root, addon, method, params),
+                _ if method == "app.info" => Ok(serde_json::json!({
+                    "name": "ElephantNote",
+                    "runtime": "freya",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "addonApiVersion": addon_adapter::ADDON_API_VERSION
+                })),
+                _ => Err(format!("Addon host context is unavailable during shutdown: {method}")),
+            }
+        };
         let result = worker
             .deactivate_with_broker(&mut broker)
             .map(|_| ())
@@ -321,18 +347,6 @@ fn runtime_entry(root: &Path, addon: &InstalledAddon) -> Result<PathBuf, String>
         return Err("Addon runtime entry escapes its package directory".to_owned());
     }
     Ok(entry)
-}
-
-fn host_rpc(method: &str, _params: &Value) -> Result<Value, String> {
-    match method {
-        "app.info" => Ok(json!({
-            "name": "ElephantNote",
-            "runtime": "freya",
-            "version": env!("CARGO_PKG_VERSION"),
-            "addonApiVersion": addon_adapter::ADDON_API_VERSION
-        })),
-        _ => Err(format!("Freya addon host RPC is unavailable: {method}")),
-    }
 }
 
 fn combine(first: Result<(), String>, second: Result<(), String>) -> Result<(), String> {
