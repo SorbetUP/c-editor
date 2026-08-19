@@ -169,6 +169,10 @@ fn resolve_watch_target(app: &AppHandle, path: &str) -> R<PathBuf> {
   assert_target_inside_root(Path::new(&vault.path), Path::new(path))
 }
 
+fn watcher_key(window_id: &str, target: &Path) -> String {
+  format!("{window_id}:{}", normalize_event_path(target))
+}
+
 #[tauri::command]
 pub fn tauri_watcher_watch_file(
   app: AppHandle,
@@ -248,33 +252,30 @@ fn watch_target(
   });
 
   let mut guard = state.watchers.lock().map_err(|e| e.to_string())?;
-  let key = format!("{window_id}:{}", normalize_event_path(&target));
-  guard.insert(key, watcher);
+  guard.insert(watcher_key(window_id, &target), watcher);
   Ok(())
 }
 
 #[tauri::command]
 pub fn tauri_watcher_unwatch_file(
+  app: AppHandle,
   state: State<'_, WatcherState>,
   window_id: String,
   path: String,
 ) -> R<()> {
-  remove_watcher(
-    &state,
-    &format!("{window_id}:{}", normalize_event_path(Path::new(&path))),
-  )
+  let target = resolve_watch_target(&app, &path)?;
+  remove_watcher(&state, &watcher_key(&window_id, &target))
 }
 
 #[tauri::command]
 pub fn tauri_watcher_unwatch_directory(
+  app: AppHandle,
   state: State<'_, WatcherState>,
   window_id: String,
   path: String,
 ) -> R<()> {
-  remove_watcher(
-    &state,
-    &format!("{window_id}:{}", normalize_event_path(Path::new(&path))),
-  )
+  let target = resolve_watch_target(&app, &path)?;
+  remove_watcher(&state, &watcher_key(&window_id, &target))
 }
 
 #[tauri::command]
@@ -420,5 +421,15 @@ mod tests {
     assert!(assert_target_inside_root(&root, &outside).is_err());
     fs::remove_dir_all(root).ok();
     fs::remove_dir_all(outside).ok();
+  }
+
+  #[test]
+  fn watcher_key_is_identical_for_watch_and_unwatch_after_canonicalization() {
+    let root = std::env::temp_dir().join(format!("elephant-watch-key-{}", std::process::id()));
+    let folder = root.join("Folder");
+    fs::create_dir_all(&folder).unwrap();
+    let canonical = assert_target_inside_root(&root, &folder).unwrap();
+    assert_eq!(watcher_key("main", &canonical), watcher_key("main", &canonical));
+    fs::remove_dir_all(root).ok();
   }
 }
