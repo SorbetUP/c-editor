@@ -5,7 +5,10 @@
 //! prevents sidecars and runtimes from depending on the process working
 //! directory.
 
-use std::{env, path::{Path, PathBuf}};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativePlatform {
@@ -104,12 +107,66 @@ pub fn node_runtime() -> Result<PathBuf, String> {
         });
     }
 
+    runtime_binary("node", "node", "ELEPHANT_FREYA_ALLOW_SYSTEM_NODE")
+        .or_else(|error| {
+            if cfg!(debug_assertions) {
+                Ok(PathBuf::from(platform_executable_name("node")))
+            } else {
+                Err(error)
+            }
+        })
+}
+
+/// Resolve the package-owned llama.cpp server used by Open Models.
+///
+/// The official Open Models service already honours `ELEPHANT_LLAMA_SERVER_PATH`.
+/// Freya supplies that variable when the runtime is bundled, while development
+/// may explicitly opt into a system `llama-server` binary.
+pub fn llama_server() -> Result<PathBuf, String> {
+    if let Some(path) = env::var_os("ELEPHANT_LLAMA_SERVER_PATH") {
+        let path = PathBuf::from(path);
+        return existing_file(path).map_err(|path| {
+            format!(
+                "ELEPHANT_LLAMA_SERVER_PATH does not point to a file: {}",
+                path.display()
+            )
+        });
+    }
+
+    runtime_binary(
+        "llama",
+        "llama-server",
+        "ELEPHANT_FREYA_ALLOW_SYSTEM_LLAMA",
+    )
+    .or_else(|error| {
+        if cfg!(debug_assertions)
+            || env::var_os("ELEPHANT_FREYA_ALLOW_SYSTEM_LLAMA").as_deref()
+                == Some(std::ffi::OsStr::new("1"))
+        {
+            Ok(PathBuf::from(platform_executable_name("llama-server")))
+        } else {
+            Err(error)
+        }
+    })
+}
+
+fn runtime_binary(
+    runtime_directory: &str,
+    executable_name: &str,
+    allow_system_env: &str,
+) -> Result<PathBuf, String> {
     let platform = NativePlatform::current()?.directory();
-    let file = platform_executable_name("node");
+    let file = platform_executable_name(executable_name);
     for root in installed_resource_roots() {
         for relative in [
-            PathBuf::from("runtimes").join("node").join(platform).join(&file),
-            PathBuf::from("runtime").join("node").join(platform).join(&file),
+            PathBuf::from("runtimes")
+                .join(runtime_directory)
+                .join(platform)
+                .join(&file),
+            PathBuf::from("runtime")
+                .join(runtime_directory)
+                .join(platform)
+                .join(&file),
         ] {
             let candidate = root.join(relative);
             if candidate.is_file() {
@@ -118,15 +175,13 @@ pub fn node_runtime() -> Result<PathBuf, String> {
         }
     }
 
-    // System Node remains a developer/test convenience only. A packaged
-    // release must either bundle Node or opt in explicitly.
-    if cfg!(debug_assertions)
-        || env::var_os("ELEPHANT_FREYA_ALLOW_SYSTEM_NODE").as_deref() == Some(std::ffi::OsStr::new("1"))
-    {
-        return Ok(PathBuf::from(platform_executable_name("node")));
+    if env::var_os(allow_system_env).as_deref() == Some(std::ffi::OsStr::new("1")) {
+        return Ok(PathBuf::from(file));
     }
 
-    Err("No packaged Node runtime is available for external addons".to_owned())
+    Err(format!(
+        "No packaged {executable_name} runtime is available for {platform}"
+    ))
 }
 
 pub fn installed_resource_roots() -> Vec<PathBuf> {
@@ -196,5 +251,16 @@ mod tests {
         let roots = installed_resource_roots();
         let current = env::current_dir().unwrap();
         assert!(roots.iter().all(|root| root != &current.join("resources")));
+    }
+
+    #[test]
+    fn explicit_llama_override_must_be_a_file() {
+        let previous = env::var_os("ELEPHANT_LLAMA_SERVER_PATH");
+        env::set_var("ELEPHANT_LLAMA_SERVER_PATH", "/definitely/missing/llama-server");
+        assert!(llama_server().is_err());
+        match previous {
+            Some(value) => env::set_var("ELEPHANT_LLAMA_SERVER_PATH", value),
+            None => env::remove_var("ELEPHANT_LLAMA_SERVER_PATH"),
+        }
     }
 }
