@@ -1,11 +1,12 @@
 //! Production bridge for the native Explorer surface.
 //!
 //! Exact and Smart keyword search use Elephant's production SQLite FTS index.
-//! Full Markdown scans only happen when an index is explicitly rebuilt or when
-//! a pre-index vault is queried for the first time.
+//! Search rebuilds and Knowledge Graph rebuild/projection run through the
+//! shared blocking-work bridge so Freya input/rendering never waits on a full
+//! filesystem or SQLite operation.
 
 use crate::{
-    search_backend,
+    background, search_backend,
     search_graph_contract::{
         ConceptCandidate, EvidenceChunk, SearchMatchType, SearchMode, SearchRequest, SearchResult,
         SearchSnippet, SearchStatus, SearchStatusKind, SurfaceError,
@@ -56,39 +57,72 @@ fn dispatch_search_command(
         }
         SearchCommand::Submit(request) => {
             let request_id = explorer.read().search.request_id;
-            let vault = shell.read().vault.clone();
-            match search(vault.as_ref(), &request, request_id) {
-                Ok(execution) => {
-                    explorer.write().apply_search_status(execution.status);
-                    let accepted = explorer.write().apply_search_results(
-                        request_id,
-                        &request.query,
-                        execution.results,
-                        execution.concepts,
-                    );
-                    if !accepted {
+            let Some(vault) = shell.read().vault.clone() else {
+                explorer
+                    .write()
+                    .apply_search_error(request_id, SurfaceError::NoActiveVault);
+                return;
+            };
+            let expected_vault = vault.descriptor().path.clone();
+            let worker_vault = vault.clone();
+            let request_for_worker = request.clone();
+            let query_for_apply = request.query.clone();
+            let mut explorer_for_apply = explorer;
+            let shell_for_apply = shell;
+            eprintln!(
+                "[freya][search] action=dispatch request_id={} query_len={} mode={}",
+                request_id,
+                request.query.chars().count(),
+                request.mode.as_str()
+            );
+            background::run(
+                "search-query",
+                move || search(Some(&worker_vault), &request_for_worker, request_id),
+                move |outcome| {
+                    if !same_active_vault(shell_for_apply, &expected_vault) {
                         eprintln!(
-                            "[freya][search] action=stale-ignore request_id={} query_len={}",
-                            request_id,
-                            request.query.chars().count()
+                            "[freya][search] action=stale-vault-ignore request_id={request_id}"
                         );
+                        return;
                     }
-                }
-                Err(error) => {
-                    let accepted = explorer.write().apply_search_error_for_query(
-                        request_id,
-                        &request.query,
-                        error,
-                    );
-                    if !accepted {
-                        eprintln!(
-                            "[freya][search] action=stale-error-ignore request_id={} query_len={}",
-                            request_id,
-                            request.query.chars().count()
-                        );
+                    match outcome {
+                        Ok(Ok(execution)) => {
+                            explorer_for_apply
+                                .write()
+                                .apply_search_status(execution.status);
+                            let accepted = explorer_for_apply.write().apply_search_results(
+                                request_id,
+                                &query_for_apply,
+                                execution.results,
+                                execution.concepts,
+                            );
+                            if !accepted {
+                                eprintln!(
+                                    "[freya][search] action=stale-ignore request_id={} query_len={}",
+                                    request_id,
+                                    query_for_apply.chars().count()
+                                );
+                            }
+                        }
+                        Ok(Err(error)) => {
+                            let _ = explorer_for_apply.write().apply_search_error_for_query(
+                                request_id,
+                                &query_for_apply,
+                                error,
+                            );
+                        }
+                        Err(error) => {
+                            let _ = explorer_for_apply.write().apply_search_error_for_query(
+                                request_id,
+                                &query_for_apply,
+                                SurfaceError::Unknown(format!(
+                                    "Search background worker failed: {error}"
+                                )),
+                            );
+                        }
                     }
-                }
-            }
+                },
+            );
         }
         SearchCommand::OpenResult {
             relative_path,
@@ -98,74 +132,17 @@ fn dispatch_search_command(
             relative_path,
             title,
         } => open_search_note(shell, explorer, relative_path, title),
-        SearchCommand::RefreshStatus | SearchCommand::InspectIndex => {
-            let request_id = explorer.read().search.request_id;
-            let vault = shell.read().vault.clone();
-            let Some(vault) = vault.as_ref() else {
-                explorer
-                    .write()
-                    .apply_search_error(request_id, SurfaceError::NoActiveVault);
-                return;
-            };
-            match search_backend::status(vault) {
-                Ok(status) => {
-                    let message = if matches!(command, SearchCommand::InspectIndex) {
-                        format!(
-                            "FTS index: {} ({} documents)",
-                            status.index_path.display(),
-                            status.indexed_documents
-                        )
-                    } else {
-                        format!("{} indexed documents", status.indexed_documents)
-                    };
-                    explorer
-                        .write()
-                        .apply_search_status(to_search_status(vault, status, message));
-                }
-                Err(error) => explorer.write().apply_search_error(
-                    request_id,
-                    SurfaceError::Unknown(format!("Search status failed: {error}")),
-                ),
-            }
+        SearchCommand::RefreshStatus => {
+            spawn_search_status(shell, explorer, false);
+        }
+        SearchCommand::InspectIndex => {
+            spawn_search_status(shell, explorer, true);
         }
         SearchCommand::RebuildIndex => {
-            let request_id = explorer.read().search.request_id;
-            let vault = shell.read().vault.clone();
-            let Some(vault) = vault.as_ref() else {
-                explorer
-                    .write()
-                    .apply_search_error(request_id, SurfaceError::NoActiveVault);
-                return;
-            };
-            match search_backend::rebuild(vault) {
-                Ok(refresh) => match search_backend::status(vault) {
-                    Ok(status) => explorer.write().apply_search_status(to_search_status(
-                        vault,
-                        status,
-                        format!(
-                            "Index rebuilt: {} scanned, {} updated, {} unchanged, {} removed, {} failed",
-                            refresh.scanned,
-                            refresh.indexed,
-                            refresh.unchanged,
-                            refresh.removed,
-                            refresh.failed.len()
-                        ),
-                    )),
-                    Err(error) => explorer.write().apply_search_error(
-                        request_id,
-                        SurfaceError::Unknown(format!("Search status failed after rebuild: {error}")),
-                    ),
-                },
-                Err(error) => explorer.write().apply_search_error(
-                    request_id,
-                    SurfaceError::Unknown(format!("Search rebuild failed: {error}")),
-                ),
-            }
+            spawn_search_rebuild(shell, explorer);
         }
         SearchCommand::ClearIndex => {
-            apply_search_backend_action(shell, explorer, "clear", |vault| {
-                search_backend::clear(vault)
-            });
+            apply_search_backend_action(shell, explorer, "clear", search_backend::clear);
         }
         SearchCommand::Enable => {
             apply_search_backend_action(shell, explorer, "enable", |vault| {
@@ -180,39 +157,182 @@ fn dispatch_search_command(
     }
 }
 
-fn apply_search_backend_action(
+fn spawn_search_status(
     shell: State<ShellState>,
     mut explorer: State<explorer::ExplorerState>,
-    action: &str,
-    operation: impl FnOnce(&VaultAdapter) -> Result<search_backend::BackendStatus, String>,
+    inspect: bool,
 ) {
     let request_id = explorer.read().search.request_id;
-    let vault = shell.read().vault.clone();
-    let Some(vault) = vault.as_ref() else {
+    let Some(vault) = shell.read().vault.clone() else {
         explorer
             .write()
             .apply_search_error(request_id, SurfaceError::NoActiveVault);
         return;
     };
-    match operation(vault) {
-        Ok(status) => {
-            let message = format!(
-                "Search {action} complete: {} indexed documents",
-                status.indexed_documents
-            );
-            explorer
-                .write()
-                .apply_search_status(to_search_status(vault, status, message));
-            eprintln!("[freya][search] action={action}:complete");
-        }
-        Err(error) => {
-            eprintln!("[freya][search] action={action}:failure error={error}");
-            explorer.write().apply_search_error(
-                request_id,
-                SurfaceError::Unknown(format!("Search {action} failed: {error}")),
-            );
-        }
-    }
+    let expected_vault = vault.descriptor().path.clone();
+    let worker_vault = vault.clone();
+    let apply_vault = vault;
+    let mut explorer_for_apply = explorer;
+    let shell_for_apply = shell;
+    background::run(
+        "search-status",
+        move || search_backend::status(&worker_vault),
+        move |outcome| {
+            if !same_active_vault(shell_for_apply, &expected_vault) {
+                return;
+            }
+            match outcome {
+                Ok(Ok(status)) => {
+                    let message = if inspect {
+                        format!(
+                            "FTS index: {} ({} documents)",
+                            status.index_path.display(),
+                            status.indexed_documents
+                        )
+                    } else {
+                        format!("{} indexed documents", status.indexed_documents)
+                    };
+                    explorer_for_apply
+                        .write()
+                        .apply_search_status(to_search_status(&apply_vault, status, message));
+                }
+                Ok(Err(error)) => {
+                    let _ = explorer_for_apply.write().apply_search_error(
+                        request_id,
+                        SurfaceError::Unknown(format!("Search status failed: {error}")),
+                    );
+                }
+                Err(error) => {
+                    let _ = explorer_for_apply.write().apply_search_error(
+                        request_id,
+                        SurfaceError::Unknown(format!(
+                            "Search status background worker failed: {error}"
+                        )),
+                    );
+                }
+            }
+        },
+    );
+}
+
+fn spawn_search_rebuild(
+    shell: State<ShellState>,
+    mut explorer: State<explorer::ExplorerState>,
+) {
+    let request_id = explorer.read().search.request_id;
+    let Some(vault) = shell.read().vault.clone() else {
+        explorer
+            .write()
+            .apply_search_error(request_id, SurfaceError::NoActiveVault);
+        return;
+    };
+    let expected_vault = vault.descriptor().path.clone();
+    let worker_vault = vault.clone();
+    let apply_vault = vault;
+    let mut explorer_for_apply = explorer;
+    let shell_for_apply = shell;
+    background::run(
+        "search-rebuild",
+        move || {
+            let refresh = search_backend::rebuild(&worker_vault)?;
+            let status = search_backend::status(&worker_vault)?;
+            Ok::<_, String>((refresh, status))
+        },
+        move |outcome| {
+            if !same_active_vault(shell_for_apply, &expected_vault) {
+                return;
+            }
+            match outcome {
+                Ok(Ok((refresh, status))) => {
+                    explorer_for_apply.write().apply_search_status(to_search_status(
+                        &apply_vault,
+                        status,
+                        format!(
+                            "Index rebuilt: {} scanned, {} updated, {} unchanged, {} removed, {} failed",
+                            refresh.scanned,
+                            refresh.indexed,
+                            refresh.unchanged,
+                            refresh.removed,
+                            refresh.failed.len()
+                        ),
+                    ));
+                }
+                Ok(Err(error)) => {
+                    let _ = explorer_for_apply.write().apply_search_error(
+                        request_id,
+                        SurfaceError::Unknown(format!("Search rebuild failed: {error}")),
+                    );
+                }
+                Err(error) => {
+                    let _ = explorer_for_apply.write().apply_search_error(
+                        request_id,
+                        SurfaceError::Unknown(format!(
+                            "Search rebuild background worker failed: {error}"
+                        )),
+                    );
+                }
+            }
+        },
+    );
+}
+
+fn apply_search_backend_action<Operation>(
+    shell: State<ShellState>,
+    mut explorer: State<explorer::ExplorerState>,
+    action: &'static str,
+    operation: Operation,
+) where
+    Operation:
+        FnOnce(&VaultAdapter) -> Result<search_backend::BackendStatus, String> + Send + 'static,
+{
+    let request_id = explorer.read().search.request_id;
+    let Some(vault) = shell.read().vault.clone() else {
+        explorer
+            .write()
+            .apply_search_error(request_id, SurfaceError::NoActiveVault);
+        return;
+    };
+    let expected_vault = vault.descriptor().path.clone();
+    let worker_vault = vault.clone();
+    let apply_vault = vault;
+    let mut explorer_for_apply = explorer;
+    let shell_for_apply = shell;
+    background::run(
+        "search-control",
+        move || operation(&worker_vault),
+        move |outcome| {
+            if !same_active_vault(shell_for_apply, &expected_vault) {
+                return;
+            }
+            match outcome {
+                Ok(Ok(status)) => {
+                    let message = format!(
+                        "Search {action} complete: {} indexed documents",
+                        status.indexed_documents
+                    );
+                    explorer_for_apply
+                        .write()
+                        .apply_search_status(to_search_status(&apply_vault, status, message));
+                    eprintln!("[freya][search] action={action}:complete");
+                }
+                Ok(Err(error)) => {
+                    eprintln!("[freya][search] action={action}:failure error={error}");
+                    let _ = explorer_for_apply.write().apply_search_error(
+                        request_id,
+                        SurfaceError::Unknown(format!("Search {action} failed: {error}")),
+                    );
+                }
+                Err(error) => {
+                    let _ = explorer_for_apply.write().apply_search_error(
+                        request_id,
+                        SurfaceError::Unknown(format!(
+                            "Search {action} background worker failed: {error}"
+                        )),
+                    );
+                }
+            }
+        },
+    );
 }
 
 fn to_search_status(
@@ -296,7 +416,7 @@ fn open_search_note(
 }
 
 fn dispatch_graph_command(
-    mut shell: State<ShellState>,
+    shell: State<ShellState>,
     mut explorer: State<explorer::ExplorerState>,
     command: crate::search_graph_contract::GraphCommand,
 ) {
@@ -304,55 +424,83 @@ fn dispatch_graph_command(
 
     match command {
         GraphCommand::Refresh | GraphCommand::RebuildIndex => {
-            let action = match command {
-                GraphCommand::Refresh => "refresh",
-                GraphCommand::RebuildIndex => "rebuild",
-                _ => unreachable!("graph action already matched"),
+            let action = if matches!(command, GraphCommand::Refresh) {
+                "refresh"
+            } else {
+                "rebuild"
             };
-            let vault = shell.read().vault.clone();
-            match graph_runtime::refresh(vault.as_ref(), false) {
-                Ok(execution) => {
-                    let mut snapshot = execution.snapshot;
-                    if shell.read().view == crate::navigation_contract::WorkspaceView::Canvas {
-                        let Some(vault) = vault.as_ref() else {
-                            explorer
+            let Some(vault) = shell.read().vault.clone() else {
+                explorer
+                    .write()
+                    .apply_graph_error(SurfaceError::NoActiveVault);
+                return;
+            };
+            let expected_vault = vault.descriptor().path.clone();
+            let worker_vault = vault.clone();
+            let apply_vault = vault;
+            let shell_for_apply = shell;
+            let mut explorer_for_apply = explorer;
+            eprintln!("[freya][graph] action={action}:dispatch");
+            background::run(
+                "graph-refresh",
+                move || graph_runtime::refresh(Some(&worker_vault), false),
+                move |outcome| {
+                    if !same_active_vault(shell_for_apply, &expected_vault) {
+                        eprintln!("[freya][graph] action={action}:stale-vault-ignore");
+                        return;
+                    }
+                    match outcome {
+                        Ok(Ok(execution)) => {
+                            let mut snapshot = execution.snapshot;
+                            if shell_for_apply.read().view
+                                == crate::navigation_contract::WorkspaceView::Canvas
+                            {
+                                match crate::canvas_runtime::CanvasRuntime::open(
+                                    apply_vault.root(),
+                                    snapshot.clone(),
+                                ) {
+                                    Ok(runtime) => {
+                                        snapshot = runtime.snapshot_for_render();
+                                        shell_for_apply.write().canvas = Some(runtime);
+                                    }
+                                    Err(error) => {
+                                        let message = format!("Canvas failed: {error}");
+                                        eprintln!(
+                                            "[freya][canvas] action=load-failure error={message}"
+                                        );
+                                        explorer_for_apply
+                                            .write()
+                                            .apply_graph_error(SurfaceError::Unknown(message));
+                                        return;
+                                    }
+                                }
+                            }
+                            let nodes = snapshot.nodes.len();
+                            let edges = snapshot.edges.len();
+                            eprintln!(
+                                "[freya][graph] action={action}:complete nodes={nodes} edges={edges}"
+                            );
+                            explorer_for_apply.write().apply_graph_snapshot(snapshot);
+                        }
+                        Ok(Err(error)) => {
+                            let message = format!("Graph failed: {}", error.message());
+                            eprintln!(
+                                "[freya][graph] action={action}:failure error={message}"
+                            );
+                            explorer_for_apply
                                 .write()
-                                .apply_graph_error(SurfaceError::NoActiveVault);
-                            return;
-                        };
-                        match crate::canvas_runtime::CanvasRuntime::open(
-                            vault.root(),
-                            snapshot.clone(),
-                        ) {
-                            Ok(runtime) => {
-                                snapshot = runtime.snapshot_for_render();
-                                shell.write().canvas = Some(runtime);
-                            }
-                            Err(error) => {
-                                let message = format!("Canvas failed: {error}");
-                                eprintln!("[freya][canvas] action=load-failure error={message}");
-                                explorer
-                                    .write()
-                                    .apply_graph_error(SurfaceError::Unknown(message));
-                                return;
-                            }
+                                .apply_graph_error(SurfaceError::Unknown(message));
+                        }
+                        Err(error) => {
+                            explorer_for_apply.write().apply_graph_error(
+                                SurfaceError::Unknown(format!(
+                                    "Graph background worker failed: {error}"
+                                )),
+                            );
                         }
                     }
-                    let nodes = snapshot.nodes.len();
-                    let edges = snapshot.edges.len();
-                    eprintln!(
-                        "[freya][graph] action={action}:complete nodes={nodes} edges={edges}"
-                    );
-                    explorer.write().apply_graph_snapshot(snapshot);
-                }
-                Err(error) => {
-                    let message = format!("Graph failed: {}", error.message());
-                    eprintln!("[freya][graph] action={action}:failure error={message}");
-                    explorer
-                        .write()
-                        .apply_graph_error(SurfaceError::Unknown(message));
-                }
-            }
+                },
+            );
         }
         GraphCommand::SetFilterQuery(query) => eprintln!(
             "[freya][graph] action=filter:complete query_len={}",
@@ -391,8 +539,18 @@ fn dispatch_graph_command(
                 ));
             }
         }
-        _ => eprintln!("[freya][graph] action=unsupported error=graph command not converted"),
+        other => eprintln!(
+            "[freya][graph] action=unsupported command={other:?} error=graph command not converted"
+        ),
     }
+}
+
+fn same_active_vault(shell: State<ShellState>, expected_path: &str) -> bool {
+    shell
+        .read()
+        .vault
+        .as_ref()
+        .is_some_and(|vault| vault.descriptor().path == expected_path)
 }
 
 pub(super) struct SearchExecution {
@@ -460,14 +618,19 @@ fn fts_search(
             title: hit.title,
             relative_path: hit.path,
             excerpt: excerpt.clone(),
-            tags: entry.as_ref().map(|entry| entry.tags.clone()).unwrap_or(hit.tags),
+            tags: entry
+                .as_ref()
+                .map(|entry| entry.tags.clone())
+                .unwrap_or(hit.tags),
             score,
-            match_type: if request.mode == SearchMode::Smart {
-                SearchMatchType::Hybrid
-            } else {
-                SearchMatchType::Keyword
-            },
-            snippets: vec![SearchSnippet { text: excerpt, score }],
+            // Smart currently uses the production keyword index only. Keep the
+            // observable match type honest until a real embedding backend is
+            // connected instead of labelling lexical results as hybrid.
+            match_type: SearchMatchType::Keyword,
+            snippets: vec![SearchSnippet {
+                text: excerpt,
+                score,
+            }],
             updated_at: entry.map(|entry| entry.updated_at).unwrap_or_default(),
         });
     }
@@ -479,14 +642,15 @@ fn fts_search(
         results.len(),
         backend_status.indexed_documents
     );
+    let message = if request.mode == SearchMode::Smart {
+        "Smart search currently uses the persistent keyword FTS index; semantic ranking is not connected yet"
+    } else {
+        "Search executed with the persistent FTS index"
+    };
     Ok(SearchExecution {
         concepts: concept_candidates(&results),
         results,
-        status: to_search_status(
-            vault,
-            backend_status,
-            "Search executed with the persistent FTS index".to_owned(),
-        ),
+        status: to_search_status(vault, backend_status, message.to_owned()),
     })
 }
 
