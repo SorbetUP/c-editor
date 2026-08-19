@@ -11,6 +11,7 @@ pub mod library_contract;
 mod markdown_tags;
 mod pi_adapter;
 pub mod resource_locator;
+mod search_backend;
 pub mod search_graph_contract;
 pub mod settings_contract;
 pub mod source_contracts;
