@@ -94,6 +94,7 @@ pub fn drawing_canvas_with_state_and_palette(
 ) -> Element {
     let snapshot = state.read().clone();
     let gesture_state = use_state(|| Option::<Gesture>::None);
+    let pointer_down_state = use_state(|| false);
     let last_active_tool = use_state(|| snapshot.active_tool.clone());
     let rendered_active_tool = snapshot.active_tool.clone();
     let mut reset_gesture = gesture_state;
@@ -111,19 +112,29 @@ pub fn drawing_canvas_with_state_and_palette(
     let move_gesture = gesture_state;
     let mut local_end_state = state;
     let mut local_end_gesture = gesture_state;
+    let mut pointer_down = pointer_down_state;
+    let move_pointer_down = pointer_down_state;
+    let mut release_pointer_down = pointer_down_state;
     let primitives = drawing_render::render(&snapshot);
 
     rect()
         .key(("native-excalidraw-canvas", snapshot.revision))
-        .position(Position::new_absolute().left(0.).right(0.).top(0.).bottom(0.))
+        .position(
+            Position::new_absolute()
+                .left(0.)
+                .right(0.)
+                .top(0.)
+                .bottom(0.),
+        )
         .width(Size::fill())
         .height(Size::fill())
         .background(Color::from_rgb(238, 238, 238))
         .overflow(Overflow::Clip)
         .a11y_alt("DrawingCanvas")
-        .on_mouse_down(move |event: Event<MouseEventData>| {
-            if event.button == Some(MouseButton::Left) {
-                let point = point(event.global_location);
+        .on_pointer_down(move |event: Event<PointerEventData>| {
+            if event.button() == Some(MouseButton::Left) && event.is_primary() {
+                pointer_down.set(true);
+                let point = point(event.global_location());
                 let tool = DrawingTool::from_id(pointer_state.read().active_tool.as_str());
                 if tool == DrawingTool::Selection {
                     pointer_state.write().begin_pointer(point);
@@ -154,8 +165,11 @@ pub fn drawing_canvas_with_state_and_palette(
                 event.stop_propagation();
             }
         })
-        .on_mouse_move(move |event: Event<MouseEventData>| {
-            let location = point(event.global_location);
+        .on_global_pointer_move(move |event: Event<PointerEventData>| {
+            if !*move_pointer_down.read() {
+                return;
+            }
+            let location = point(event.global_location());
             let active_tool = DrawingTool::from_id(move_state.read().active_tool.as_str());
             if active_tool == DrawingTool::Eraser {
                 move_state.write().erase_at(location);
@@ -166,7 +180,11 @@ pub fn drawing_canvas_with_state_and_palette(
             }
             event.stop_propagation();
         })
-        .on_mouse_up(move |event: Event<MouseEventData>| {
+        .on_global_pointer_press(move |event: Event<PointerEventData>| {
+            if !event.is_primary() {
+                return;
+            }
+            release_pointer_down.set(false);
             local_end_state.write().end_pointer();
             local_end_gesture.set(None);
             event.stop_propagation();
@@ -250,7 +268,11 @@ fn new_element(tool: DrawingTool, start: [f32; 2], index: usize) -> DrawingEleme
         } else {
             Vec::new()
         },
-        text: if tool == DrawingTool::Text { "Text".to_owned() } else { String::new() },
+        text: if tool == DrawingTool::Text {
+            "Text".to_owned()
+        } else {
+            String::new()
+        },
         stroke_color: "#000000".to_owned(),
         background_color: "transparent".to_owned(),
         stroke_width: 2.,
@@ -259,7 +281,11 @@ fn new_element(tool: DrawingTool, start: [f32; 2], index: usize) -> DrawingEleme
         opacity: 100.,
         angle: 0.,
         font_size: 20.,
-        end_arrowhead: if tool == DrawingTool::Arrow { Some("arrow".to_owned()) } else { None },
+        end_arrowhead: if tool == DrawingTool::Arrow {
+            Some("arrow".to_owned())
+        } else {
+            None
+        },
         start_arrowhead: None,
         is_deleted: false,
         extra: Default::default(),
@@ -288,7 +314,10 @@ fn draw_gesture(canvas: &mut DrawingCanvasState, gesture: Gesture, point: [f32; 
         DrawingTool::Arrow | DrawingTool::Line => {
             element.x = gesture.start[0];
             element.y = gesture.start[1];
-            element.points = vec![[0., 0.], [world[0] - gesture.start[0], world[1] - gesture.start[1]]];
+            element.points = vec![
+                [0., 0.],
+                [world[0] - gesture.start[0], world[1] - gesture.start[1]],
+            ];
             element.width = (world[0] - gesture.start[0]).abs();
             element.height = (world[1] - gesture.start[1]).abs();
         }

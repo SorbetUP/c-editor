@@ -10,6 +10,7 @@ rust-version = "1.91"
 path = "src/lib.rs"
 
 [dependencies]
+bytes = "1"
 elephantnote-knowledge-core = { path = "../backend/knowledge-core" }
 elephant-draw = { path = "../feature-incoming/Draw" }
 elephant-note = { path = "../feature-incoming/Note" }
