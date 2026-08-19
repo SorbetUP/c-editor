@@ -1,13 +1,18 @@
 //! Freya search lifecycle backed by Elephant's production SQLite FTS index.
 //!
 //! Querying never rescans Markdown files. A full scan is performed only when
-//! explicitly rebuilding or when an older vault has no index yet. Search
-//! enable/disable is persisted beside the index so the native surface can
-//! implement the same lifecycle commands as the Tauri search store.
+//! explicitly rebuilding, when an older vault has no index yet, or when a
+//! directory-level filesystem event makes an exact per-note delta impossible.
+//! Normal note create/modify/remove/rename events are applied incrementally.
 
 use crate::vault_adapter::{production_fts, VaultAdapter};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Component, Path, PathBuf},
+    time::UNIX_EPOCH,
+};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -20,7 +25,10 @@ struct SearchState {
 
 impl Default for SearchState {
     fn default() -> Self {
-        Self { version: 1, enabled: true }
+        Self {
+            version: 1,
+            enabled: true,
+        }
     }
 }
 
@@ -29,6 +37,13 @@ pub(crate) struct BackendStatus {
     pub enabled: bool,
     pub indexed_documents: usize,
     pub index_path: PathBuf,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct IncrementalRefresh {
+    pub upserted: usize,
+    pub removed: usize,
+    pub rebuilt: bool,
 }
 
 pub(crate) fn status(vault: &VaultAdapter) -> Result<BackendStatus> {
@@ -46,7 +61,10 @@ pub(crate) fn status(vault: &VaultAdapter) -> Result<BackendStatus> {
 }
 
 pub(crate) fn set_enabled(vault: &VaultAdapter, enabled: bool) -> Result<BackendStatus> {
-    let state = SearchState { version: 1, enabled };
+    let state = SearchState {
+        version: 1,
+        enabled,
+    };
     write_state(vault.root(), &state)?;
     if enabled && status(vault)?.indexed_documents == 0 {
         rebuild(vault)?;
@@ -104,6 +122,171 @@ pub(crate) fn query(
         .map_err(|error| format!("Unable to query search index: {error}"))
 }
 
+/// Apply real filesystem events to the production FTS index.
+///
+/// Note files can be updated exactly. Directory create/remove/rename events are
+/// intentionally collapsed into one production rebuild because the watcher may
+/// only provide the directory path while an arbitrary number of indexed notes
+/// changed beneath it.
+pub(crate) fn refresh_paths(
+    vault: &VaultAdapter,
+    changed_paths: &[PathBuf],
+) -> Result<IncrementalRefresh> {
+    if changed_paths.is_empty() || !read_state(vault.root())?.enabled {
+        return Ok(IncrementalRefresh::default());
+    }
+
+    let root = fs::canonicalize(vault.root())
+        .map_err(|error| format!("Unable to resolve active vault for search refresh: {error}"))?;
+    let mut unique = BTreeSet::new();
+    for path in changed_paths {
+        let path = if path.is_absolute() {
+            path.clone()
+        } else {
+            root.join(path)
+        };
+        if let Ok(relative) = path.strip_prefix(&root) {
+            if !is_hidden_relative_path(relative) {
+                unique.insert(path);
+            }
+        }
+    }
+    if unique.is_empty() {
+        return Ok(IncrementalRefresh::default());
+    }
+
+    let index = production_fts::FtsIndex::open(&root)
+        .map_err(|error| format!("Unable to open search index: {error}"))?;
+    let mut result = IncrementalRefresh::default();
+    let mut needs_rebuild = false;
+
+    for path in unique {
+        let relative = path
+            .strip_prefix(&root)
+            .map_err(|_| format!("Search refresh path escaped the vault: {}", path.display()))?;
+        let relative_path = relative.to_string_lossy().replace('\\', "/");
+        if relative_path.is_empty() {
+            needs_rebuild = true;
+            continue;
+        }
+
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                // A symlink can hide an arbitrary subtree. The production scan
+                // deliberately ignores it, so rebuild to remove any stale rows
+                // that may have existed before the replacement.
+                needs_rebuild = true;
+            }
+            Ok(metadata) if metadata.is_dir() => {
+                needs_rebuild = true;
+            }
+            Ok(metadata) if metadata.is_file() && is_markdown_path(&path) => {
+                let canonical = fs::canonicalize(&path)
+                    .map_err(|error| format!("Resolve changed note {relative_path}: {error}"))?;
+                if !canonical.starts_with(&root) {
+                    return Err(format!("Changed note escaped the active vault: {relative_path}"));
+                }
+                let markdown = fs::read_to_string(&canonical)
+                    .map_err(|error| format!("Read changed note {relative_path}: {error}"))?;
+                let title = vault
+                    .find_entry(&relative_path)
+                    .map(|entry| entry.title)
+                    .unwrap_or_else(|_| title_from_markdown(&relative_path, &markdown));
+                let mtime = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+                    .unwrap_or_default();
+                index
+                    .upsert_note(
+                        &vault.descriptor().id,
+                        &relative_path,
+                        &canonical.to_string_lossy(),
+                        &title,
+                        &markdown,
+                        mtime,
+                    )
+                    .map_err(|error| format!("Update search index for {relative_path}: {error}"))?;
+                result.upserted = result.upserted.saturating_add(1);
+            }
+            Ok(_) => {
+                // Non-Markdown files have no FTS row.
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if is_markdown_path(&path) {
+                    index
+                        .remove_note(&vault.descriptor().id, &relative_path)
+                        .map_err(|error| {
+                            format!("Remove deleted note {relative_path} from search index: {error}")
+                        })?;
+                    result.removed = result.removed.saturating_add(1);
+                } else {
+                    // A removed/renamed directory no longer has metadata and
+                    // can contain many stale note rows.
+                    needs_rebuild = true;
+                }
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Inspect changed search path {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
+    if needs_rebuild {
+        let refresh = index
+            .rebuild_from_files(&vault.descriptor().id, &root)
+            .map_err(|error| format!("Rebuild search index after directory change: {error}"))?;
+        if !refresh.failed.is_empty() && refresh.indexed == 0 && refresh.unchanged == 0 {
+            return Err(format!(
+                "Search refresh rebuild failed for {} path(s)",
+                refresh.failed.len()
+            ));
+        }
+        result.rebuilt = true;
+    }
+
+    eprintln!(
+        "[freya][search-index] action=filesystem-refresh changed={} upserted={} removed={} rebuilt={}",
+        changed_paths.len(),
+        result.upserted,
+        result.removed,
+        result.rebuilt
+    );
+    Ok(result)
+}
+
+fn is_markdown_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+}
+
+fn is_hidden_relative_path(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        Component::Normal(value) => value.to_string_lossy().starts_with('.'),
+        _ => false,
+    })
+}
+
+fn title_from_markdown(relative_path: &str, markdown: &str) -> String {
+    markdown
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("# ").map(str::trim))
+        .filter(|title| !title.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            Path::new(relative_path)
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Untitled")
+                .to_owned()
+        })
+}
+
 fn index_dir(root: &Path) -> PathBuf {
     root.join(".elephantnote").join("index")
 }
@@ -133,7 +316,9 @@ fn read_state(root: &Path) -> Result<SearchState> {
 
 fn write_state(root: &Path, state: &SearchState) -> Result<()> {
     let path = state_path(root);
-    let parent = path.parent().ok_or_else(|| "Search state has no parent".to_owned())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Search state has no parent".to_owned())?;
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let temporary = path.with_extension("json.tmp");
     fs::write(
@@ -154,7 +339,10 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fixture() -> (PathBuf, VaultAdapter) {
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let root = std::env::temp_dir().join(format!("elephant-freya-search-backend-{stamp}"));
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("Alpha.md"), "# Alpha\nneedle elephant search").unwrap();
@@ -193,6 +381,38 @@ mod tests {
         clear(&vault).unwrap();
         assert_eq!(status(&vault).unwrap().indexed_documents, 0);
         assert!(root.join("Alpha.md").is_file());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn filesystem_refresh_updates_and_removes_single_note_without_full_scan() {
+        let (root, vault) = fixture();
+        rebuild(&vault).unwrap();
+        let alpha = root.join("Alpha.md");
+        fs::write(&alpha, "# Alpha\nnew incremental phrase").unwrap();
+        let refreshed = refresh_paths(&vault, std::slice::from_ref(&alpha)).unwrap();
+        assert_eq!(refreshed.upserted, 1);
+        assert!(!refreshed.rebuilt);
+        assert_eq!(query(&vault, "incremental", 10).unwrap().len(), 1);
+
+        fs::remove_file(&alpha).unwrap();
+        let refreshed = refresh_paths(&vault, std::slice::from_ref(&alpha)).unwrap();
+        assert_eq!(refreshed.removed, 1);
+        assert!(!refreshed.rebuilt);
+        assert!(query(&vault, "incremental", 10).unwrap().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn directory_event_rebuilds_once_for_subtree_consistency() {
+        let (root, vault) = fixture();
+        rebuild(&vault).unwrap();
+        let folder = root.join("Folder");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("Gamma.md"), "# Gamma\nsubtree phrase").unwrap();
+        let refreshed = refresh_paths(&vault, std::slice::from_ref(&folder)).unwrap();
+        assert!(refreshed.rebuilt);
+        assert_eq!(query(&vault, "subtree", 10).unwrap().len(), 1);
         let _ = fs::remove_dir_all(root);
     }
 }
