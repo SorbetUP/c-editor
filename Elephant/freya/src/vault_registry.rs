@@ -1,8 +1,9 @@
-//! Persistent Freya vault registry matching Tauri's `elephantnote.json`.
+//! Persistent Freya vault registry using the same desktop contract as Tauri.
 //!
-//! The registry owns identities and selection only. Filesystem access remains
-//! in `VaultAdapter`; the shell consumes a selected descriptor and reloads the
-//! same production adapter for every vault switch.
+//! Freya is still a development shell, but it must not create a second source
+//! of truth for vault identity. The canonical file is therefore the Tauri
+//! `tauri-vaults.json` registry. Older Freya `elephantnote.json` registries are
+//! migrated once, atomically, and then ignored.
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -11,10 +12,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::vault_adapter::types::{next_vault_id, VaultDescriptor};
+use crate::vault_adapter::types::{next_vault_id, VaultConfig, VaultDescriptor, VAULT_SCHEMA_VERSION};
 
-const CONFIG_FILE: &str = "elephantnote.json";
-const SCHEMA_VERSION: u32 = 1;
+const CONFIG_FILE: &str = "tauri-vaults.json";
+const LEGACY_FREYA_CONFIG_FILE: &str = "elephantnote.json";
 const PROFILE_OVERRIDE_ENV: &str = "ELEPHANT_FREYA_PROFILE";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -33,18 +34,24 @@ pub(crate) struct VaultRegistry {
 
 impl VaultRegistry {
     pub(crate) fn load() -> Result<Self, String> {
-        let path = config_path()?;
-        if !path.exists() {
+        let canonical = config_path()?;
+        if canonical.exists() {
+            return read_registry(&canonical);
+        }
+
+        let legacy = canonical.with_file_name(LEGACY_FREYA_CONFIG_FILE);
+        if !legacy.exists() {
             return Ok(Self::default());
         }
-        let raw = fs::read_to_string(&path)
-            .map_err(|error| format!("read vault registry {}: {error}", path.display()))?;
-        let persisted: PersistedRegistry = serde_json::from_str(&raw)
-            .map_err(|error| format!("parse vault registry {}: {error}", path.display()))?;
-        Ok(Self {
-            vaults: persisted.vaults,
-            active_vault_id: persisted.active_vault_id,
-        })
+
+        let registry = read_registry(&legacy)?;
+        registry.persist()?;
+        eprintln!(
+            "[freya][vault-registry] action=migrate source={} target={}",
+            legacy.display(),
+            canonical.display()
+        );
+        Ok(registry)
     }
 
     pub(crate) fn persist(&self) -> Result<(), String> {
@@ -58,18 +65,16 @@ impl VaultRegistry {
                 parent.display()
             )
         })?;
-        let mut value = serde_json::to_value(PersistedRegistry {
+
+        let config = VaultConfig {
             vaults: self.vaults.clone(),
             active_vault_id: self.active_vault_id.clone(),
-        })
-        .map_err(|error| format!("encode vault registry: {error}"))?;
-        value["schemaVersion"] = serde_json::json!(SCHEMA_VERSION);
-        let temporary = path.with_extension("json.tmp");
+        };
+        let mut value = serde_json::to_value(config)
+            .map_err(|error| format!("encode vault registry: {error}"))?;
+        value["schemaVersion"] = serde_json::json!(VAULT_SCHEMA_VERSION);
         let encoded = serde_json::to_vec_pretty(&value).map_err(|error| error.to_string())?;
-        fs::write(&temporary, encoded)
-            .map_err(|error| format!("write vault registry {}: {error}", temporary.display()))?;
-        fs::rename(&temporary, &path)
-            .map_err(|error| format!("install vault registry {}: {error}", path.display()))?;
+        write_atomic(&path, &encoded)?;
         eprintln!(
             "[freya][vault-registry] action=persist path={} count={}",
             path.display(),
@@ -168,6 +173,25 @@ impl VaultRegistry {
     }
 }
 
+fn read_registry(path: &Path) -> Result<VaultRegistry, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| format!("read vault registry {}: {error}", path.display()))?;
+    let persisted: PersistedRegistry = serde_json::from_str(&raw)
+        .map_err(|error| format!("parse vault registry {}: {error}", path.display()))?;
+    let mut registry = VaultRegistry {
+        vaults: persisted.vaults,
+        active_vault_id: persisted.active_vault_id,
+    };
+    if registry.active().is_none() {
+        registry.active_vault_id = registry
+            .vaults
+            .iter()
+            .find(|vault| vault.enabled)
+            .map(|vault| vault.id.clone());
+    }
+    Ok(registry)
+}
+
 fn config_path() -> Result<PathBuf, String> {
     Ok(config_dir()?.join(CONFIG_FILE))
 }
@@ -192,6 +216,20 @@ fn config_dir() -> Result<PathBuf, String> {
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
         .unwrap_or_else(|| PathBuf::from("."));
     Ok(root.join("com.elephantnote.app"))
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("write vault registry {}: {error}", temporary.display()))?;
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        fs::remove_file(path)
+            .map_err(|error| format!("replace vault registry {}: {error}", path.display()))?;
+    }
+    fs::rename(&temporary, path)
+        .map_err(|error| format!("install vault registry {}: {error}", path.display()))?;
+    Ok(())
 }
 
 fn normalize_path(path: &Path) -> String {
@@ -231,6 +269,7 @@ mod tests {
         assert_eq!(registry.active().unwrap().id, second_record.id);
         registry.activate(&first_record.id).unwrap();
         registry.persist().unwrap();
+        assert!(profile.join(CONFIG_FILE).is_file());
         let restored = VaultRegistry::load().unwrap();
         assert_eq!(restored.active().unwrap().name, "First Vault");
         assert_eq!(restored.vaults.len(), 2);
@@ -244,6 +283,41 @@ mod tests {
         let mut restored = restored;
         restored.remove(&second_id).unwrap();
         assert_eq!(restored.vaults.len(), 1);
+
+        match previous {
+            Some(value) => env::set_var(PROFILE_OVERRIDE_ENV, value),
+            None => env::remove_var(PROFILE_OVERRIDE_ENV),
+        }
+        let _ = fs::remove_dir_all(profile);
+    }
+
+    #[test]
+    fn legacy_freya_registry_is_migrated_to_tauri_filename() {
+        let profile = std::env::temp_dir().join(format!(
+            "elephant-freya-registry-migrate-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&profile).unwrap();
+        let previous = env::var_os(PROFILE_OVERRIDE_ENV);
+        env::set_var(PROFILE_OVERRIDE_ENV, &profile);
+        let legacy = profile.join(LEGACY_FREYA_CONFIG_FILE);
+        fs::write(
+            &legacy,
+            serde_json::json!({
+                "schemaVersion": 1,
+                "vaults": [],
+                "activeVaultId": null
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let registry = VaultRegistry::load().unwrap();
+        assert!(registry.vaults.is_empty());
+        assert!(profile.join(CONFIG_FILE).is_file());
 
         match previous {
             Some(value) => env::set_var(PROFILE_OVERRIDE_ENV, value),
