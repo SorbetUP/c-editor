@@ -1,6 +1,9 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+  fs,
+  path::{Component, Path, PathBuf},
+};
 use tauri::AppHandle;
 
 use crate::vault::config as vault_config;
@@ -22,12 +25,32 @@ fn candidate_path(root: &Path, pathname: &str) -> R<PathBuf> {
     return Err(format!("Parent path components are not allowed: {pathname}"));
   }
   let candidate = PathBuf::from(pathname);
-  Ok(if candidate.is_absolute() { candidate } else { root.join(candidate) })
+  let candidate = if candidate.is_absolute() {
+    candidate
+  } else {
+    root.join(candidate)
+  };
+  // Reject lexically-outside absolute destinations before any directory is
+  // created. Canonical checks below still protect existing symlink components.
+  if !candidate.starts_with(root) {
+    return Err(format!(
+      "Refusing a vault path outside the active root: {}",
+      candidate.to_string_lossy()
+    ));
+  }
+  Ok(candidate)
 }
 
 fn existing_path_inside_root(app: &AppHandle, pathname: &str) -> R<PathBuf> {
   let root = canonical_root(app)?;
   let candidate = candidate_path(&root, pathname)?;
+  let metadata = fs::symlink_metadata(&candidate).map_err(|error| error.to_string())?;
+  if metadata.file_type().is_symlink() {
+    return Err(format!(
+      "Refusing to access a symlinked vault path: {}",
+      candidate.to_string_lossy()
+    ));
+  }
   let resolved = fs::canonicalize(&candidate).map_err(|error| error.to_string())?;
   if !resolved.starts_with(&root) {
     return Err(format!("Refusing to access a path outside the active vault: {}", resolved.to_string_lossy()));
@@ -35,20 +58,68 @@ fn existing_path_inside_root(app: &AppHandle, pathname: &str) -> R<PathBuf> {
   Ok(resolved)
 }
 
+/// Walk/create a directory beneath a canonical vault root without ever
+/// traversing a symlink component. This check happens before each creation, so
+/// a malicious `vault/link -> /outside` cannot make `create_dir_all` mutate the
+/// external target before we notice the escape.
+fn ensure_directory_inside_root(root: &Path, directory: &Path) -> R<PathBuf> {
+  let relative = directory
+    .strip_prefix(root)
+    .map_err(|_| format!("Directory is outside the active vault: {}", directory.to_string_lossy()))?;
+  let mut current = root.to_path_buf();
+  for component in relative.components() {
+    let Component::Normal(part) = component else {
+      return Err(format!("Unsafe vault directory component: {}", directory.to_string_lossy()));
+    };
+    current.push(part);
+    match fs::symlink_metadata(&current) {
+      Ok(metadata) if metadata.file_type().is_symlink() => {
+        return Err(format!(
+          "Refusing to follow a symlinked vault directory: {}",
+          current.to_string_lossy()
+        ));
+      }
+      Ok(metadata) if metadata.is_dir() => {}
+      Ok(_) => {
+        return Err(format!(
+          "Vault directory component is not a directory: {}",
+          current.to_string_lossy()
+        ));
+      }
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+        fs::create_dir(&current).map_err(|error| error.to_string())?;
+      }
+      Err(error) => return Err(error.to_string()),
+    }
+    let canonical = fs::canonicalize(&current).map_err(|error| error.to_string())?;
+    if !canonical.starts_with(root) {
+      return Err(format!(
+        "Vault directory escaped the active root: {}",
+        canonical.to_string_lossy()
+      ));
+    }
+    current = canonical;
+  }
+  Ok(current)
+}
+
 fn writable_path_inside_root(app: &AppHandle, pathname: &str) -> R<PathBuf> {
   let root = canonical_root(app)?;
   let candidate = candidate_path(&root, pathname)?;
   let parent = candidate.parent().ok_or_else(|| "The destination has no parent directory.".to_string())?;
-  fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-  let parent = fs::canonicalize(parent).map_err(|error| error.to_string())?;
-  if !parent.starts_with(&root) {
-    return Err(format!("Refusing to write outside the active vault: {}", candidate.to_string_lossy()));
-  }
+  let parent = ensure_directory_inside_root(&root, parent)?;
   let file_name = candidate.file_name().ok_or_else(|| "The destination has no file name.".to_string())?;
-  if candidate.exists() && fs::symlink_metadata(&candidate).map_err(|error| error.to_string())?.file_type().is_symlink() {
-    return Err(format!("Refusing to write through a symlink: {}", candidate.to_string_lossy()));
+  let target = parent.join(file_name);
+  if let Ok(metadata) = fs::symlink_metadata(&target) {
+    if metadata.file_type().is_symlink() {
+      return Err(format!("Refusing to write through a symlink: {}", target.to_string_lossy()));
+    }
+    let canonical = fs::canonicalize(&target).map_err(|error| error.to_string())?;
+    if !canonical.starts_with(&root) {
+      return Err(format!("Refusing to write outside the active vault: {}", canonical.to_string_lossy()));
+    }
   }
-  Ok(parent.join(file_name))
+  Ok(target)
 }
 
 fn writable_directory_inside_root(app: &AppHandle, pathname: &str) -> R<PathBuf> {
@@ -57,14 +128,7 @@ fn writable_directory_inside_root(app: &AppHandle, pathname: &str) -> R<PathBuf>
   if candidate == root {
     return Ok(root);
   }
-  let parent = candidate.parent().ok_or_else(|| "The directory has no parent.".to_string())?;
-  fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-  let parent = fs::canonicalize(parent).map_err(|error| error.to_string())?;
-  if !parent.starts_with(&root) {
-    return Err(format!("Refusing to create a directory outside the active vault: {}", candidate.to_string_lossy()));
-  }
-  let name = candidate.file_name().ok_or_else(|| "The directory has no name.".to_string())?;
-  Ok(parent.join(name))
+  ensure_directory_inside_root(&root, &candidate)
 }
 
 #[tauri::command]
@@ -92,7 +156,6 @@ pub fn tauri_vault_write_binary(app: AppHandle, pathname: String, data_base64: S
 #[tauri::command]
 pub fn tauri_vault_ensure_dir(app: AppHandle, pathname: String) -> R<Value> {
   let path = writable_directory_inside_root(&app, &pathname)?;
-  fs::create_dir_all(&path).map_err(|error| error.to_string())?;
   Ok(json!({ "ok": true, "pathname": path.to_string_lossy() }))
 }
 
@@ -137,5 +200,40 @@ mod tests {
   fn empty_paths_are_rejected() {
     let root = PathBuf::from("/tmp/elephant-vault");
     assert!(candidate_path(&root, "").is_err());
+  }
+
+  #[test]
+  fn lexical_absolute_escape_is_rejected_before_creation() {
+    let root = PathBuf::from("/tmp/elephant-vault");
+    assert!(candidate_path(&root, "/tmp/outside/new/file.bin").is_err());
+  }
+
+  #[test]
+  fn nested_directory_creation_stays_beneath_root() {
+    let root = std::env::temp_dir().join(format!("elephant-vault-path-{}", std::process::id()));
+    fs::create_dir_all(&root).unwrap();
+    let root = fs::canonicalize(&root).unwrap();
+    let nested = root.join("A/B/C");
+    let created = ensure_directory_inside_root(&root, &nested).unwrap();
+    assert!(created.starts_with(&root));
+    assert!(created.is_dir());
+    fs::remove_dir_all(root).ok();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn symlink_parent_is_rejected_before_external_subdirectory_is_created() {
+    use std::os::unix::fs::symlink;
+    let base = std::env::temp_dir().join(format!("elephant-vault-symlink-{}", std::process::id()));
+    let root = base.join("vault");
+    let outside = base.join("outside");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    let root = fs::canonicalize(&root).unwrap();
+    symlink(&outside, root.join("link")).unwrap();
+    let target = root.join("link/should-not-exist");
+    assert!(ensure_directory_inside_root(&root, &target).is_err());
+    assert!(!outside.join("should-not-exist").exists());
+    fs::remove_dir_all(base).ok();
   }
 }
