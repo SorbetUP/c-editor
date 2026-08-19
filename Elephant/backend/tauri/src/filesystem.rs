@@ -2,10 +2,9 @@ use encoding_rs::Encoding;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tauri::State;
+use tauri::AppHandle;
 
 use crate::infra::write_atomically;
-use crate::state::AppState;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MarkdownDocument {
@@ -112,8 +111,6 @@ fn read_markdown_file(path: &Path) -> std::io::Result<MarkdownDocument> {
   let (detected_eol, has_lf, has_crlf, is_mixed) = detect_line_ending(&text);
   let line_ending = if has_crlf && !has_lf {
     "crlf".into()
-  } else if has_lf && !has_crlf {
-    "lf".into()
   } else {
     "lf".into()
   };
@@ -203,15 +200,84 @@ pub fn resolve_path(path: &Path) -> Option<PathBuf> {
   fs::canonicalize(path).ok().or_else(|| Some(path.to_path_buf()))
 }
 
+fn canonical_vault_root(app: &AppHandle) -> Result<PathBuf, String> {
+  let vault = crate::vault::config::get_active_vault(app)?;
+  fs::canonicalize(&vault.path)
+    .map_err(|error| format!("Active vault is unavailable: {error}"))
+}
+
+fn absolute_candidate(root: &Path, path: &Path) -> PathBuf {
+  if path.is_absolute() {
+    path.to_path_buf()
+  } else {
+    root.join(path)
+  }
+}
+
+fn existing_path_inside_root(root: &Path, requested: &Path) -> Result<PathBuf, String> {
+  let root = fs::canonicalize(root)
+    .map_err(|error| format!("Active vault is unavailable: {error}"))?;
+  let candidate = absolute_candidate(&root, requested);
+  let target = fs::canonicalize(&candidate)
+    .map_err(|error| format!("Requested vault path is unavailable: {error}"))?;
+  if !target.starts_with(&root) {
+    return Err(format!(
+      "Refusing to access a path outside the active vault: {}",
+      target.display()
+    ));
+  }
+  Ok(target)
+}
+
+fn writable_path_inside_root(root: &Path, requested: &Path) -> Result<PathBuf, String> {
+  let root = fs::canonicalize(root)
+    .map_err(|error| format!("Active vault is unavailable: {error}"))?;
+  let candidate = absolute_candidate(&root, requested);
+  let parent = candidate
+    .parent()
+    .ok_or_else(|| "Cannot write a path without a parent directory.".to_string())?;
+  let parent = fs::canonicalize(parent)
+    .map_err(|error| format!("Requested vault parent is unavailable: {error}"))?;
+  if !parent.starts_with(&root) {
+    return Err(format!(
+      "Refusing to write outside the active vault: {}",
+      candidate.display()
+    ));
+  }
+  let file_name = candidate
+    .file_name()
+    .ok_or_else(|| "Cannot write a path without a file name.".to_string())?;
+  let target = parent.join(file_name);
+  if let Ok(metadata) = fs::symlink_metadata(&target) {
+    if metadata.file_type().is_symlink() {
+      return Err(format!("Refusing to write through a symlink: {}", target.display()));
+    }
+    let canonical = fs::canonicalize(&target)
+      .map_err(|error| format!("Requested vault file is unavailable: {error}"))?;
+    if !canonical.starts_with(&root) {
+      return Err(format!(
+        "Refusing to write outside the active vault: {}",
+        canonical.display()
+      ));
+    }
+  }
+  Ok(target)
+}
+
 #[tauri::command]
-pub fn tauri_fs_read_markdown(path: String) -> Result<MarkdownDocument, String> {
-  let path = PathBuf::from(&path);
+pub fn tauri_fs_read_markdown(app: AppHandle, path: String) -> Result<MarkdownDocument, String> {
+  let root = canonical_vault_root(&app)?;
+  let path = existing_path_inside_root(&root, Path::new(&path))?;
+  if !path.is_file() {
+    return Err("Cannot read a non-file path as Markdown.".into());
+  }
   read_markdown_file(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn tauri_fs_write_markdown(path: String, content: String, options: Option<WriteOptions>) -> Result<(), String> {
-  let path = PathBuf::from(&path);
+pub fn tauri_fs_write_markdown(app: AppHandle, path: String, content: String, options: Option<WriteOptions>) -> Result<(), String> {
+  let root = canonical_vault_root(&app)?;
+  let path = writable_path_inside_root(&root, Path::new(&path))?;
   let opts = options.unwrap_or_else(|| WriteOptions {
     encoding: None,
     is_bom: None,
@@ -222,12 +288,10 @@ pub fn tauri_fs_write_markdown(path: String, content: String, options: Option<Wr
 }
 
 #[tauri::command]
-pub fn tauri_fs_resolve_path(path: String) -> Result<String, String> {
-  let path = PathBuf::from(&path);
-  match resolve_path(&path) {
-    Some(p) => Ok(p.to_string_lossy().to_string()),
-    None => Err("cannot resolve path".into()),
-  }
+pub fn tauri_fs_resolve_path(app: AppHandle, path: String) -> Result<String, String> {
+  let root = canonical_vault_root(&app)?;
+  existing_path_inside_root(&root, Path::new(&path))
+    .map(|path| path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -272,10 +336,11 @@ fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
-pub fn tauri_fs_trash_item(path: String, _state: State<'_, AppState>) -> Result<(), String> {
-  let path = PathBuf::from(&path);
-  if !path.exists() {
-    return Err("path does not exist".into());
+pub fn tauri_fs_trash_item(app: AppHandle, path: String) -> Result<(), String> {
+  let root = canonical_vault_root(&app)?;
+  let path = existing_path_inside_root(&root, Path::new(&path))?;
+  if path == root {
+    return Err("Refusing to remove the active vault root.".into());
   }
   if path.is_dir() {
     fs::remove_dir_all(&path).map_err(|e| e.to_string())
@@ -394,6 +459,22 @@ mod tests {
     let resolved = resolve_path(&path);
     assert!(resolved.is_some());
     fs::remove_dir_all(&dir).ok();
+  }
+
+  #[test]
+  fn vault_path_helpers_reject_escape_and_symlink_targets() {
+    let root = std::env::temp_dir().join(format!("elephantnote_fs_root_{}", std::process::id()));
+    let outside = std::env::temp_dir().join(format!("elephantnote_fs_outside_{}", std::process::id()));
+    fs::create_dir_all(root.join("Folder")).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(root.join("Folder/note.md"), "inside").unwrap();
+    fs::write(outside.join("secret.md"), "outside").unwrap();
+    assert!(existing_path_inside_root(&root, &root.join("Folder/note.md")).is_ok());
+    assert!(existing_path_inside_root(&root, &outside.join("secret.md")).is_err());
+    assert!(writable_path_inside_root(&root, &root.join("Folder/new.md")).is_ok());
+    assert!(writable_path_inside_root(&root, &outside.join("new.md")).is_err());
+    fs::remove_dir_all(root).ok();
+    fs::remove_dir_all(outside).ok();
   }
 
   #[test]
