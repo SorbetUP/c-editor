@@ -9,6 +9,7 @@ pub mod canvas_runtime;
 pub mod editor;
 pub mod library_contract;
 mod markdown_tags;
+mod models_adapter;
 mod pi_adapter;
 pub mod resource_locator;
 mod search_backend;
