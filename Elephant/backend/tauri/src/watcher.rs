@@ -150,6 +150,25 @@ fn is_ignored_path(path: &Path) -> bool {
     || normalized.ends_with(".tmp")
 }
 
+fn assert_target_inside_root(root: &Path, target: &Path) -> R<PathBuf> {
+  let root = std::fs::canonicalize(root)
+    .map_err(|error| format!("active vault is unavailable: {error}"))?;
+  let target = std::fs::canonicalize(target)
+    .map_err(|error| format!("watch target is unavailable: {error}"))?;
+  if !target.starts_with(&root) {
+    return Err(format!(
+      "Refusing to watch a path outside the active vault: {}",
+      target.display()
+    ));
+  }
+  Ok(target)
+}
+
+fn resolve_watch_target(app: &AppHandle, path: &str) -> R<PathBuf> {
+  let vault = crate::vault::config::get_active_vault(app)?;
+  assert_target_inside_root(Path::new(&vault.path), Path::new(path))
+}
+
 #[tauri::command]
 pub fn tauri_watcher_watch_file(
   app: AppHandle,
@@ -177,10 +196,7 @@ fn watch_target(
   path: &str,
   mode: RecursiveMode,
 ) -> R<()> {
-  let target = PathBuf::from(path);
-  if !target.exists() {
-    return Err(format!("path does not exist: {path}"));
-  }
+  let target = resolve_watch_target(app, path)?;
   let app_handle = app.clone();
   let ignore_next = state.ignore_next.clone();
   let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
@@ -277,8 +293,13 @@ pub fn tauri_watcher_unwatch_all(state: State<'_, WatcherState>, window_id: Stri
 }
 
 #[tauri::command]
-pub fn tauri_watcher_ignore_next(state: State<'_, WatcherState>, path: String) -> R<()> {
-  state.ignore_next.register(Path::new(&path))
+pub fn tauri_watcher_ignore_next(
+  app: AppHandle,
+  state: State<'_, WatcherState>,
+  path: String,
+) -> R<()> {
+  let target = resolve_watch_target(&app, &path)?;
+  state.ignore_next.register(&target)
 }
 
 fn remove_watcher(state: &State<'_, WatcherState>, key: &str) -> R<()> {
@@ -390,14 +411,14 @@ mod tests {
   }
 
   #[test]
-  fn file_operations_emit_for_visible_path() {
-    let dir = std::env::temp_dir().join(format!("elephantnote_watch_test_{}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap();
-    let visible = dir.join("note.md");
-    assert!(!is_ignored_path(&visible));
-    let hidden = dir.join(".elephantnote").join("index.json");
-    fs::create_dir_all(hidden.parent().unwrap()).unwrap();
-    assert!(is_ignored_path(&hidden));
-    fs::remove_dir_all(&dir).ok();
+  fn watcher_target_must_stay_inside_canonical_vault() {
+    let root = std::env::temp_dir().join(format!("elephant-watch-root-{}", std::process::id()));
+    let outside = std::env::temp_dir().join(format!("elephant-watch-outside-{}", std::process::id()));
+    fs::create_dir_all(root.join("Folder")).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    assert!(assert_target_inside_root(&root, &root.join("Folder")).is_ok());
+    assert!(assert_target_inside_root(&root, &outside).is_err());
+    fs::remove_dir_all(root).ok();
+    fs::remove_dir_all(outside).ok();
   }
 }
