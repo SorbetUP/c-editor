@@ -4,6 +4,7 @@ mod addon_packages;
 pub mod addon_runtime;
 mod addon_worker;
 pub mod app;
+mod background;
 pub mod canvas_contract;
 pub mod canvas_runtime;
 pub mod editor;
