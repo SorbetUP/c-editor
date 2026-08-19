@@ -1,20 +1,20 @@
 //! Production bridge for the native Explorer surface.
 //!
-//! Search is executed through the production Tauri FTS index. This module only
-//! maps `FtsIndex::Hit` into the renderer contract; it owns no second index or
-//! result store.
+//! Exact and Smart keyword search use Elephant's production SQLite FTS index.
+//! Full Markdown scans only happen when an index is explicitly rebuilt or when
+//! a pre-index vault is queried for the first time.
 
 use crate::{
+    search_backend,
     search_graph_contract::{
         ConceptCandidate, EvidenceChunk, SearchMatchType, SearchMode, SearchRequest, SearchResult,
         SearchSnippet, SearchStatus, SearchStatusKind, SurfaceError,
     },
-    vault_adapter::{PageRequest, VaultAdapter, VaultEntry, MAX_PAGE_SIZE},
+    vault_adapter::VaultAdapter,
 };
 
 use super::{explorer, ShellState};
 use freya::prelude::State;
-use std::{collections::VecDeque, fs};
 
 #[path = "graph_runtime.rs"]
 mod graph_runtime;
@@ -41,7 +41,7 @@ fn dispatch_search_command(
     mut explorer: State<explorer::ExplorerState>,
     command: crate::search_graph_contract::SearchCommand,
 ) {
-    use crate::search_graph_contract::{SearchCommand, SurfaceError};
+    use crate::search_graph_contract::SearchCommand;
 
     match command {
         SearchCommand::Open => shell.write().search_open = true,
@@ -52,7 +52,7 @@ fn dispatch_search_command(
         SearchCommand::SetQuery(_) | SearchCommand::SetMode(_) => {}
         SearchCommand::ClearQuery => {
             explorer.write().finish_clear_query();
-            eprintln!("[freya][search] action=clear");
+            eprintln!("[freya][search] action=clear-query");
         }
         SearchCommand::Submit(request) => {
             let request_id = explorer.read().search.request_id;
@@ -98,21 +98,139 @@ fn dispatch_search_command(
             relative_path,
             title,
         } => open_search_note(shell, explorer, relative_path, title),
-        SearchCommand::RefreshStatus
-        | SearchCommand::InspectIndex
-        | SearchCommand::RebuildIndex
-        | SearchCommand::ClearIndex
-        | SearchCommand::Enable
-        | SearchCommand::Disable => {
+        SearchCommand::RefreshStatus | SearchCommand::InspectIndex => {
             let request_id = explorer.read().search.request_id;
-            eprintln!(
-                "[freya][search] action=unsupported request_id={} error=search host command unavailable",
-                request_id
+            let vault = shell.read().vault.clone();
+            let Some(vault) = vault.as_ref() else {
+                explorer
+                    .write()
+                    .apply_search_error(request_id, SurfaceError::NoActiveVault);
+                return;
+            };
+            match search_backend::status(vault) {
+                Ok(status) => {
+                    let message = if matches!(command, SearchCommand::InspectIndex) {
+                        format!(
+                            "FTS index: {} ({} documents)",
+                            status.index_path.display(),
+                            status.indexed_documents
+                        )
+                    } else {
+                        format!("{} indexed documents", status.indexed_documents)
+                    };
+                    explorer
+                        .write()
+                        .apply_search_status(to_search_status(vault, status, message));
+                }
+                Err(error) => explorer.write().apply_search_error(
+                    request_id,
+                    SurfaceError::Unknown(format!("Search status failed: {error}")),
+                ),
+            }
+        }
+        SearchCommand::RebuildIndex => {
+            let request_id = explorer.read().search.request_id;
+            let vault = shell.read().vault.clone();
+            let Some(vault) = vault.as_ref() else {
+                explorer
+                    .write()
+                    .apply_search_error(request_id, SurfaceError::NoActiveVault);
+                return;
+            };
+            match search_backend::rebuild(vault) {
+                Ok(refresh) => match search_backend::status(vault) {
+                    Ok(status) => explorer.write().apply_search_status(to_search_status(
+                        vault,
+                        status,
+                        format!(
+                            "Index rebuilt: {} scanned, {} updated, {} unchanged, {} removed, {} failed",
+                            refresh.scanned,
+                            refresh.indexed,
+                            refresh.unchanged,
+                            refresh.removed,
+                            refresh.failed.len()
+                        ),
+                    )),
+                    Err(error) => explorer.write().apply_search_error(
+                        request_id,
+                        SurfaceError::Unknown(format!("Search status failed after rebuild: {error}")),
+                    ),
+                },
+                Err(error) => explorer.write().apply_search_error(
+                    request_id,
+                    SurfaceError::Unknown(format!("Search rebuild failed: {error}")),
+                ),
+            }
+        }
+        SearchCommand::ClearIndex => {
+            apply_search_backend_action(shell, explorer, "clear", |vault| {
+                search_backend::clear(vault)
+            });
+        }
+        SearchCommand::Enable => {
+            apply_search_backend_action(shell, explorer, "enable", |vault| {
+                search_backend::set_enabled(vault, true)
+            });
+        }
+        SearchCommand::Disable => {
+            apply_search_backend_action(shell, explorer, "disable", |vault| {
+                search_backend::set_enabled(vault, false)
+            });
+        }
+    }
+}
+
+fn apply_search_backend_action(
+    shell: State<ShellState>,
+    mut explorer: State<explorer::ExplorerState>,
+    action: &str,
+    operation: impl FnOnce(&VaultAdapter) -> Result<search_backend::BackendStatus, String>,
+) {
+    let request_id = explorer.read().search.request_id;
+    let vault = shell.read().vault.clone();
+    let Some(vault) = vault.as_ref() else {
+        explorer
+            .write()
+            .apply_search_error(request_id, SurfaceError::NoActiveVault);
+        return;
+    };
+    match operation(vault) {
+        Ok(status) => {
+            let message = format!(
+                "Search {action} complete: {} indexed documents",
+                status.indexed_documents
             );
             explorer
                 .write()
-                .apply_search_error(request_id, SurfaceError::SearchUnavailable);
+                .apply_search_status(to_search_status(vault, status, message));
+            eprintln!("[freya][search] action={action}:complete");
         }
+        Err(error) => {
+            eprintln!("[freya][search] action={action}:failure error={error}");
+            explorer.write().apply_search_error(
+                request_id,
+                SurfaceError::Unknown(format!("Search {action} failed: {error}")),
+            );
+        }
+    }
+}
+
+fn to_search_status(
+    vault: &VaultAdapter,
+    status: search_backend::BackendStatus,
+    message: String,
+) -> SearchStatus {
+    SearchStatus {
+        status: if status.enabled {
+            SearchStatusKind::Ready
+        } else {
+            SearchStatusKind::Disabled
+        },
+        vault_path: vault.descriptor().path.clone(),
+        indexed_documents: status.indexed_documents,
+        total_documents: status.indexed_documents,
+        message,
+        error: String::new(),
     }
 }
 
@@ -131,10 +249,9 @@ fn open_search_note(
     );
     let vault = shell.read().vault.clone();
     let Some(vault) = vault else {
-        explorer.write().apply_search_error(
-            request_id,
-            crate::search_graph_contract::SurfaceError::NoActiveVault,
-        );
+        explorer
+            .write()
+            .apply_search_error(request_id, SurfaceError::NoActiveVault);
         return;
     };
     let entry = match vault.find_entry(&relative_path) {
@@ -145,10 +262,9 @@ fn open_search_note(
                 "[freya][search] action=open_result:failure request_id={} path={} error={error}",
                 request_id, relative_path
             );
-            explorer.write().apply_search_error(
-                request_id,
-                crate::search_graph_contract::SurfaceError::Unknown(message),
-            );
+            explorer
+                .write()
+                .apply_search_error(request_id, SurfaceError::Unknown(message));
             return;
         }
     };
@@ -173,10 +289,9 @@ fn open_search_note(
             "[freya][search] action=open_result:failure request_id={} path={} error={error}",
             request_id, relative_path
         );
-        explorer.write().apply_search_error(
-            request_id,
-            crate::search_graph_contract::SurfaceError::Unknown(error),
-        );
+        explorer
+            .write()
+            .apply_search_error(request_id, SurfaceError::Unknown(error));
     }
 }
 
@@ -185,7 +300,7 @@ fn dispatch_graph_command(
     mut explorer: State<explorer::ExplorerState>,
     command: crate::search_graph_contract::GraphCommand,
 ) {
-    use crate::search_graph_contract::{GraphCommand, SurfaceError};
+    use crate::search_graph_contract::GraphCommand;
 
     match command {
         GraphCommand::Refresh | GraphCommand::RebuildIndex => {
@@ -318,138 +433,61 @@ pub(super) fn search(
             );
             Err(SurfaceError::Unknown(message))
         }
-        SearchMode::Exact | SearchMode::Smart => {
-            let execution = exact_search(vault, request, request_id)?;
-            eprintln!(
-                "[freya][search] action=complete request_id={} mode={} results={}",
-                request_id,
-                request.mode.as_str(),
-                execution.results.len()
-            );
-            Ok(execution)
-        }
+        SearchMode::Exact | SearchMode::Smart => fts_search(vault, request, request_id),
     }
 }
 
-fn exact_search(
+fn fts_search(
     vault: &VaultAdapter,
     request: &SearchRequest,
     request_id: u64,
 ) -> Result<SearchExecution, SurfaceError> {
-    let entries = visible_markdown_entries(vault, request_id)?;
-    let query = request.query.to_lowercase();
-    let mut results = Vec::new();
-
-    for entry in &entries {
-        let markdown = fs::read_to_string(&entry.full_path).map_err(|error| {
-            eprintln!(
-                "[freya][search] action=read:failure request_id={} path={} error={error}",
-                request_id, entry.path
-            );
-            SurfaceError::Unknown(format!(
-                "Search document could not be read {}: {error}",
-                entry.path
-            ))
-        })?;
-        let haystack = format!("{}\n{}", entry.path, markdown).to_lowercase();
-        let Some(index) = haystack.find(&query) else {
-            continue;
-        };
-        let excerpt = exact_excerpt(&markdown, &query, &entry.path, &entry.excerpt);
-        let score = if index == 0 { 1.0 } else { 0.75 };
+    let hits = search_backend::query(vault, &request.query, request.limit).map_err(|error| {
+        eprintln!(
+            "[freya][search] action=query-failure request_id={} error={error}",
+            request_id
+        );
+        SurfaceError::Unknown(error)
+    })?;
+    let mut results = Vec::with_capacity(hits.len());
+    for hit in hits {
+        let entry = vault.find_entry(&hit.path).ok();
+        let score = (1.0 / (1.0 + hit.score.abs())) as f32;
+        let excerpt = hit.excerpt.clone();
         results.push(SearchResult {
-            id: format!("exact:{}", entry.path),
-            uri: format!("elephantnote://vault/{}", entry.path),
-            title: entry.title.clone(),
-            relative_path: entry.path.clone(),
+            id: format!("fts:{}", hit.path),
+            uri: format!("elephantnote://vault/{}", hit.path),
+            title: hit.title,
+            relative_path: hit.path,
             excerpt: excerpt.clone(),
-            tags: entry.tags.clone(),
+            tags: entry.as_ref().map(|entry| entry.tags.clone()).unwrap_or(hit.tags),
             score,
-            match_type: SearchMatchType::Keyword,
-            snippets: vec![SearchSnippet {
-                text: excerpt,
-                score: 1.0,
-            }],
-            updated_at: entry.updated_at.clone(),
+            match_type: if request.mode == SearchMode::Smart {
+                SearchMatchType::Hybrid
+            } else {
+                SearchMatchType::Keyword
+            },
+            snippets: vec![SearchSnippet { text: excerpt, score }],
+            updated_at: entry.map(|entry| entry.updated_at).unwrap_or_default(),
         });
-        if results.len() >= request.limit {
-            break;
-        }
     }
-
-    let scanned = entries.len();
-    let mode_message = if request.mode == SearchMode::Smart {
-        "Smart search used the exact fallback"
-    } else {
-        "Exact search scanned"
-    };
+    let backend_status = search_backend::status(vault).map_err(SurfaceError::Unknown)?;
+    eprintln!(
+        "[freya][search] action=complete request_id={} mode={} results={} indexed={}",
+        request_id,
+        request.mode.as_str(),
+        results.len(),
+        backend_status.indexed_documents
+    );
     Ok(SearchExecution {
         concepts: concept_candidates(&results),
         results,
-        status: SearchStatus {
-            status: SearchStatusKind::Ready,
-            vault_path: vault.descriptor().path.clone(),
-            indexed_documents: scanned,
-            total_documents: scanned,
-            message: format!("{mode_message} {scanned} documents"),
-            error: String::new(),
-        },
+        status: to_search_status(
+            vault,
+            backend_status,
+            "Search executed with the persistent FTS index".to_owned(),
+        ),
     })
-}
-
-fn visible_markdown_entries(
-    vault: &VaultAdapter,
-    request_id: u64,
-) -> Result<Vec<VaultEntry>, SurfaceError> {
-    let mut directories = VecDeque::from([String::new()]);
-    let mut entries = Vec::new();
-    while let Some(directory) = directories.pop_front() {
-        let mut offset = 0;
-        loop {
-            let page = vault
-                .list(
-                    PageRequest::new(directory.clone())
-                        .with_window(offset, MAX_PAGE_SIZE)
-                        .without_preview(),
-                )
-                .map_err(|error| {
-                    eprintln!(
-                        "[freya][search] action=list:failure request_id={} directory={} error={error}",
-                        request_id, directory
-                    );
-                    SurfaceError::Unknown(format!("Search could not list {directory}: {error}"))
-                })?;
-            for entry in page.entries {
-                if entry.is_directory {
-                    directories.push_back(entry.path);
-                } else if entry.path.to_ascii_lowercase().ends_with(".md") {
-                    entries.push(entry);
-                }
-            }
-            let Some(next_offset) = page.next_offset else {
-                break;
-            };
-            offset = next_offset;
-        }
-    }
-    entries.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(entries)
-}
-
-fn exact_excerpt(markdown: &str, query: &str, path: &str, fallback: &str) -> String {
-    let compact = markdown.split_whitespace().collect::<Vec<_>>().join(" ");
-    let compact_lower = compact.to_lowercase();
-    if let Some(index) = compact_lower.find(query) {
-        let start = index.saturating_sub(70);
-        let end = (index + query.len() + 90).min(compact.len());
-        if let Some(snippet) = compact.get(start..end) {
-            return snippet.to_string();
-        }
-    }
-    if path.to_lowercase().contains(query) {
-        return path.to_string();
-    }
-    fallback.to_string()
 }
 
 fn concept_candidates(results: &[SearchResult]) -> Vec<ConceptCandidate> {
@@ -486,7 +524,7 @@ fn concept_candidates(results: &[SearchResult]) -> Vec<ConceptCandidate> {
                 candidates.len() - 1
             });
         let candidate = &mut candidates[index];
-        candidate.score += result.score.max(1.0);
+        candidate.score += result.score.max(0.05);
         candidate.confidence = candidate.score.min(1.);
         if candidate.evidence_chunks.len() < 4 {
             candidate.evidence_chunks.push(EvidenceChunk {
