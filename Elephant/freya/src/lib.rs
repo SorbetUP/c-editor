@@ -1,4 +1,5 @@
 mod addon_adapter;
+mod addon_host;
 mod addon_packages;
 pub mod addon_runtime;
 mod addon_worker;
