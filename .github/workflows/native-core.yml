@@ -1,0 +1,44 @@
+name: Native Rust core
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+      - assistant/freya-native-todo-full
+    paths:
+      - "Elephant/backend/native-core/**"
+      - "Elephant/backend/tauri/src/vault_layout.rs"
+      - "Elephant/backend/tauri/src/fts.rs"
+      - "Elephant/backend/tauri/src/vault/entries.rs"
+      - "Elephant/backend/tauri/src/vault/metadata.rs"
+      - "Elephant/backend/tauri/src/vault/types.rs"
+      - ".github/workflows/native-core.yml"
+  pull_request:
+    paths:
+      - "Elephant/backend/native-core/**"
+      - "Elephant/backend/tauri/src/vault_layout.rs"
+      - "Elephant/backend/tauri/src/fts.rs"
+      - "Elephant/backend/tauri/src/vault/entries.rs"
+      - "Elephant/backend/tauri/src/vault/metadata.rs"
+      - "Elephant/backend/tauri/src/vault/types.rs"
+      - ".github/workflows/native-core.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: native-core check and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/backend/native-core -> target
+      - name: Check shared native backend
+        run: cargo check --manifest-path Elephant/backend/native-core/Cargo.toml
+      - name: Test shared native backend
+        run: cargo test --manifest-path Elephant/backend/native-core/Cargo.toml -- --test-threads=1
