@@ -48,10 +48,8 @@ pub fn lookup(shortcode: &str) -> Option<&'static str> {
 fn catalog() -> &'static [EmojiRecord] {
   static CATALOG: OnceLock<Vec<EmojiRecord>> = OnceLock::new();
   CATALOG.get_or_init(|| {
-    serde_json::from_str(include_str!(
-      "../../../../../frontend/src/muya/lib/ui/emojis/emojisJson.json"
-    ))
-    .expect("bundled Tauri Muya emoji catalog must remain valid JSON")
+    serde_json::from_str(include_str!("../../../data/muya-emojis.json"))
+      .expect("vendored Muya emoji catalog must remain valid JSON")
   })
 }
 
