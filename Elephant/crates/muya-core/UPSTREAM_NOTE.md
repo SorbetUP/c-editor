@@ -7,9 +7,9 @@ This public-tree copy exists so Elephant/Freya can build and test from a normal 
 Pinned canonical snapshot:
 
 - repository: `SorbetUP/Note`
-- commit: `78a919afdadef27621d44dc0f8397abff6da8246`
-- required Elephant gitlink target: `78a919afdadef27621d44dc0f8397abff6da8246`
-- `crates/muya-core/src` Git tree: `79cf957ebc66604dbc5ed94303ce796f120f7c04`
+- commit: `043b6abaf0ab8888397605346db4c31f257d5888`
+- required Elephant gitlink target: `043b6abaf0ab8888397605346db4c31f257d5888`
+- `crates/muya-core/src` Git tree: `655822bb55d3608db209553d007dcc308cfd2d50`
 - `crates/muya-core/data` Git tree: `7f09e2bd5ba5a1c014429a9f5e2ceeea9e452062`
 
 Development rule:
