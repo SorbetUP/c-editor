@@ -35,7 +35,6 @@ def sync_scene() -> None:
     },''',
         "additive selection interaction state",
     )
-
     text = replace_once(
         text,
         '''        let Interaction::BoxSelect {
@@ -55,7 +54,6 @@ def sync_scene() -> None:
         '''            Interaction::LassoSelect { points, .. } => Some(points.as_slice()),''',
         "additive lasso accessor",
     )
-
     text = replace_once(
         text,
         '''                self.interaction = Interaction::LassoSelect {
@@ -276,9 +274,86 @@ def sync_canvas() -> None:
     path.write_text(text)
 
 
+def sync_test() -> None:
+    path = Path("Elephant/freya/tests/drawing_additive_selection_contract.rs")
+    path.write_text(r'''#[path = "../src/app/drawing_canvas.rs"]
+mod drawing_canvas;
+
+use drawing_canvas::DrawingCanvasState;
+use serde_json::json;
+
+fn fixture() -> DrawingCanvasState {
+    DrawingCanvasState::from_json(
+        &serde_json::to_string(&json!({
+            "type":"excalidraw",
+            "elements":[
+                {"id":"a","type":"rectangle","x":10,"y":10,"width":40,"height":40},
+                {"id":"b","type":"rectangle","x":80,"y":10,"width":40,"height":40},
+                {"id":"c","type":"rectangle","x":150,"y":10,"width":40,"height":40}
+            ],
+            "appState":{},
+            "files":{}
+        }))
+        .expect("fixture json"),
+    )
+    .expect("valid fixture")
+}
+
+fn ids(canvas: &DrawingCanvasState) -> Vec<String> {
+    canvas
+        .selected_element_ids()
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn additive_click_toggles_membership() {
+    let mut canvas = fixture();
+    canvas.begin_pointer([25.0, 25.0]);
+    canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a"]);
+
+    canvas.begin_pointer_with_additive([95.0, 25.0], true);
+    canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a", "b"]);
+
+    canvas.begin_pointer_with_additive([95.0, 25.0], true);
+    canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a"]);
+}
+
+#[test]
+fn additive_box_unions_with_existing_selection() {
+    let mut canvas = fixture();
+    canvas.begin_pointer([25.0, 25.0]);
+    canvas.end_pointer();
+    canvas.begin_pointer_with_additive([140.0, 0.0], true);
+    canvas.move_pointer([205.0, 60.0]);
+    canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a", "c"]);
+}
+
+#[test]
+fn additive_lasso_unions_with_existing_selection() {
+    let mut canvas = fixture();
+    canvas.begin_pointer([25.0, 25.0]);
+    canvas.end_pointer();
+    canvas.set_active_tool_label("Lasso");
+    canvas.begin_pointer_with_additive([70.0, 0.0], true);
+    for point in [[130.0, 0.0], [130.0, 60.0], [70.0, 60.0], [70.0, 0.0]] {
+        canvas.move_pointer(point);
+    }
+    canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a", "b"]);
+}
+''')
+
+
 def main() -> None:
     sync_scene()
     sync_canvas()
+    sync_test()
 
 
 if __name__ == "__main__":
