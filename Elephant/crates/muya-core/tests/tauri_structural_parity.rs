@@ -1,5 +1,5 @@
 use muya_core::{
-  model::{BlockKind, InlineKind, NodeKind},
+  model::{BlockKind, InlineKind, InlineSyntax, NodeKind},
   parse_markdown, to_markdown,
 };
 
@@ -55,14 +55,14 @@ A [reference][two] and https://example.com and <dev@example.com> with [^source].
     node.kind,
     NodeKind::Block(BlockKind::BlockQuote)
   )));
-  assert!(reparsed.nodes.values().any(|node| matches!(
-    node.kind,
-    NodeKind::Inline(InlineKind::ReferenceLink { .. })
-  )));
-  assert!(reparsed.nodes.values().any(|node| matches!(
-    node.kind,
-    NodeKind::Inline(InlineKind::BareAutoLink { .. })
-  )));
+  assert!(reparsed.nodes.values().any(|node| {
+    matches!(node.kind, NodeKind::Inline(InlineKind::Link { .. }))
+      && matches!(node.inline_syntax, Some(InlineSyntax::Reference { .. }))
+  }));
+  assert!(reparsed.nodes.values().any(|node| {
+    matches!(node.kind, NodeKind::Inline(InlineKind::Link { .. }))
+      && matches!(node.inline_syntax, Some(InlineSyntax::BareAutoLink { .. }))
+  }));
   assert!(reparsed.nodes.values().any(|node| matches!(
     node.kind,
     NodeKind::Inline(InlineKind::FootnoteReference { .. })
@@ -119,11 +119,13 @@ fn adjacent_reference_definitions_stay_adjacent_and_resolve() {
   assert_eq!(to_markdown(&document), markdown);
 
   assert!(document.nodes.values().any(|node| matches!(
-    &node.kind,
-    NodeKind::Inline(InlineKind::ReferenceLink {
-      destination,
-      title: Some(title),
-      ..
-    }) if destination == "https://two.example" && title == "Two"
+    (&node.kind, &node.inline_syntax),
+    (
+      NodeKind::Inline(InlineKind::Link {
+        destination,
+        title: Some(title),
+      }),
+      Some(InlineSyntax::Reference { .. })
+    ) if destination == "https://two.example" && title == "Two"
   )));
 }
