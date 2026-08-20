@@ -276,4 +276,33 @@ mod tests {
         );
         let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn collects_reference_and_bare_links_with_activation_targets() {
+        let document = muya_core::parse_markdown(
+            "[Beta][beta] https://example.com www.example.com dev@example.com\n\n[beta]: Beta.md",
+        );
+        let links = collect_links(&document);
+        assert_eq!(
+            links,
+            vec![
+                MarkdownLink {
+                    label: "Beta".to_owned(),
+                    destination: "Beta.md".to_owned(),
+                },
+                MarkdownLink {
+                    label: "https://example.com".to_owned(),
+                    destination: "https://example.com".to_owned(),
+                },
+                MarkdownLink {
+                    label: "www.example.com".to_owned(),
+                    destination: "http://www.example.com".to_owned(),
+                },
+                MarkdownLink {
+                    label: "dev@example.com".to_owned(),
+                    destination: "mailto:dev@example.com".to_owned(),
+                },
+            ]
+        );
+    }
 }
