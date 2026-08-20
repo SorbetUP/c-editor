@@ -1,0 +1,51 @@
+name: Draw contract mirror
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - "Elephant/crates/draw-contract/**"
+      - "Elephant/freya/src/app/drawing_*.rs"
+      - "Elephant/freya/tests/drawing_*.rs"
+      - ".github/workflows/draw-contract.yml"
+  pull_request:
+    paths:
+      - "Elephant/crates/draw-contract/**"
+      - "Elephant/freya/src/app/drawing_*.rs"
+      - "Elephant/freya/tests/drawing_*.rs"
+      - ".github/workflows/draw-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: draw-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mirror-contract:
+    name: Rust mirror contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Format contract
+        run: cargo fmt --manifest-path Elephant/crates/draw-contract/Cargo.toml -- --check
+
+      - name: Clippy contract
+        run: cargo clippy --manifest-path Elephant/crates/draw-contract/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test contract
+        run: cargo test --manifest-path Elephant/crates/draw-contract/Cargo.toml --all-targets
+
+      - name: Check Freya against mirrored Draw API
+        run: cargo check --manifest-path Elephant/freya/Cargo.toml
