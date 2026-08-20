@@ -79,6 +79,13 @@ impl DrawingElement {
         matches!(self.kind.as_str(), "line" | "arrow" | "freedraw")
     }
 
+    pub fn is_locked(&self) -> bool {
+        self.extra
+            .get("locked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    }
+
     pub fn bounds(&self) -> (f32, f32, f32, f32) {
         if self.points.is_empty() {
             return (
@@ -106,7 +113,7 @@ impl DrawingElement {
     }
 
     pub fn hit_test_with_tolerance(&self, point: [f32; 2], tolerance: f32) -> bool {
-        if self.is_deleted {
+        if self.is_deleted || self.is_locked() {
             return false;
         }
         let tolerance = tolerance.max(0.0);
