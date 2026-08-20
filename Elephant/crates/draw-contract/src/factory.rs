@@ -31,6 +31,14 @@ pub fn create_element(tool: DrawingTool, start: [f32; 2], id: impl Into<String>)
         extra.insert("scale".to_owned(), json!([1, 1]));
         extra.insert("crop".to_owned(), Value::Null);
     }
+    if tool == DrawingTool::Freehand {
+        extra.insert("pressures".to_owned(), json!([]));
+        extra.insert("simulatePressure".to_owned(), json!(true));
+        extra.insert(
+            "strokeOptions".to_owned(),
+            json!({"variability": "variable", "streamline": 0.5}),
+        );
+    }
     if tool == DrawingTool::Line {
         extra.insert("polygon".to_owned(), json!(false));
         extra.insert("startBinding".to_owned(), Value::Null);
@@ -40,6 +48,10 @@ pub fn create_element(tool: DrawingTool, start: [f32; 2], id: impl Into<String>)
         extra.insert("elbowed".to_owned(), json!(false));
         extra.insert("startBinding".to_owned(), Value::Null);
         extra.insert("endBinding".to_owned(), Value::Null);
+    }
+    if tool == DrawingTool::Frame {
+        extra.insert("name".to_owned(), Value::Null);
+        extra.insert("roughness".to_owned(), json!(0));
     }
 
     DrawingElement {
@@ -58,7 +70,12 @@ pub fn create_element(tool: DrawingTool, start: [f32; 2], id: impl Into<String>)
             Vec::new()
         },
         text: String::new(),
-        stroke_color: "#000000".to_owned(),
+        stroke_color: match tool {
+            DrawingTool::Image => "transparent",
+            DrawingTool::Frame => "#bbb",
+            _ => "#1e1e1e",
+        }
+        .to_owned(),
         background_color: "transparent".to_owned(),
         stroke_width: 2.0,
         stroke_style: "solid".to_owned(),
