@@ -1,4 +1,4 @@
-name: Patch Freya Note renderer parity
+name: One-shot Freya Note renderer repair
 
 on:
   push:
@@ -13,15 +13,16 @@ permissions:
 jobs:
   patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Apply exact renderer transformations
+      - name: Apply bounded renderer repair
         shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
 
@@ -32,10 +33,11 @@ jobs:
               global text
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f'expected one anchor, found {count}: {old[:100]!r}')
+                  raise SystemExit(f'expected exactly one anchor, found {count}: {old[:120]!r}')
               text = text.replace(old, new, 1)
 
-          once('''        NodeKind::Block(BlockKind::HtmlBlock) => unsupported_block(
+          if 'HTML block not rendered' in text:
+              once('''        NodeKind::Block(BlockKind::HtmlBlock) => unsupported_block(
             state,
             autosave_generation,
             node_id,
@@ -90,11 +92,12 @@ jobs:
             palette,
             text_scale,
         ),
-        NodeKind::Block(BlockKind::FootnoteDefinition { label }) => semantic_source_block(
+        NodeKind::Block(BlockKind::FootnoteDefinition { label }) => render_footnote_definition(
             state,
-            autosave_generation,
+            document,
             node_id,
-            &format!("Footnote {label}"),
+            label,
+            autosave_generation,
             palette,
             text_scale,
         ),
@@ -115,14 +118,54 @@ jobs:
             text_scale,
         ),''')
 
-          once('''fn unsupported_block(
+              once('''fn unsupported_block(
     state: State<ShellState>,''', '''fn semantic_source_block(
     state: State<ShellState>,''')
-          once('''.color(theme::color(palette.danger))
+              once('''.color(theme::color(palette.danger))
                 .text(message.to_string()),''', '''.color(theme::color(palette.muted))
                 .text(message.to_string()),''')
 
-          once('''            InlineKind::Escaped { value } => {
+              once('''fn semantic_source_block(
+    state: State<ShellState>,''', '''fn render_footnote_definition(
+    state: State<ShellState>,
+    document: &Document,
+    node_id: NodeId,
+    footnote_label: &str,
+    autosave_generation: State<u64>,
+    palette: theme::ThemePalette,
+    text_scale: f32,
+) -> Element {
+    rect()
+        .width(Size::fill())
+        .spacing(6.)
+        .padding(Gaps::new_all(8.))
+        .background(theme::color(palette.soft))
+        .border(Border::new().fill(theme::color(palette.border)).width(1.))
+        .with_corner_radius(7.)
+        .child(
+            label()
+                .font_family(UI_FONT)
+                .font_size(12. * text_scale)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(palette.muted))
+                .text(format!("[^{footnote_label}]")),
+        )
+        .child(render_block_children(
+            state,
+            document,
+            node_id,
+            autosave_generation,
+            palette,
+            text_scale,
+        ))
+        .a11y_alt(format!("Footnote {footnote_label}"))
+        .into_element()
+}
+
+fn semantic_source_block(
+    state: State<ShellState>,''')
+
+              once('''            InlineKind::Escaped { value } => {
                 spans.push(styled_span(value.to_string(), style, palette, text_scale))
             }''', '''            InlineKind::Escaped { value } => {
                 if node.children.is_empty() {
@@ -132,7 +175,17 @@ jobs:
                 }
             }''')
 
-          once('''            InlineKind::Image { source, alt, .. } => {
+              once('''            InlineKind::Link { .. } => {
+                let mut next = style;
+                next.link = true;
+                collect_inline_children(document, node_id, next, palette, text_scale, spans);
+            }''', '''            InlineKind::Link { .. } | InlineKind::ReferenceLink { .. } => {
+                let mut next = style;
+                next.link = true;
+                collect_inline_children(document, node_id, next, palette, text_scale, spans);
+            }''')
+
+              once('''            InlineKind::Image { source, alt, .. } => {
                 let mut next = style;
                 next.status = true;
                 spans.push(styled_span(
@@ -141,7 +194,7 @@ jobs:
                     palette,
                     text_scale,
                 ));
-            }''', '''            InlineKind::Image { alt, .. } => {
+            }''', '''            InlineKind::Image { alt, .. } | InlineKind::ReferenceImage { alt, .. } => {
                 let mut next = style;
                 next.emphasis = true;
                 if node.children.is_empty() {
@@ -151,7 +204,7 @@ jobs:
                 }
             }''')
 
-          once('''            InlineKind::AutoLink { destination } => {
+              once('''            InlineKind::AutoLink { destination } => {
                 let mut next = style;
                 next.link = true;
                 spans.push(styled_span(destination.clone(), next, palette, text_scale));
@@ -163,9 +216,18 @@ jobs:
                 } else {
                     collect_inline_children(document, node_id, next, palette, text_scale, spans);
                 }
+            }
+            InlineKind::BareAutoLink { text, .. } => {
+                let mut next = style;
+                next.link = true;
+                if node.children.is_empty() {
+                    spans.push(styled_span(text.clone(), next, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, next, palette, text_scale, spans);
+                }
             }''')
 
-          once('''            InlineKind::InlineHtml { raw } => {
+              once('''            InlineKind::InlineHtml { raw } => {
                 let mut next = style;
                 next.status = true;
                 spans.push(styled_span(
@@ -184,7 +246,7 @@ jobs:
                 }
             }''')
 
-          once('''            InlineKind::InlineMath { source } => {
+              once('''            InlineKind::InlineMath { source } => {
                 let mut next = style;
                 next.status = true;
                 spans.push(styled_span(
@@ -203,7 +265,7 @@ jobs:
                 }
             }''')
 
-          once('''            InlineKind::Emoji { value, .. } => {
+              once('''            InlineKind::Emoji { value, .. } => {
                 spans.push(styled_span(value.clone(), style, palette, text_scale))
             }''', '''            InlineKind::Emoji { value, .. } => {
                 if node.children.is_empty() {
@@ -213,7 +275,7 @@ jobs:
                 }
             }''')
 
-          once('''            InlineKind::FootnoteReference { label } => spans.push(styled_span(
+              once('''            InlineKind::FootnoteReference { label } => spans.push(styled_span(
                 format!("[footnote: {label}]"),
                 style,
                 palette,
@@ -238,8 +300,7 @@ jobs:
                 }
             }''')
 
-          # Edited autolinks must activate the child payload, not a stale parse-time destination.
-          once('''        match &node.kind {
+              once('''        match &node.kind {
             NodeKind::Inline(InlineKind::Link { destination, .. })
             | NodeKind::Inline(InlineKind::AutoLink { destination }) => {
                 destinations.push(destination.clone());
@@ -247,7 +308,10 @@ jobs:
             }
             _ => collect_inline_link_destinations(document, node.id, destinations),
         }''', '''        match &node.kind {
-            NodeKind::Inline(InlineKind::Link { destination, .. }) => {
+            NodeKind::Inline(
+                InlineKind::Link { destination, .. }
+                | InlineKind::ReferenceLink { destination, .. },
+            ) => {
                 destinations.push(destination.clone());
                 collect_inline_link_destinations(document, node.id, destinations);
             }
@@ -262,22 +326,69 @@ jobs:
                 destinations.push(destination);
                 collect_inline_link_destinations(document, node.id, destinations);
             }
+            NodeKind::Inline(InlineKind::BareAutoLink { destination, .. }) => {
+                let mut editable = Vec::new();
+                editable_text_nodes(document, node.id, &mut editable);
+                let edited = editable.into_iter().map(|(_, value)| value).collect::<String>();
+                let destination = if edited.is_empty() {
+                    destination.clone()
+                } else if destination.starts_with("mailto:") && !edited.starts_with("mailto:") {
+                    format!("mailto:{edited}")
+                } else if destination.starts_with("http://www.") && edited.starts_with("www.") {
+                    format!("http://{edited}")
+                } else {
+                    edited
+                };
+                destinations.push(destination);
+                collect_inline_link_destinations(document, node.id, destinations);
+            }
             _ => collect_inline_link_destinations(document, node.id, destinations),
         }''')
+          else:
+              required = [
+                  'fn semantic_source_block(',
+                  'InlineKind::ReferenceLink',
+                  'InlineKind::ReferenceImage',
+                  'InlineKind::BareAutoLink',
+                  'fn render_footnote_definition(',
+              ]
+              missing = [marker for marker in required if marker not in text]
+              if missing:
+                  raise SystemExit(f'renderer is partially patched; missing {missing}')
+
+          forbidden = ['not rendered', 'non rendu', 'non rendue', 'fn unsupported_block(']
+          leaked = [marker for marker in forbidden if marker in text]
+          if leaked:
+              raise SystemExit(f'placeholder renderer markers remain: {leaked}')
 
           path.write_text(text)
           PY
 
           cargo fmt --manifest-path Elephant/freya/Cargo.toml
 
-      - name: Commit bounded renderer patch
+      - name: Verify native Note renderer
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test editor_atomic_inline_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test editor_structured_markdown_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test muya_tauri_structural_parity -- --test-threads=1 --nocapture
+
+      - name: Commit renderer and remove one-shot workflow
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add Elephant/freya/src/app/editor_view.rs
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'fix(freya): render Muya Note extensions as editable native content'
+          git rm .github/workflows/patch-freya-note-renderer.yml
+          git diff --cached --check
+          git commit -m 'fix(freya): render structured Muya Note content natively'
           git pull --rebase origin nsb/freya-native-migration
           git push origin HEAD:nsb/freya-native-migration
