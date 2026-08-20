@@ -57,7 +57,7 @@ pub use history::HistoryState;
 pub use laser::{
     ease_out as laser_ease_out, LaserPoint, LaserSample, LaserTrail, LaserTrails,
     DEFAULT_LASER_COLOR, LASER_DECAY_LENGTH, LASER_DECAY_TIME_MS, LASER_SIMPLIFY,
-    LASER_STREAMLINE,
+    LASER_SIZE, LASER_STREAMLINE,
 };
 pub use library::{LibraryFile, LibraryItem, LibraryItemStatus};
 pub use rough::{rough_shape_paths, RoughPath};
