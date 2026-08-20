@@ -22,6 +22,7 @@ pub enum DrawingTool {
     Arrow,
     Line,
     Text,
+    Image,
     Eraser,
 }
 
@@ -35,6 +36,7 @@ impl DrawingTool {
             "arrow" => Self::Arrow,
             "line" => Self::Line,
             "text" => Self::Text,
+            "image" => Self::Image,
             "eraser" => Self::Eraser,
             "hand" => Self::Hand,
             _ => Self::Selection,
@@ -52,6 +54,7 @@ impl DrawingTool {
             Self::Arrow => "arrow",
             Self::Line => "line",
             Self::Text => "text",
+            Self::Image => "image",
             Self::Eraser => "eraser",
         }
     }
@@ -67,6 +70,7 @@ impl DrawingTool {
             Self::Arrow => "Arrow",
             Self::Line => "Line",
             Self::Text => "Text",
+            Self::Image => "Image",
             Self::Eraser => "Eraser",
         }
     }
@@ -136,14 +140,14 @@ pub fn drawing_canvas_with_state_and_palette(
                 pointer_down.set(true);
                 let point = point(event.global_location());
                 let tool = DrawingTool::from_id(pointer_state.read().active_tool.as_str());
-                if tool == DrawingTool::Selection {
-                    pointer_state.write().begin_pointer(point);
-                    pointer_gesture.set(None);
-                } else if tool == DrawingTool::Hand {
+                if tool == DrawingTool::Selection || tool == DrawingTool::Hand {
                     pointer_state.write().begin_pointer(point);
                     pointer_gesture.set(None);
                 } else if tool == DrawingTool::Eraser {
                     pointer_state.write().erase_at(point);
+                    pointer_gesture.set(None);
+                } else if tool == DrawingTool::Image {
+                    pointer_state.write().end_pointer();
                     pointer_gesture.set(None);
                 } else {
                     let mut canvas = pointer_state.write();
@@ -153,7 +157,6 @@ pub fn drawing_canvas_with_state_and_palette(
                         .document
                         .elements
                         .push(new_element(tool, world, index));
-                    canvas.begin_pointer(point);
                     canvas.revision = canvas.revision.wrapping_add(1);
                     drop(canvas);
                     pointer_gesture.set(Some(Gesture {
@@ -175,7 +178,7 @@ pub fn drawing_canvas_with_state_and_palette(
                 move_state.write().erase_at(location);
             } else if let Some(gesture) = *move_gesture.read() {
                 draw_gesture(&mut move_state.write(), gesture, location);
-            } else {
+            } else if matches!(active_tool, DrawingTool::Selection | DrawingTool::Hand) {
                 move_state.write().move_pointer(location);
             }
             event.stop_propagation();
@@ -212,6 +215,7 @@ fn tool_palette(state: State<DrawingCanvasState>) -> Element {
             "Active drawing tool: {}",
             DrawingTool::from_id(state.read().active_tool.as_str()).label()
         ))
+        .child(tool_button(state, DrawingTool::Hand))
         .child(tool_button(state, DrawingTool::Selection))
         .child(tool_button(state, DrawingTool::Freehand))
         .child(tool_button(state, DrawingTool::Rectangle))
@@ -220,6 +224,7 @@ fn tool_palette(state: State<DrawingCanvasState>) -> Element {
         .child(tool_button(state, DrawingTool::Arrow))
         .child(tool_button(state, DrawingTool::Line))
         .child(tool_button(state, DrawingTool::Text))
+        .child(tool_button(state, DrawingTool::Image))
         .child(tool_button(state, DrawingTool::Eraser))
         .into_element()
 }
@@ -244,52 +249,32 @@ fn tool_button(mut state: State<DrawingCanvasState>, tool: DrawingTool) -> Eleme
 }
 
 fn new_element(tool: DrawingTool, start: [f32; 2], index: usize) -> DrawingElement {
-    DrawingElement {
-        id: format!("freya-element-{index}"),
-        kind: match tool {
-            DrawingTool::Freehand => "freedraw".to_owned(),
-            DrawingTool::Rectangle => "rectangle".to_owned(),
-            DrawingTool::Diamond => "diamond".to_owned(),
-            DrawingTool::Ellipse => "ellipse".to_owned(),
-            DrawingTool::Arrow => "arrow".to_owned(),
-            DrawingTool::Line => "line".to_owned(),
-            DrawingTool::Text => "text".to_owned(),
-            DrawingTool::Selection => "rectangle".to_owned(),
-            _ => "rectangle".to_owned(),
-        },
-        x: start[0],
-        y: start[1],
-        width: 1.,
-        height: 1.,
-        points: if tool == DrawingTool::Freehand {
-            vec![[0., 0.]]
-        } else if tool == DrawingTool::Arrow || tool == DrawingTool::Line {
-            vec![[0., 0.], [0., 0.]]
-        } else {
-            Vec::new()
-        },
-        text: if tool == DrawingTool::Text {
-            "Text".to_owned()
-        } else {
-            String::new()
-        },
-        stroke_color: "#000000".to_owned(),
-        background_color: "transparent".to_owned(),
-        stroke_width: 2.,
-        stroke_style: "solid".to_owned(),
-        fill_style: "solid".to_owned(),
-        opacity: 100.,
-        angle: 0.,
-        font_size: 20.,
-        end_arrowhead: if tool == DrawingTool::Arrow {
-            Some("arrow".to_owned())
-        } else {
-            None
-        },
-        start_arrowhead: None,
-        is_deleted: false,
-        extra: Default::default(),
+    let core_tool = match tool {
+        DrawingTool::Selection => elephant_draw::DrawingTool::Selection,
+        DrawingTool::Hand => elephant_draw::DrawingTool::Hand,
+        DrawingTool::Freehand => elephant_draw::DrawingTool::Freehand,
+        DrawingTool::Rectangle => elephant_draw::DrawingTool::Rectangle,
+        DrawingTool::Diamond => elephant_draw::DrawingTool::Diamond,
+        DrawingTool::Ellipse => elephant_draw::DrawingTool::Ellipse,
+        DrawingTool::Arrow => elephant_draw::DrawingTool::Arrow,
+        DrawingTool::Line => elephant_draw::DrawingTool::Line,
+        DrawingTool::Text => elephant_draw::DrawingTool::Text,
+        DrawingTool::Image => elephant_draw::DrawingTool::Image,
+        DrawingTool::Eraser => elephant_draw::DrawingTool::Eraser,
+    };
+    let mut element = elephant_draw::create_element(
+        core_tool,
+        start,
+        format!("freya-element-{index}"),
+    );
+    if tool == DrawingTool::Text {
+        element.text = "Text".to_owned();
+        element.extra.insert(
+            "originalText".to_owned(),
+            serde_json::Value::String(element.text.clone()),
+        );
     }
+    element
 }
 
 fn draw_gesture(canvas: &mut DrawingCanvasState, gesture: Gesture, point: [f32; 2]) {
@@ -320,6 +305,9 @@ fn draw_gesture(canvas: &mut DrawingCanvasState, gesture: Gesture, point: [f32; 
             ];
             element.width = (world[0] - gesture.start[0]).abs();
             element.height = (world[1] - gesture.start[1]).abs();
+        }
+        DrawingTool::Text => {
+            element.width = (world[0] - gesture.start[0]).abs().max(1.0);
         }
         _ => {}
     }
