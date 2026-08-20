@@ -1,5 +1,6 @@
 mod arrow;
 mod binding;
+mod delete;
 mod document;
 mod factory;
 mod fractional_index;
@@ -13,6 +14,7 @@ mod tool;
 
 pub use arrow::{Arrowhead, ArrowheadPrimitive};
 pub use binding::ArrowEndpoint;
+pub use delete::DeleteSelectionOutcome;
 pub use document::{DrawingElement, DrawingScene, SceneError};
 pub use factory::create_element;
 pub use fractional_index::{
