@@ -2,6 +2,10 @@ use freya::prelude::*;
 
 use super::drawing_scene::{DrawingCanvasState, DrawingElement, Viewport};
 
+mod drawing_scene {
+    pub(super) use super::super::drawing_scene::{DrawingElement, Viewport};
+}
+
 #[path = "drawing_render_svg.rs"]
 mod svg;
 
