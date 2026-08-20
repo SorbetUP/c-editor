@@ -4,10 +4,13 @@
 //! primitives and pointer state; no WebView, React renderer, or fake success
 //! state is involved.
 
+#[path = "drawing_image.rs"]
+mod drawing_image;
 mod drawing_render;
 mod drawing_scene;
 
 use freya::prelude::*;
+use serde_json::{json, Map, Value};
 
 pub use drawing_scene::{DrawingCanvasState, DrawingElement, DrawingScene};
 
@@ -136,22 +139,36 @@ pub fn drawing_canvas_with_state_and_palette(
         .overflow(Overflow::Clip)
         .a11y_alt("DrawingCanvas")
         .on_pointer_down(move |event: Event<PointerEventData>| {
-            if event.button() == Some(MouseButton::Left) && event.is_primary() {
-                pointer_down.set(true);
-                let point = point(event.global_location());
-                let tool = DrawingTool::from_id(pointer_state.read().active_tool.as_str());
-                if matches!(
-                    tool,
-                    DrawingTool::Selection | DrawingTool::Hand | DrawingTool::Eraser
-                ) {
-                    pointer_state.write().begin_pointer(point);
+            if event.button() != Some(MouseButton::Left) || !event.is_primary() {
+                return;
+            }
+            pointer_down.set(true);
+            let screen = point(event.global_location());
+            let tool = DrawingTool::from_id(pointer_state.read().active_tool.as_str());
+            match tool {
+                DrawingTool::Selection | DrawingTool::Hand | DrawingTool::Eraser => {
+                    pointer_state.write().begin_pointer(screen);
                     pointer_gesture.set(None);
-                } else if tool == DrawingTool::Image {
-                    pointer_state.write().end_pointer();
+                }
+                DrawingTool::Image => {
                     pointer_gesture.set(None);
-                } else {
+                    pointer_down.set(false);
+                    match drawing_image::pick_image() {
+                        Ok(Some(asset)) => {
+                            let mut canvas = pointer_state.write();
+                            let world = canvas.to_world(screen);
+                            insert_image(&mut canvas, world, asset);
+                            canvas.set_active_tool_label("Selection");
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            eprintln!("[freya][drawing] action:failure action=insert-image error={error}");
+                        }
+                    }
+                }
+                _ => {
                     let mut canvas = pointer_state.write();
-                    let world = canvas.to_world(point);
+                    let world = canvas.to_world(screen);
                     let index = canvas.document.elements.len();
                     canvas.checkpoint();
                     canvas
@@ -166,8 +183,8 @@ pub fn drawing_canvas_with_state_and_palette(
                         start: world,
                     }));
                 }
-                event.stop_propagation();
             }
+            event.stop_propagation();
         })
         .on_global_pointer_move(move |event: Event<PointerEventData>| {
             if !*move_pointer_down.read() {
@@ -273,47 +290,90 @@ fn new_element(tool: DrawingTool, start: [f32; 2], index: usize) -> DrawingEleme
         element.text = "Text".to_owned();
         element.extra.insert(
             "originalText".to_owned(),
-            serde_json::Value::String(element.text.clone()),
+            Value::String(element.text.clone()),
         );
     }
     element
 }
 
+fn insert_image(
+    canvas: &mut DrawingCanvasState,
+    world: [f32; 2],
+    asset: drawing_image::DrawingImageAsset,
+) {
+    canvas.checkpoint();
+    let index = canvas.document.elements.len();
+    let mut element = elephant_draw::create_element(
+        elephant_draw::DrawingTool::Image,
+        world,
+        format!("freya-element-{index}"),
+    );
+    element.width = asset.width;
+    element.height = asset.height;
+    element
+        .extra
+        .insert("fileId".to_owned(), Value::String(asset.file_id.clone()));
+    element
+        .extra
+        .insert("status".to_owned(), Value::String("saved".to_owned()));
+    element.extra.insert("scale".to_owned(), json!([1, 1]));
+    element.extra.insert("crop".to_owned(), Value::Null);
+
+    if !canvas.document.files.is_object() {
+        canvas.document.files = Value::Object(Map::new());
+    }
+    if let Some(files) = canvas.document.files.as_object_mut() {
+        files.insert(
+            asset.file_id.clone(),
+            json!({
+                "id": asset.file_id,
+                "mimeType": asset.mime_type,
+                "dataURL": asset.data_url,
+                "created": asset.created
+            }),
+        );
+    }
+    canvas.document.elements.push(element);
+    canvas.touch_element(index);
+}
+
 fn draw_gesture(canvas: &mut DrawingCanvasState, gesture: Gesture, point: [f32; 2]) {
     let world = canvas.to_world(point);
-    let Some(element) = canvas.document.elements.get_mut(gesture.index) else {
-        return;
-    };
-    match gesture.tool {
-        DrawingTool::Freehand => {
-            element
-                .points
-                .push([world[0] - gesture.start[0], world[1] - gesture.start[1]]);
-            element.width = (world[0] - gesture.start[0]).abs();
-            element.height = (world[1] - gesture.start[1]).abs();
+    {
+        let Some(element) = canvas.document.elements.get_mut(gesture.index) else {
+            return;
+        };
+        match gesture.tool {
+            DrawingTool::Freehand => {
+                element
+                    .points
+                    .push([world[0] - gesture.start[0], world[1] - gesture.start[1]]);
+                element.width = (world[0] - gesture.start[0]).abs();
+                element.height = (world[1] - gesture.start[1]).abs();
+            }
+            DrawingTool::Rectangle | DrawingTool::Diamond | DrawingTool::Ellipse => {
+                element.x = gesture.start[0].min(world[0]);
+                element.y = gesture.start[1].min(world[1]);
+                element.width = (world[0] - gesture.start[0]).abs();
+                element.height = (world[1] - gesture.start[1]).abs();
+            }
+            DrawingTool::Arrow | DrawingTool::Line => {
+                element.x = gesture.start[0];
+                element.y = gesture.start[1];
+                element.points = vec![
+                    [0.0, 0.0],
+                    [world[0] - gesture.start[0], world[1] - gesture.start[1]],
+                ];
+                element.width = (world[0] - gesture.start[0]).abs();
+                element.height = (world[1] - gesture.start[1]).abs();
+            }
+            DrawingTool::Text => {
+                element.width = (world[0] - gesture.start[0]).abs().max(1.0);
+            }
+            _ => {}
         }
-        DrawingTool::Rectangle | DrawingTool::Diamond | DrawingTool::Ellipse => {
-            element.x = gesture.start[0].min(world[0]);
-            element.y = gesture.start[1].min(world[1]);
-            element.width = (world[0] - gesture.start[0]).abs();
-            element.height = (world[1] - gesture.start[1]).abs();
-        }
-        DrawingTool::Arrow | DrawingTool::Line => {
-            element.x = gesture.start[0];
-            element.y = gesture.start[1];
-            element.points = vec![
-                [0., 0.],
-                [world[0] - gesture.start[0], world[1] - gesture.start[1]],
-            ];
-            element.width = (world[0] - gesture.start[0]).abs();
-            element.height = (world[1] - gesture.start[1]).abs();
-        }
-        DrawingTool::Text => {
-            element.width = (world[0] - gesture.start[0]).abs().max(1.0);
-        }
-        _ => {}
     }
-    canvas.revision = canvas.revision.wrapping_add(1);
+    canvas.touch_element(gesture.index);
 }
 
 fn point(value: CursorPoint) -> [f32; 2] {
