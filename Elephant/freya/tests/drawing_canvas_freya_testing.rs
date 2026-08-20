@@ -14,13 +14,21 @@ fn fixture_state() -> DrawingCanvasState {
         "source": "drawing-canvas-freya-testing",
         "elements": [
             {"id": "rectangle", "type": "rectangle", "x": 80, "y": 70, "width": 120, "height": 80, "strokeColor": "#ff0000", "backgroundColor": "#ffeeee", "strokeWidth": 4, "opacity": 100},
-            {"id": "ellipse", "type": "ellipse", "x": 260, "y": 70, "width": 120, "height": 80, "strokeColor": "#00aa00", "backgroundColor": "#eeffee", "strokeWidth": 4, "opacity": 100},
-            {"id": "arrow", "type": "arrow", "x": 80, "y": 230, "width": 160, "height": 0, "points": [[0, 0], [160, 0]], "strokeColor": "#0000ff", "strokeWidth": 4, "endArrowhead": "arrow", "opacity": 100},
-            {"id": "text", "type": "text", "x": 280, "y": 210, "width": 120, "height": 30, "text": "Native", "fontSize": 24, "strokeColor": "#111111", "opacity": 100},
-            {"id": "freedraw", "type": "freedraw", "x": 90, "y": 330, "width": 100, "height": 70, "points": [[0, 0], [20, 30], [45, 5], [70, 50], [100, 20]], "strokeColor": "#aa00aa", "strokeWidth": 4, "opacity": 100}
+            {"id": "ellipse", "type": "ellipse", "x": 260, "y": 70, "width": 120, "height": 80, "strokeColor": "#00aa00", "backgroundColor": "#eeffee", "strokeWidth": 4, "opacity": 100, "angle": 0.18},
+            {"id": "arrow", "type": "arrow", "x": 80, "y": 230, "width": 160, "height": 0, "points": [[0, 0], [160, 0]], "strokeColor": "#0000ff", "strokeWidth": 4, "strokeStyle": "dashed", "endArrowhead": "arrow", "opacity": 80},
+            {"id": "text", "type": "text", "x": 280, "y": 210, "width": 120, "height": 30, "text": "Native", "fontSize": 24, "strokeColor": "#111111", "opacity": 65},
+            {"id": "freedraw", "type": "freedraw", "x": 90, "y": 330, "width": 100, "height": 70, "points": [[0, 0], [20, 30], [45, 5], [70, 50], [100, 20]], "strokeColor": "#aa00aa", "strokeWidth": 4, "opacity": 100},
+            {"id": "image", "type": "image", "x": 430, "y": 210, "width": 110, "height": 80, "fileId": "asset-1", "status": "saved", "scale": [1, 1], "crop": null, "opacity": 100}
         ],
         "appState": {"viewBackgroundColor": "#ffffff"},
-        "files": {}
+        "files": {
+            "asset-1": {
+                "id": "asset-1",
+                "mimeType": "image/png",
+                "dataURL": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl4xXcAAAAASUVORK5CYII=",
+                "created": 1
+            }
+        }
     })).expect("fixture JSON"))
     .expect("real Excalidraw fixture must parse")
 }
@@ -59,7 +67,7 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
     assert_eq!(canvas.layout().area.size.height, 480.);
 
     let rendered = state.peek().renderable_elements();
-    assert_eq!(rendered.len(), 5);
+    assert_eq!(rendered.len(), 6);
     assert_eq!(rendered[0].kind, "rectangle");
     assert_eq!(rendered[0].bounds, (80., 70., 120., 80.));
     assert_eq!(rendered[0].stroke_rgba, [255, 0, 0, 255]);
@@ -67,6 +75,7 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
     assert_eq!(rendered[2].kind, "arrow");
     assert_eq!(rendered[3].kind, "text");
     assert_eq!(rendered[4].kind, "freedraw");
+    assert_eq!(rendered[5].kind, "image");
 
     let rectangle_area = labeled_node(&runner, "Drawing element rectangle rectangle")
         .layout()
@@ -76,13 +85,14 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
     assert_eq!(rectangle_area.size.width, 120.);
     assert_eq!(rectangle_area.size.height, 80.);
 
-    assert_eq!(
+    assert!(
         labeled_node(&runner, "Drawing element ellipse ellipse")
             .layout()
             .area
             .size
-            .width,
-        120.
+            .width
+            > 120.,
+        "rotated ellipse surface must grow instead of clipping"
     );
 
     assert_eq!(
@@ -96,6 +106,9 @@ fn all_supported_excalidraw_primitives_render_from_real_geometry_and_style() {
 
     labeled_node(&runner, "Drawing element text text");
     labeled_node(&runner, "Drawing element freedraw freedraw");
+    let image = labeled_node(&runner, "Drawing element image image");
+    assert_eq!(image.layout().area.size.width, 110.);
+    assert_eq!(image.layout().area.size.height, 80.);
 
     let evidence = std::env::temp_dir().join("elephant-freya-drawing-canvas-primitives.png");
     runner.render_to_file(&evidence);
@@ -132,6 +145,7 @@ fn pointer_selection_and_drag_update_model_and_excalidraw_serialization() {
     let value: serde_json::Value = serde_json::from_str(&serialized).expect("valid scene JSON");
     assert_eq!(value["elements"][0]["x"], 130.);
     assert_eq!(value["elements"][0]["y"], 105.);
+    assert_eq!(value["files"]["asset-1"]["mimeType"], "image/png");
 }
 
 #[test]
