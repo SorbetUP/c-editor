@@ -110,3 +110,44 @@ fn imported_frame_embed_and_iframe_elements_remain_visible() {
             > 0
     );
 }
+
+#[test]
+fn start_arrowhead_changes_the_native_freya_pixels() {
+    fn scene(start_arrowhead: serde_json::Value) -> serde_json::Value {
+        json!({
+            "type": "excalidraw",
+            "version": 2,
+            "elements": [{
+                "id": "arrow",
+                "type": "arrow",
+                "x": 120,
+                "y": 180,
+                "width": 300,
+                "height": 80,
+                "points": [[0, 0], [300, 80]],
+                "strokeColor": "#111111",
+                "strokeWidth": 4,
+                "startArrowhead": start_arrowhead,
+                "endArrowhead": "arrow"
+            }],
+            "appState": {"viewBackgroundColor": "#ffffff"},
+            "files": {}
+        })
+    }
+
+    let (mut end_only_runner, _) = runner_for(scene(serde_json::Value::Null));
+    let (mut two_sided_runner, _) = runner_for(scene(json!("arrow")));
+    labeled_node(&end_only_runner, "Drawing element arrow arrow");
+    labeled_node(&two_sided_runner, "Drawing element arrow arrow");
+
+    let end_only = std::env::temp_dir().join("elephant-freya-arrow-end-only.png");
+    let two_sided = std::env::temp_dir().join("elephant-freya-arrow-two-sided.png");
+    end_only_runner.render_to_file(&end_only);
+    two_sided_runner.render_to_file(&two_sided);
+
+    assert_ne!(
+        fs::read(end_only).expect("end-only arrow screenshot"),
+        fs::read(two_sided).expect("two-sided arrow screenshot"),
+        "startArrowhead must affect real native Freya pixels"
+    );
+}
