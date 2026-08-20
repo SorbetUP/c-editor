@@ -27,11 +27,21 @@ pub fn render(state: &DrawingCanvasState) -> Vec<Element> {
 
     if state.selected_element_ids().len() > 1 {
         if let Some(bounds) = state.selection_bounds() {
-            output.push(svg::group_selection(bounds, state.viewport));
+            output.push(selection_overlay(
+                bounds,
+                state.viewport,
+                "Drawing group selection",
+                10,
+            ));
         }
     }
     if let Some(bounds) = state.selection_marquee_world() {
-        output.push(svg::selection_marquee(bounds, state.viewport));
+        output.push(selection_overlay(
+            bounds,
+            state.viewport,
+            "Drawing selection marquee",
+            24,
+        ));
     }
     output
 }
@@ -61,4 +71,24 @@ fn render_element(
     if selected {
         output.push(svg::selection(index, element, viewport));
     }
+}
+
+fn selection_overlay(
+    bounds: (f32, f32, f32, f32),
+    viewport: Viewport,
+    label: &'static str,
+    alpha: u8,
+) -> Element {
+    let (x, y, width, height) = bounds;
+    rect()
+        .position(
+            Position::new_absolute()
+                .left(viewport.pan[0] + x * viewport.zoom)
+                .top(viewport.pan[1] + y * viewport.zoom),
+        )
+        .width(Size::px(width.max(1.0) * viewport.zoom))
+        .height(Size::px(height.max(1.0) * viewport.zoom))
+        .background(Color::from_argb(alpha, 105, 101, 219))
+        .a11y_alt(label)
+        .into_element()
 }
