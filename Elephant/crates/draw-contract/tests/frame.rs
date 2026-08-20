@@ -58,3 +58,15 @@ fn frame_translation_moves_direct_children_and_geometry_can_detach_them() {
     assert!(scene.sync_element_frame_membership("shape"));
     assert_eq!(frame_id(&scene, "shape"), None);
 }
+
+#[test]
+fn frame_border_is_selectable_without_swallowing_child_interior() {
+    let mut scene = scene_with_frame();
+    assert_eq!(scene.add_elements_to_frame("frame", &["shape"]), 1);
+    let frame = scene.element_by_id("frame").unwrap();
+    let shape = scene.element_by_id("shape").unwrap();
+
+    assert!(frame.hit_test([2.0, 100.0]));
+    assert!(shape.hit_test([60.0, 60.0]));
+    assert!(!frame.hit_test([60.0, 60.0]));
+}
