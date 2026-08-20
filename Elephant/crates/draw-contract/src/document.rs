@@ -139,8 +139,7 @@ impl DrawingElement {
                 if rx <= f32::EPSILON || ry <= f32::EPSILON {
                     return false;
                 }
-                ((point[0] - center[0]).abs() / rx) + ((point[1] - center[1]).abs() / ry)
-                    <= 1.0
+                ((point[0] - center[0]).abs() / rx) + ((point[1] - center[1]).abs() / ry) <= 1.0
             }
             _ => {
                 point[0] >= x - tolerance
