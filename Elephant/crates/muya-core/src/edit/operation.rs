@@ -110,7 +110,7 @@ fn apply_replace_text(
     value.replace_range(start..end, inserted);
     deleted
   };
-  sync_bare_autolink_parent(document, node_id);
+  sync_autolink_parent(document, node_id);
   document.invalidate_source_chain(node_id);
 
   Ok(Operation::ReplaceText {
@@ -123,16 +123,20 @@ fn apply_replace_text(
   })
 }
 
-fn sync_bare_autolink_parent(document: &mut Document, node_id: NodeId) {
+fn sync_autolink_parent(document: &mut Document, node_id: NodeId) {
   let Some(parent_id) = document.node(node_id).and_then(|node| node.parent) else {
     return;
   };
   let Some(parent) = document.node(parent_id) else {
     return;
   };
-  if !matches!(parent.inline_syntax, Some(InlineSyntax::BareAutoLink { .. })) {
+  let is_bare = matches!(parent.inline_syntax, Some(InlineSyntax::BareAutoLink { .. }))
+    && matches!(parent.kind, NodeKind::Inline(InlineKind::Link { .. }));
+  let is_angle = matches!(parent.kind, NodeKind::Inline(InlineKind::AutoLink { .. }));
+  if !is_bare && !is_angle {
     return;
   }
+
   let text = parent
     .children
     .iter()
@@ -141,23 +145,38 @@ fn sync_bare_autolink_parent(document: &mut Document, node_id: NodeId) {
       _ => None,
     })
     .collect::<String>();
-  let destination = extended::parse_bare_autolink(&text)
-    .filter(|parsed| parsed.consumed == text.len())
-    .map(|parsed| parsed.destination)
-    .unwrap_or_default();
+
+  let destination = if is_bare {
+    extended::parse_bare_autolink(&text)
+      .filter(|parsed| parsed.consumed == text.len())
+      .map(|parsed| parsed.destination)
+      .unwrap_or_default()
+  } else {
+    let wrapped = format!("<{text}>");
+    extended::parse_autolink(&wrapped)
+      .filter(|parsed| parsed.consumed == wrapped.len())
+      .map(|parsed| extended::autolink_destination(parsed.value))
+      .unwrap_or_default()
+  };
 
   let Some(parent) = document.node_mut(parent_id) else {
     return;
   };
-  let NodeKind::Inline(InlineKind::Link {
-    destination: current,
-    ..
-  }) = &mut parent.kind
-  else {
-    return;
-  };
-  *current = destination;
-  parent.inline_syntax = Some(InlineSyntax::BareAutoLink { text });
+  match &mut parent.kind {
+    NodeKind::Inline(InlineKind::Link {
+      destination: current,
+      ..
+    }) if is_bare => {
+      *current = destination;
+      parent.inline_syntax = Some(InlineSyntax::BareAutoLink { text });
+    }
+    NodeKind::Inline(InlineKind::AutoLink {
+      destination: current,
+    }) if is_angle => {
+      *current = destination;
+    }
+    _ => {}
+  }
 }
 
 fn apply_insert_node(
@@ -431,6 +450,51 @@ mod tests {
     assert!(matches!(
       &document.node(link).unwrap().kind,
       NodeKind::Inline(InlineKind::Link { destination, .. }) if destination.is_empty()
+    ));
+  }
+
+  #[test]
+  fn angle_autolink_target_tracks_edits_and_invalidates_safely() {
+    let mut document = Document::new();
+    let paragraph = document.allocate(NodeKind::Block(BlockKind::Paragraph), None);
+    document.append_child(document.root, paragraph);
+    let link = document.allocate(
+      NodeKind::Inline(InlineKind::AutoLink {
+        destination: "mailto:dev@example.com".to_string(),
+      }),
+      None,
+    );
+    document.append_child(paragraph, link);
+    let text = document.allocate(
+      NodeKind::Inline(InlineKind::Text {
+        value: "dev@example.com".to_string(),
+      }),
+      None,
+    );
+    document.append_child(link, text);
+
+    Operation::ReplaceText {
+      node: text,
+      range: Utf16Range::new(0, 15),
+      inserted: "ops@example.org".to_string(),
+    }
+    .apply(&mut document)
+    .unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::AutoLink { destination }) if destination == "mailto:ops@example.org"
+    ));
+
+    Operation::ReplaceText {
+      node: text,
+      range: Utf16Range::new(0, 15),
+      inserted: "not an autolink".to_string(),
+    }
+    .apply(&mut document)
+    .unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::AutoLink { destination }) if destination.is_empty()
     ));
   }
 
