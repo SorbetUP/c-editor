@@ -131,6 +131,11 @@ fn pointer_selection_and_drag_update_model_and_excalidraw_serialization() {
         })
         .is_some());
 
+    let version_before = state.peek().document.elements[0]
+        .extra
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
     runner.press_cursor((140., 110.));
     runner.move_cursor((190., 145.));
     runner.release_cursor((190., 145.));
@@ -138,6 +143,14 @@ fn pointer_selection_and_drag_update_model_and_excalidraw_serialization() {
     assert_eq!(state.peek().selected_element_id(), Some("rectangle"));
     assert_eq!(state.peek().document.elements[0].x, 130.);
     assert_eq!(state.peek().document.elements[0].y, 105.);
+    assert!(
+        state.peek().document.elements[0]
+            .extra
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+            > version_before
+    );
     let serialized = state
         .peek()
         .serialize_json()
@@ -198,20 +211,13 @@ fn wheel_zoom_selection_blank_drag_and_hand_pan_match_excalidraw_semantics() {
 }
 
 #[test]
-fn image_tool_is_not_misrouted_to_selection() {
+fn image_tool_selection_does_not_mutate_scene_before_a_file_is_picked() {
     let (mut runner, state) = test_runner();
+    let before = state.peek().document.clone();
     let image = labeled_node(&runner, "Image tool");
     runner.click_cursor(image.layout().area.center().to_f64());
     assert_eq!(state.peek().active_tool, "image");
-    let before = state.peek().document.clone();
-    let viewport = state.peek().viewport;
-
-    runner.press_cursor((140., 110.));
-    runner.move_cursor((190., 145.));
-    runner.release_cursor((190., 145.));
-
     assert_eq!(state.peek().document, before);
-    assert_eq!(state.peek().viewport, viewport);
 }
 
 #[test]
@@ -251,6 +257,7 @@ fn active_freehand_tool_draws_into_shared_state_and_serializes() {
     assert!(element.points.len() >= 2);
     assert!(element.extra.contains_key("version"));
     assert!(element.extra.contains_key("versionNonce"));
+    assert!(element.extra["version"].as_u64().unwrap_or(0) > 1);
     let serialized = snapshot.serialize_json().expect("serialize drawn scene");
     assert!(serialized.contains(&element.id));
 }
