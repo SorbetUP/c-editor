@@ -12,6 +12,7 @@ pub mod history;
 pub mod model;
 pub mod parser;
 mod parser_blocks;
+mod parser_definitions;
 mod parser_extensions;
 pub mod protocol;
 pub mod selection;
@@ -38,6 +39,7 @@ pub use view::ViewPatch;
 
 pub fn parse_markdown(markdown: &str) -> Document {
   let mut document = parser::parse_markdown(markdown);
+  parser_definitions::apply(&mut document, markdown);
   parser_blocks::apply(&mut document, markdown);
   parser_extensions::apply(&mut document);
   document
