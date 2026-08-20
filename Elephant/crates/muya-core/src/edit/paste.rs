@@ -198,6 +198,7 @@ fn clone_node(
   let kind = remap_groups(&source_node.kind, next_id, groups);
   let index = nodes.len();
   let mut node = Node::new(id, kind, None);
+  node.inline_syntax = source_node.inline_syntax.clone();
   node.parent = parent;
   nodes.push(node);
   let children = source_node
@@ -329,6 +330,15 @@ mod tests {
   #[test]
   fn preserves_inline_markdown_and_undoes_exactly() {
     assert_paste("alpha", "**bold** and *soft*", "al**bold** and *soft*pha");
+  }
+
+  #[test]
+  fn preserves_renderer_neutral_bare_link_syntax_and_undoes_exactly() {
+    assert_paste(
+      "alpha",
+      "https://bare.example",
+      "alhttps://bare.examplepha",
+    );
   }
 
   #[test]

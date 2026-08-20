@@ -1,6 +1,8 @@
 pub mod code_span;
+pub mod emoji;
 pub mod emphasis;
 pub mod escape;
+pub mod extended;
 pub mod line_break;
 pub mod link;
 pub mod text;
