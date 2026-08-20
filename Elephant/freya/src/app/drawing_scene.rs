@@ -126,7 +126,10 @@ impl DrawingCanvasState {
     pub fn selected_element(&self) -> Option<&DrawingElement> {
         if self.selection.len() == 1 {
             let id = self.selection.ids().next()?;
-            return self.document.element_by_id(id).filter(|element| !is_locked(element));
+            return self
+                .document
+                .element_by_id(id)
+                .filter(|element| !is_locked(element));
         }
         if !self.selection.is_empty() {
             return None;
@@ -471,9 +474,26 @@ impl DrawingCanvasState {
                         checkpointed: true,
                     };
                 }
-                if let Some(element) = self.document.elements.get_mut(index) {
-                    element.x = world[0] - offset[0];
-                    element.y = world[1] - offset[1];
+
+                let Some((id, kind, origin)) = self.document.elements.get(index).map(|element| {
+                    (
+                        element.id.clone(),
+                        element.kind.clone(),
+                        [element.x, element.y],
+                    )
+                }) else {
+                    return;
+                };
+                let target = [world[0] - offset[0], world[1] - offset[1]];
+
+                if matches!(kind.as_str(), "frame" | "magicframe") {
+                    let delta = [target[0] - origin[0], target[1] - origin[1]];
+                    if self.document.translate_frame_with_children(&id, delta) > 0 {
+                        self.changed();
+                    }
+                } else if let Some(element) = self.document.elements.get_mut(index) {
+                    element.x = target[0];
+                    element.y = target[1];
                     mark_changed(element);
                     self.changed();
                 }
@@ -539,10 +559,37 @@ impl DrawingCanvasState {
     }
 
     pub(crate) fn end_pointer(&mut self) {
+        let moved_ids = match &self.interaction {
+            Interaction::MoveElement { index, .. } => self
+                .document
+                .elements
+                .get(*index)
+                .filter(|element| !matches!(element.kind.as_str(), "frame" | "magicframe"))
+                .map(|element| vec![element.id.clone()])
+                .unwrap_or_default(),
+            Interaction::MoveSelection { .. } => self.selection.ids().map(str::to_owned).collect(),
+            _ => Vec::new(),
+        };
+
         if matches!(self.interaction, Interaction::BoxSelect { .. }) {
             self.sync_primary_from_selection();
         }
         self.interaction = Interaction::None;
+
+        let mut membership_changed = false;
+        for id in moved_ids {
+            let is_frame = self
+                .document
+                .element_by_id(&id)
+                .is_some_and(|element| matches!(element.kind.as_str(), "frame" | "magicframe"));
+            if !is_frame && self.document.sync_element_frame_membership(&id) {
+                membership_changed = true;
+            }
+        }
+        if membership_changed {
+            self.sync_primary_from_selection();
+            self.changed();
+        }
     }
 
     pub(crate) fn zoom_at(&mut self, point: [f32; 2], delta_y: f64) {
