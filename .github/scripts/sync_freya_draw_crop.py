@@ -100,12 +100,12 @@ def sync_canvas() -> None:
     element.extra.insert("crop".to_owned(), Value::Null);
     element
         .extra
-        .insert("naturalWidth".to_owned(), json!(asset.width));
+        .insert("naturalWidth".to_owned(), json!(asset.natural_width));
     element
         .extra
-        .insert("naturalHeight".to_owned(), json!(asset.height));
+        .insert("naturalHeight".to_owned(), json!(asset.natural_height));
 '''
-    text = replace_once(text, anchor, replacement, "persist image natural dimensions")
+    text = replace_once(text, anchor, replacement, "persist intrinsic image dimensions")
     path.write_text(text)
 
 
@@ -239,8 +239,8 @@ fn selected_image_crop_uses_excalidraw_schema_and_is_undoable() {
     assert_eq!((crop.x, crop.y), (30.0, 10.0));
     assert_eq!((crop.width, crop.height), (110.0, 80.0));
     let raw = state.serialize_json().expect("serialize crop");
-    assert!(raw.contains("\"naturalWidth\": 160.0"));
-    assert!(raw.contains("\"naturalHeight\": 100.0"));
+    assert!(raw.contains("\"naturalWidth\": 160"));
+    assert!(raw.contains("\"naturalHeight\": 100"));
     assert!(state.undo());
     assert!(state.selected_image_crop().is_none());
 }
