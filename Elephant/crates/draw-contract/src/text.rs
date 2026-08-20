@@ -1,5 +1,5 @@
-use crate::DrawingElement;
-use serde_json::Value;
+use crate::{DrawingElement, DrawingScene};
+use serde_json::{json, Value};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextLineLayout {
@@ -73,7 +73,10 @@ pub fn layout_text(element: &DrawingElement) -> TextLayout {
     let width = if auto_resize {
         measured_width
     } else {
-        element.width.max(measured_width.min(element.width.max(1.0))).max(1.0)
+        element
+            .width
+            .max(measured_width.min(element.width.max(1.0)))
+            .max(1.0)
     };
     let measured_height = (rows.len() as f32 * line_height_px).max(line_height_px);
     let height = if auto_resize {
@@ -122,6 +125,45 @@ pub fn layout_text(element: &DrawingElement) -> TextLayout {
         width,
         height,
         line_height_px,
+    }
+}
+
+impl DrawingScene {
+    pub fn set_text_content(&mut self, id: &str, content: impl Into<String>) -> bool {
+        let content = content.into();
+        let Some(index) = self.elements.iter().position(|element| {
+            element.id == id && element.kind == "text" && !element.is_deleted && !element.is_locked()
+        }) else {
+            return false;
+        };
+        if self.elements[index].text == content {
+            return false;
+        }
+
+        {
+            let element = &mut self.elements[index];
+            element.text = content.clone();
+            element
+                .extra
+                .insert("originalText".to_owned(), Value::String(content));
+            element
+                .extra
+                .entry("autoResize".to_owned())
+                .or_insert(Value::Bool(true));
+            mark_text_changed(element);
+        }
+
+        let layout = layout_text(&self.elements[index]);
+        if self.elements[index]
+            .extra
+            .get("autoResize")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+        {
+            self.elements[index].width = layout.width;
+            self.elements[index].height = layout.height;
+        }
+        true
     }
 }
 
@@ -189,4 +231,24 @@ fn wrap_line(line: &str, max_width: f32, char_width: f32) -> Vec<String> {
         output.push(String::new());
     }
     output
+}
+
+fn mark_text_changed(element: &mut DrawingElement) {
+    let version = element
+        .extra
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .saturating_add(1);
+    let nonce = element
+        .extra
+        .get("versionNonce")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .wrapping_mul(1_664_525)
+        .wrapping_add(1_013_904_223);
+    element.extra.insert("version".to_owned(), json!(version));
+    element
+        .extra
+        .insert("versionNonce".to_owned(), json!(nonce));
 }
