@@ -1,4 +1,6 @@
-use elephant_draw_contract::{create_element, validate_order_key, DrawingScene, DrawingTool};
+use elephant_draw_contract::{
+    create_element, validate_order_key, DrawingScene, DrawingTool, SelectionSet,
+};
 use serde_json::Value;
 
 fn frame_id(scene: &DrawingScene, id: &str) -> Option<String> {
@@ -32,13 +34,23 @@ fn bound_text_follows_container_into_frame_and_indices_follow_render_order() {
     assert_eq!(frame_id(&scene, "shape").as_deref(), Some("frame"));
     assert_eq!(frame_id(&scene, "text").as_deref(), Some("frame"));
     assert_eq!(
-        scene.elements.iter().map(|element| element.id.as_str()).collect::<Vec<_>>(),
+        scene
+            .elements
+            .iter()
+            .map(|element| element.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["shape", "text", "frame"]
     );
     let indices = scene
         .elements
         .iter()
-        .map(|element| element.extra.get("index").and_then(Value::as_str).expect("index"))
+        .map(|element| {
+            element
+                .extra
+                .get("index")
+                .and_then(Value::as_str)
+                .expect("index")
+        })
         .collect::<Vec<_>>();
     assert!(indices.iter().all(|index| validate_order_key(index)));
     assert!(indices.windows(2).all(|pair| pair[0] < pair[1]));
@@ -57,6 +69,39 @@ fn frame_translation_moves_direct_children_and_geometry_can_detach_them() {
     assert!(scene.translate_element("shape", [400.0, 0.0]));
     assert!(scene.sync_element_frame_membership("shape"));
     assert_eq!(frame_id(&scene, "shape"), None);
+}
+
+#[test]
+fn multi_selection_with_frame_moves_child_once_and_keeps_locked_child_attached() {
+    let mut scene = scene_with_frame();
+    assert_eq!(scene.add_elements_to_frame("frame", &["shape"]), 1);
+    assert!(scene.set_element_locked("shape", true));
+    let before_frame = scene.element_by_id("frame").unwrap().bounds();
+    let before_shape = scene.element_by_id("shape").unwrap().bounds();
+    let before_text = scene.element_by_id("text").unwrap().bounds();
+    let selection = SelectionSet::from_ids(
+        ["frame", "shape", "text"]
+            .into_iter()
+            .map(str::to_owned),
+    );
+
+    assert_eq!(scene.translate_selection(&selection, [30.0, 15.0]), 3);
+    let after_frame = scene.element_by_id("frame").unwrap().bounds();
+    let after_shape = scene.element_by_id("shape").unwrap().bounds();
+    let after_text = scene.element_by_id("text").unwrap().bounds();
+    assert_eq!(
+        (after_frame.0 - before_frame.0, after_frame.1 - before_frame.1),
+        (30.0, 15.0)
+    );
+    assert_eq!(
+        (after_shape.0 - before_shape.0, after_shape.1 - before_shape.1),
+        (30.0, 15.0)
+    );
+    assert_eq!(
+        (after_text.0 - before_text.0, after_text.1 - before_text.1),
+        (30.0, 15.0)
+    );
+    assert_eq!(frame_id(&scene, "shape").as_deref(), Some("frame"));
 }
 
 #[test]
