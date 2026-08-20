@@ -1,6 +1,6 @@
 use crate::model::{
   Alignment, BlockKind, Document, InlineKind, InlineMarkKind, ListKind, MarkFragmentEdge, Node,
-  NodeKind,
+  NodeKind, ReferenceStyle,
 };
 
 pub fn to_markdown(document: &Document) -> String {
@@ -69,7 +69,7 @@ fn serialize_block(document: &Document, node: &Node) -> String {
       format!("$$\n{}\n$$", serialize_inlines(document, node))
     }
     NodeKind::Block(BlockKind::FootnoteDefinition { label }) => {
-      serialize_footnote_definition(label, &serialize_inlines(document, node))
+      serialize_footnote(document, node, label)
     }
     NodeKind::Block(BlockKind::ReferenceDefinition { label }) => {
       format!("[{label}]: {}", serialize_inlines(document, node))
@@ -113,6 +113,50 @@ fn serialize_blockquote(document: &Document, quote: &Node) -> String {
     })
     .collect::<Vec<_>>()
     .join("\n")
+}
+
+fn serialize_footnote(document: &Document, footnote: &Node, label: &str) -> String {
+  let children = document.children(footnote.id).collect::<Vec<_>>();
+  if !children
+    .iter()
+    .any(|child| matches!(child.kind, NodeKind::Block(_)))
+  {
+    return serialize_footnote_definition(label, &serialize_inlines(document, footnote));
+  }
+
+  let mut output = format!("[^{label}]:");
+  let mut next = 0usize;
+  if let Some(first) = children.first()
+    && matches!(first.kind, NodeKind::Block(BlockKind::Paragraph))
+  {
+    let paragraph = serialize_inlines(document, first);
+    let mut lines = paragraph.lines();
+    if let Some(line) = lines.next() {
+      if !line.is_empty() {
+        output.push(' ');
+        output.push_str(line);
+      }
+    }
+    for line in lines {
+      output.push_str("\n    ");
+      output.push_str(line);
+    }
+    next = 1;
+  }
+
+  for child in children.into_iter().skip(next) {
+    output.push_str("\n\n");
+    let nested = serialize_block(document, child);
+    let mut lines = nested.lines().peekable();
+    while let Some(line) = lines.next() {
+      output.push_str("    ");
+      output.push_str(line);
+      if lines.peek().is_some() {
+        output.push('\n');
+      }
+    }
+  }
+  output
 }
 
 fn serialize_footnote_definition(label: &str, body: &str) -> String {
@@ -290,6 +334,15 @@ fn editable_payload(document: &Document, node: &Node, fallback: &str) -> String 
   }
 }
 
+fn serialize_reference(label: &str, reference: &str, style: ReferenceStyle, image: bool) -> String {
+  let prefix = if image { "!" } else { "" };
+  match style {
+    ReferenceStyle::Full => format!("{prefix}[{label}][{reference}]"),
+    ReferenceStyle::Collapsed => format!("{prefix}[{label}][]"),
+    ReferenceStyle::Shortcut => format!("{prefix}[{label}]"),
+  }
+}
+
 fn serialize_inline(document: &Document, node: &Node) -> String {
   match &node.kind {
     NodeKind::Inline(InlineKind::Text { value }) => value.clone(),
@@ -330,10 +383,36 @@ fn serialize_inline(document: &Document, node: &Node) -> String {
       let alt = editable_payload(document, node, alt);
       format!("![{alt}]({source}{})", serialize_title(title))
     }
+    NodeKind::Inline(InlineKind::ReferenceLink {
+      reference, style, ..
+    }) => {
+      let label = serialize_inlines(document, node);
+      let reference = if matches!(style, ReferenceStyle::Full) {
+        reference.as_str()
+      } else {
+        label.as_str()
+      };
+      serialize_reference(&label, reference, *style, false)
+    }
+    NodeKind::Inline(InlineKind::ReferenceImage {
+      alt,
+      reference,
+      style,
+      ..
+    }) => {
+      let label = editable_payload(document, node, alt);
+      let reference = if matches!(style, ReferenceStyle::Full) {
+        reference.as_str()
+      } else {
+        label.as_str()
+      };
+      serialize_reference(&label, reference, *style, true)
+    }
     NodeKind::Inline(InlineKind::AutoLink { destination }) => {
       let destination = editable_payload(document, node, destination);
       format!("<{destination}>")
     }
+    NodeKind::Inline(InlineKind::BareAutoLink { text, .. }) => editable_payload(document, node, text),
     NodeKind::Inline(InlineKind::InlineHtml { raw }) => editable_payload(document, node, raw),
     NodeKind::Inline(InlineKind::InlineMath { source }) => {
       let source = editable_payload(document, node, source);
@@ -426,6 +505,18 @@ mod tests {
   }
 
   #[test]
+  fn preserves_indented_code_without_canonicalizing_to_a_fence() {
+    let markdown = "    alpha\n    beta\n\nbody";
+    let document = parse_markdown(markdown);
+    assert_eq!(to_markdown(&document), markdown);
+    let first = document.children(document.root).next().unwrap();
+    assert!(matches!(
+      first.kind,
+      NodeKind::Block(BlockKind::CodeBlock { fenced: false, .. })
+    ));
+  }
+
+  #[test]
   fn serializes_tauri_special_blocks() {
     let markdown = "$$\nx + y\n$$\n\n[^src]: cited **source**\n\n[openai]: https://openai.com \"Home\"\n\n<div>block</div>";
     let document = parse_markdown(markdown);
@@ -436,6 +527,19 @@ mod tests {
   fn canonicalizes_gitlab_math_fence_to_display_math() {
     let document = parse_markdown("```math\nx^2\n```");
     assert_eq!(to_markdown(&document), "$$\nx^2\n$$");
+  }
+
+  #[test]
+  fn preserves_tauri_diagram_fences() {
+    for language in ["mermaid", "flowchart", "sequence", "plantuml", "vega-lite"] {
+      let markdown = format!("```{language}\nA -> B\n```");
+      let document = parse_markdown(&markdown);
+      assert_eq!(to_markdown(&document), markdown);
+      assert!(matches!(
+        document.children(document.root).next().map(|node| &node.kind),
+        Some(NodeKind::Block(BlockKind::Diagram { language: actual })) if actual == language
+      ));
+    }
   }
 
   #[test]
@@ -466,17 +570,56 @@ mod tests {
   }
 
   #[test]
-  fn round_trips_structured_blockquote_and_indented_code() {
-    let quote = "> # Heading\n>\n> - item\n>   - nested";
-    assert_eq!(to_markdown(&parse_markdown(quote)), quote);
+  fn preserves_multiblock_list_semantics() {
+    let markdown = "- first\n  continuation\n\n  second paragraph\n\n  > quote\n- sibling";
+    let document = parse_markdown(markdown);
+    let saved = to_markdown(&document);
+    let reparsed = parse_markdown(&saved);
+    let list = reparsed.children(reparsed.root).next().unwrap();
+    let first = reparsed.children(list.id).next().unwrap();
+    let blocks = reparsed.children(first.id).collect::<Vec<_>>();
+    assert!(blocks.len() >= 3, "saved list lost structured child blocks: {saved}");
+    assert!(blocks.iter().any(|node| matches!(
+      node.kind,
+      NodeKind::Block(BlockKind::BlockQuote)
+    )));
+  }
 
-    let indented = "    alpha\n    beta";
-    assert_eq!(to_markdown(&parse_markdown(indented)), indented);
+  #[test]
+  fn preserves_structured_footnote_semantics() {
+    let markdown = "[^id]: first\n\n    second paragraph\n\n    - nested\n\noutside";
+    let document = parse_markdown(markdown);
+    let saved = to_markdown(&document);
+    let reparsed = parse_markdown(&saved);
+    let footnote = reparsed
+      .children(reparsed.root)
+      .find(|node| matches!(node.kind, NodeKind::Block(BlockKind::FootnoteDefinition { .. })))
+      .expect("footnote");
+    let children = reparsed.children(footnote.id).collect::<Vec<_>>();
+    assert!(children.len() >= 3, "footnote blocks collapsed during save: {saved}");
+    assert!(children.iter().any(|node| matches!(
+      node.kind,
+      NodeKind::Block(BlockKind::List { .. })
+    )));
   }
 
   #[test]
   fn round_trips_the_executable_inline_slice() {
     let markdown = "A **bold** *soft* ~~gone~~ [link](https://example.com \"Title\") ![alt](image.png) `code` \\*.";
+    let document = parse_markdown(markdown);
+    assert_eq!(to_markdown(&document), markdown);
+  }
+
+  #[test]
+  fn round_trips_reference_forms_and_bare_autolinks() {
+    let markdown = "[full][id] [collapsed][] [shortcut] ![logo][img] https://example.com www.example.com dev@example.com\n\n[id]: https://target.example \"Title\"\n\n[collapsed]: https://collapsed.example\n\n[shortcut]: https://shortcut.example\n\n[img]: image.png";
+    let document = parse_markdown(markdown);
+    assert_eq!(to_markdown(&document), markdown);
+  }
+
+  #[test]
+  fn preserves_consecutive_reference_definition_lines() {
+    let markdown = "[one]: https://one.example\n[two]: https://two.example";
     let document = parse_markdown(markdown);
     assert_eq!(to_markdown(&document), markdown);
   }
