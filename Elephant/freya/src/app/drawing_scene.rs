@@ -555,57 +555,97 @@ impl DrawingCanvasState {
         self.viewport.to_world(point)
     }
 
-    fn mutate_selected(&mut self, mutation: impl FnOnce(&mut DrawingElement) -> bool) -> bool {
-        let Some(index) = self.selected else {
-            return false;
+    fn mutate_selected(
+        &mut self,
+        mut mutation: impl FnMut(&mut DrawingElement) -> bool,
+    ) -> bool {
+        let selection = if self.selection.is_empty() {
+            let Some(element) = self.selected_element() else {
+                return false;
+            };
+            SelectionSet::from_ids(std::iter::once(element.id.clone()))
+        } else {
+            self.selection.clone()
         };
-        let Some(element) = self.document.elements.get(index) else {
-            return false;
-        };
-        if element.is_deleted || is_locked(element) {
-            return false;
-        }
         let before = self.document.clone();
-        let element = &mut self.document.elements[index];
-        if !mutation(element) {
+        let mut changed = false;
+        for element in &mut self.document.elements {
+            if !selection.contains(&element.id) || element.is_deleted || is_locked(element) {
+                continue;
+            }
+            if mutation(element) {
+                mark_changed(element);
+                changed = true;
+            }
+        }
+        if !changed {
             return false;
         }
-        mark_changed(element);
         self.history.push(before);
         self.changed();
         true
     }
 
     fn reorder_selection(&mut self, direction: Reorder) -> bool {
-        if self.selection.len() > 1 {
-            return false;
-        }
-        let Some(index) = self.selected else {
-            return false;
-        };
-        let Some(element) = self.document.elements.get(index) else {
-            return false;
-        };
-        if element.is_deleted || is_locked(element) {
-            return false;
-        }
-        let target = match direction {
-            Reorder::Front if index + 1 < self.document.elements.len() => {
-                self.document.elements.len() - 1
-            }
-            Reorder::Back if index > 0 => 0,
-            Reorder::Forward if index + 1 < self.document.elements.len() => index + 1,
-            Reorder::Backward if index > 0 => index - 1,
-            _ => return false,
-        };
-        self.checkpoint();
-        if matches!(direction, Reorder::Front | Reorder::Back) {
-            let element = self.document.elements.remove(index);
-            self.document.elements.insert(target, element);
+        let selection = if self.selection.is_empty() {
+            let Some(element) = self.selected_element() else {
+                return false;
+            };
+            SelectionSet::from_ids(std::iter::once(element.id.clone()))
         } else {
-            self.document.elements.swap(index, target);
+            self.selection.clone()
+        };
+        let is_selected = |element: &DrawingElement| {
+            selection.contains(&element.id) && !element.is_deleted && !is_locked(element)
+        };
+        if !self.document.elements.iter().any(is_selected) {
+            return false;
         }
-        self.selected = Some(target);
+
+        let before = self.document.clone();
+        match direction {
+            Reorder::Front => {
+                self.document
+                    .elements
+                    .sort_by_key(|element| usize::from(is_selected(element)));
+            }
+            Reorder::Back => {
+                self.document
+                    .elements
+                    .sort_by_key(|element| usize::from(!is_selected(element)));
+            }
+            Reorder::Forward => {
+                for index in (0..self.document.elements.len().saturating_sub(1)).rev() {
+                    if is_selected(&self.document.elements[index])
+                        && !is_selected(&self.document.elements[index + 1])
+                    {
+                        self.document.elements.swap(index, index + 1);
+                    }
+                }
+            }
+            Reorder::Backward => {
+                for index in 1..self.document.elements.len() {
+                    if is_selected(&self.document.elements[index])
+                        && !is_selected(&self.document.elements[index - 1])
+                    {
+                        self.document.elements.swap(index, index - 1);
+                    }
+                }
+            }
+        }
+
+        let order_changed = self
+            .document
+            .elements
+            .iter()
+            .zip(&before.elements)
+            .any(|(after, before)| after.id != before.id);
+        if !order_changed {
+            return false;
+        }
+        self.document.sync_fractional_indices();
+        self.history.push(before);
+        self.sync_primary_from_selection();
         self.changed();
         true
     }
