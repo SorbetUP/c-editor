@@ -3,7 +3,7 @@
 This crate is a vendored compatibility slice of the private `SorbetUP/Draw` repository. It exists so Elephant/Freya can compile and test without requiring cross-repository credentials at build time while canonical development stays in Draw.
 
 - source repository: `SorbetUP/Draw`
-- source commit: `06990d65c7c154e3b7b85804a145db2030a73284`
+- source commit: `068988416df908286cfd4db3ba6e47bf17b6f42e`
 - mirrored source files: `src/document.rs`, `src/geometry.rs`, `src/history.rs`, `src/tool.rs`
 - mirrored symbol: `create_element` from `src/editor.rs`, kept in `src/factory.rs` here to avoid vendoring the full editor runtime
 
