@@ -20,9 +20,18 @@ pub fn render(state: &DrawingCanvasState) -> Vec<Element> {
             element,
             index,
             state.viewport,
-            state.selected_element_id() == Some(element.id.as_str()),
+            state.is_element_selected(&element.id),
             &state.document.files,
         );
+    }
+
+    if state.selected_element_ids().len() > 1 {
+        if let Some(bounds) = state.selection_bounds() {
+            output.push(svg::group_selection(bounds, state.viewport));
+        }
+    }
+    if let Some(bounds) = state.selection_marquee_world() {
+        output.push(svg::selection_marquee(bounds, state.viewport));
     }
     output
 }
