@@ -12,6 +12,7 @@ mod fractional_index;
 mod frame;
 mod geometry;
 mod history;
+mod laser;
 mod library;
 mod normalize;
 mod rough;
@@ -42,6 +43,11 @@ pub use fractional_index::{
 };
 pub use geometry::{distance_to_segment, rgba, rotate_point, Viewport, MAX_ZOOM, MIN_ZOOM};
 pub use history::HistoryState;
+pub use laser::{
+    ease_out as laser_ease_out, LaserPoint, LaserSample, LaserTrail, LaserTrails,
+    DEFAULT_LASER_COLOR, LASER_DECAY_LENGTH, LASER_DECAY_TIME_MS, LASER_SIMPLIFY,
+    LASER_STREAMLINE,
+};
 pub use library::{LibraryFile, LibraryItem, LibraryItemStatus};
 pub use rough::{rough_shape_paths, RoughPath};
 pub use search::{SceneSearchMatch, SearchField};
