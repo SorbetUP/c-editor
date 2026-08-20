@@ -1,0 +1,145 @@
+name: Draw contract mirror
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - "Elephant/crates/draw-contract/**"
+      - "Elephant/freya/src/app/drawing_*.rs"
+      - "Elephant/freya/tests/drawing_*.rs"
+      - ".github/scripts/sync_freya_draw_lasso.py"
+      - ".github/scripts/sync_freya_draw_interactions.py"
+      - ".github/scripts/sync_freya_draw_transform.py"
+      - ".github/scripts/sync_freya_draw_additive.py"
+      - ".github/scripts/sync_freya_draw_clipboard.py"
+      - ".github/scripts/sync_freya_draw_library.py"
+      - ".github/scripts/sync_freya_draw_search.py"
+      - ".github/scripts/sync_freya_draw_links.py"
+      - ".github/scripts/sync_freya_draw_bindings.py"
+      - ".github/workflows/draw-contract.yml"
+  pull_request:
+    paths:
+      - "Elephant/crates/draw-contract/**"
+      - "Elephant/freya/src/app/drawing_*.rs"
+      - "Elephant/freya/tests/drawing_*.rs"
+      - ".github/scripts/sync_freya_draw_lasso.py"
+      - ".github/scripts/sync_freya_draw_interactions.py"
+      - ".github/scripts/sync_freya_draw_transform.py"
+      - ".github/scripts/sync_freya_draw_additive.py"
+      - ".github/scripts/sync_freya_draw_clipboard.py"
+      - ".github/scripts/sync_freya_draw_library.py"
+      - ".github/scripts/sync_freya_draw_search.py"
+      - ".github/scripts/sync_freya_draw_links.py"
+      - ".github/scripts/sync_freya_draw_bindings.py"
+      - ".github/workflows/draw-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: draw-contract-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mirror-contract:
+    name: Rust mirror contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'nsb/freya-native-migration' }}
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Synchronize native Draw interactions in workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            git pull --ff-only origin nsb/freya-native-migration
+          fi
+          python3 .github/scripts/sync_freya_draw_lasso.py
+          python3 .github/scripts/sync_freya_draw_interactions.py
+          python3 .github/scripts/sync_freya_draw_transform.py
+          python3 .github/scripts/sync_freya_draw_additive.py
+          python3 .github/scripts/sync_freya_draw_clipboard.py
+          python3 .github/scripts/sync_freya_draw_library.py
+          python3 .github/scripts/sync_freya_draw_search.py
+          python3 .github/scripts/sync_freya_draw_links.py
+          python3 .github/scripts/sync_freya_draw_bindings.py
+          rustfmt --edition 2021 \
+            Elephant/freya/src/app/drawing.rs \
+            Elephant/freya/src/app/drawing_canvas.rs \
+            Elephant/freya/src/app/drawing_scene.rs \
+            Elephant/freya/src/app/drawing_render.rs \
+            Elephant/freya/src/app/drawing_render_svg.rs \
+            Elephant/freya/src/app/drawing_library.rs \
+            Elephant/freya/tests/drawing_additive_selection_contract.rs
+          git diff --check -- Elephant/freya/src/app/drawing*.rs Elephant/freya/tests/drawing_additive_selection_contract.rs
+
+      - name: Install native Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Format contract
+        run: cargo fmt --manifest-path Elephant/crates/draw-contract/Cargo.toml -- --check
+
+      - name: Verify touched Freya files are formatted
+        run: rustfmt --edition 2021 --check Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_canvas.rs Elephant/freya/src/app/drawing_scene.rs Elephant/freya/src/app/drawing_render.rs Elephant/freya/src/app/drawing_render_svg.rs Elephant/freya/src/app/drawing_library.rs Elephant/freya/tests/drawing_additive_selection_contract.rs
+
+      - name: Clippy contract
+        run: cargo clippy --manifest-path Elephant/crates/draw-contract/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test contract
+        run: cargo test --manifest-path Elephant/crates/draw-contract/Cargo.toml --all-targets
+
+      - name: Check Freya against mirrored Draw API
+        run: cargo check --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Verify native Draw toolbar and graphics
+        run: |
+          cargo test --manifest-path Elephant/freya/Cargo.toml drawing_toolbar_lasso_tests -- --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml drawing_library::tests -- --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_additive_selection_contract -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_hierarchy_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_lasso_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_transform_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_transform_handles_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_binding_freya_testing -- --test-threads=1 --nocapture
+
+      - name: Commit verified native Draw synchronization
+        if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- \
+            Elephant/freya/src/app/drawing.rs \
+            Elephant/freya/src/app/drawing_canvas.rs \
+            Elephant/freya/src/app/drawing_scene.rs \
+            Elephant/freya/src/app/drawing_render.rs \
+            Elephant/freya/src/app/drawing_render_svg.rs \
+            Elephant/freya/src/app/drawing_library.rs \
+            Elephant/freya/tests/drawing_*.rs
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'Native Draw interactions already synchronized.'
+            exit 0
+          fi
+          git commit -m 'feat(freya-draw): synchronize native Excalidraw interactions'
+          git fetch origin nsb/freya-native-migration
+          git rebase origin/nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration
