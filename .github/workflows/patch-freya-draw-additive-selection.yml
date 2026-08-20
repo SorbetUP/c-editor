@@ -1,0 +1,463 @@
+name: One-shot Freya Draw selection parity
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - ".github/workflows/patch-freya-draw-additive-selection.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: freya-draw-selection-parity
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: nsb/freya-native-migration
+          fetch-depth: 0
+
+      - name: Patch additive and lasso semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def once(text: str, old: str, new: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected one anchor, found {count}: {old[:120]!r}')
+              return text.replace(old, new, 1)
+
+          scene_path = Path('Elephant/freya/src/app/drawing_scene.rs')
+          scene = scene_path.read_text()
+
+          if 'base_selection: SelectionSet' not in scene:
+              scene = once(scene, '''    BoxSelect {
+        start_world: [f32; 2],
+        current_world: [f32; 2],
+    },''', '''    BoxSelect {
+        start_world: [f32; 2],
+        current_world: [f32; 2],
+        base_selection: SelectionSet,
+    },''')
+              scene = once(scene, '''        let Interaction::BoxSelect {
+            start_world,
+            current_world,
+        } = self.interaction''', '''        let Interaction::BoxSelect {
+            start_world,
+            current_world,
+            ..
+        } = self.interaction''')
+
+          if 'Lasso {' not in scene:
+              scene = once(scene, '''    BoxSelect {
+        start_world: [f32; 2],
+        current_world: [f32; 2],
+        base_selection: SelectionSet,
+    },''', '''    BoxSelect {
+        start_world: [f32; 2],
+        current_world: [f32; 2],
+        base_selection: SelectionSet,
+    },
+    Lasso {
+        points: Vec<[f32; 2]>,
+        base_selection: SelectionSet,
+    },''')
+
+          if '"Lasso" => "lasso"' not in scene:
+              scene = once(scene, '''            "Frame" => "frame",
+            _ => "selection",''', '''            "Frame" => "frame",
+            "Lasso" => "lasso",
+            _ => "selection",''')
+
+          if 'pub fn selection_lasso_world' not in scene:
+              scene = once(scene, '''    pub fn can_undo(&self) -> bool {''', '''    pub fn selection_lasso_world(&self) -> Option<Vec<[f32; 2]>> {
+        let Interaction::Lasso { points, .. } = &self.interaction else {
+            return None;
+        };
+        Some(points.clone())
+    }
+
+    pub fn can_undo(&self) -> bool {''')
+
+          if 'begin_pointer_with_additive' not in scene:
+              old = '''    pub(crate) fn begin_pointer(&mut self, point: [f32; 2]) {
+        let world = self.to_world(point);
+        match self.active_tool.as_str() {
+            "hand" => {
+                self.interaction = Interaction::Pan {
+                    start_pointer: point,
+                    start_pan: self.viewport.pan,
+                };
+            }
+            "selection" => {
+                if let Some(index) = self.hit_test(world) {
+                    let id = self.document.elements[index].id.clone();
+                    if self.selection.len() > 1 && self.selection.contains(&id) {
+                        self.selected = None;
+                        self.interaction = Interaction::MoveSelection {
+                            last_world: world,
+                            checkpointed: false,
+                        };
+                    } else {
+                        self.selection = SelectionSet::from_ids(std::iter::once(id));
+                        self.selected = Some(index);
+                        let element = &self.document.elements[index];
+                        self.interaction = Interaction::MoveElement {
+                            index,
+                            offset: [world[0] - element.x, world[1] - element.y],
+                            checkpointed: false,
+                        };
+                    }
+                } else {
+                    self.clear_selection();
+                    self.interaction = Interaction::BoxSelect {
+                        start_world: world,
+                        current_world: world,
+                    };
+                }
+            }
+            "eraser" => {
+                let changed = self.erase_world(world, false);
+                self.interaction = Interaction::Erase {
+                    checkpointed: changed,
+                };
+            }
+            _ => self.interaction = Interaction::None,
+        }
+    }
+'''
+              new = '''    pub(crate) fn begin_pointer(&mut self, point: [f32; 2]) {
+        self.begin_pointer_with_additive(point, false);
+    }
+
+    pub(crate) fn begin_pointer_with_additive(&mut self, point: [f32; 2], additive: bool) {
+        let world = self.to_world(point);
+        match self.active_tool.as_str() {
+            "hand" => {
+                self.interaction = Interaction::Pan {
+                    start_pointer: point,
+                    start_pan: self.viewport.pan,
+                };
+            }
+            "selection" => {
+                if let Some(index) = self.hit_test(world) {
+                    let id = self.document.elements[index].id.clone();
+                    if additive {
+                        let selected_after_toggle = self.selection.toggle(id);
+                        self.selected = None;
+                        self.sync_primary_from_selection();
+                        self.interaction = if selected_after_toggle {
+                            Interaction::MoveSelection {
+                                last_world: world,
+                                checkpointed: false,
+                            }
+                        } else {
+                            Interaction::None
+                        };
+                        self.changed();
+                    } else if self.selection.len() > 1 && self.selection.contains(&id) {
+                        self.selected = None;
+                        self.interaction = Interaction::MoveSelection {
+                            last_world: world,
+                            checkpointed: false,
+                        };
+                    } else {
+                        self.selection = SelectionSet::from_ids(std::iter::once(id));
+                        self.selected = Some(index);
+                        let element = &self.document.elements[index];
+                        self.interaction = Interaction::MoveElement {
+                            index,
+                            offset: [world[0] - element.x, world[1] - element.y],
+                            checkpointed: false,
+                        };
+                    }
+                } else {
+                    let base_selection = if additive {
+                        self.selection.clone()
+                    } else {
+                        self.clear_selection();
+                        SelectionSet::new()
+                    };
+                    self.interaction = Interaction::BoxSelect {
+                        start_world: world,
+                        current_world: world,
+                        base_selection,
+                    };
+                }
+            }
+            "lasso" => {
+                let base_selection = if additive {
+                    self.selection.clone()
+                } else {
+                    self.clear_selection();
+                    SelectionSet::new()
+                };
+                self.interaction = Interaction::Lasso {
+                    points: vec![world],
+                    base_selection,
+                };
+            }
+            "eraser" => {
+                let changed = self.erase_world(world, false);
+                self.interaction = Interaction::Erase {
+                    checkpointed: changed,
+                };
+            }
+            _ => self.interaction = Interaction::None,
+        }
+    }
+'''
+              scene = once(scene, old, new)
+
+          old_box = '''            Interaction::BoxSelect {
+                start_world,
+                current_world: _,
+            } => {
+                let world = self.to_world(point);
+                self.selection =
+                    self.document
+                        .select_in_rect(start_world, world, SelectionMode::Contained);
+                self.selected = None;
+                self.interaction = Interaction::BoxSelect {
+                    start_world,
+                    current_world: world,
+                };
+                self.changed();
+            }'''
+          if old_box in scene:
+              scene = once(scene, old_box, '''            Interaction::BoxSelect {
+                start_world,
+                current_world: _,
+                base_selection,
+            } => {
+                let world = self.to_world(point);
+                let mut next = self
+                    .document
+                    .select_in_rect(start_world, world, SelectionMode::Contained);
+                for id in base_selection.ids() {
+                    next.insert(id.to_owned());
+                }
+                self.selection = next;
+                self.selected = None;
+                self.interaction = Interaction::BoxSelect {
+                    start_world,
+                    current_world: world,
+                    base_selection,
+                };
+                self.changed();
+            }''')
+
+          if 'Interaction::Lasso {' not in scene.split('pub(crate) fn move_pointer', 1)[1]:
+              anchor = '''            Interaction::Pan {
+                start_pointer,
+                start_pan,
+            } => {'''
+              lasso = '''            Interaction::Lasso {
+                mut points,
+                base_selection,
+            } => {
+                let world = self.to_world(point);
+                if points.last().is_none_or(|last| {
+                    (last[0] - world[0]).abs() > 0.5 || (last[1] - world[1]).abs() > 0.5
+                }) {
+                    points.push(world);
+                }
+                let mut next = self
+                    .document
+                    .select_in_lasso(&points, SelectionMode::Contained);
+                for id in base_selection.ids() {
+                    next.insert(id.to_owned());
+                }
+                self.selection = next;
+                self.selected = None;
+                self.interaction = Interaction::Lasso {
+                    points,
+                    base_selection,
+                };
+                self.changed();
+            }
+            Interaction::Pan {
+                start_pointer,
+                start_pan,
+            } => {'''
+              scene = once(scene, anchor, lasso)
+
+          scene_path.write_text(scene)
+
+          canvas_path = Path('Elephant/freya/src/app/drawing_canvas.rs')
+          canvas = canvas_path.read_text()
+          if 'selection_modifiers' not in canvas:
+              canvas = once(canvas, '''    let pointer_down_state = use_state(|| false);
+    let last_active_tool = use_state(|| snapshot.active_tool.clone());''', '''    let pointer_down_state = use_state(|| false);
+    let selection_modifiers = use_state(Modifiers::empty);
+    let last_active_tool = use_state(|| snapshot.active_tool.clone());''')
+              canvas = once(canvas, '''    let mut pointer_state = state;
+    let mut move_state = state;''', '''    let mut pointer_state = state;
+    let pointer_modifiers = selection_modifiers;
+    let mut key_modifiers_down = selection_modifiers;
+    let mut key_modifiers_up = selection_modifiers;
+    let mut move_state = state;''')
+              canvas = once(canvas, '''                DrawingTool::Selection | DrawingTool::Hand | DrawingTool::Eraser => {
+                    pointer_state.write().begin_pointer(screen);
+                    pointer_gesture.set(None);
+                }''', '''                DrawingTool::Selection | DrawingTool::Hand | DrawingTool::Eraser => {
+                    let modifiers = *pointer_modifiers.read();
+                    let additive = modifiers.contains(Modifiers::SHIFT)
+                        || modifiers.contains(Modifiers::ctrl_or_meta());
+                    pointer_state
+                        .write()
+                        .begin_pointer_with_additive(screen, additive);
+                    pointer_gesture.set(None);
+                }''')
+              canvas = once(canvas, '''        .on_wheel(move |event: Event<WheelEventData>| {
+            wheel_state''', '''        .on_global_key_down(move |event: Event<KeyboardEventData>| {
+            key_modifiers_down.set(event.modifiers);
+        })
+        .on_global_key_up(move |event: Event<KeyboardEventData>| {
+            key_modifiers_up.set(event.modifiers);
+        })
+        .on_wheel(move |event: Event<WheelEventData>| {
+            wheel_state''')
+          canvas_path.write_text(canvas)
+
+          render_path = Path('Elephant/freya/src/app/drawing_render.rs')
+          render = render_path.read_text()
+          if 'selection_lasso_overlay' not in render:
+              render = once(render, 'use freya::prelude::*;\n', 'use bytes::Bytes;\nuse freya::prelude::*;\n')
+              render = once(render, '''    if let Some(bounds) = state.selection_marquee_world() {
+        output.push(selection_overlay(
+            bounds,
+            state.viewport,
+            "Drawing selection marquee",
+            24,
+        ));
+    }
+    output
+}''', '''    if let Some(bounds) = state.selection_marquee_world() {
+        output.push(selection_overlay(
+            bounds,
+            state.viewport,
+            "Drawing selection marquee",
+            24,
+        ));
+    }
+    if let Some(points) = state.selection_lasso_world() {
+        if points.len() >= 2 {
+            output.push(selection_lasso_overlay(&points, state.viewport));
+        }
+    }
+    output
+}''')
+              render += r'''
+
+fn selection_lasso_overlay(points: &[[f32; 2]], viewport: Viewport) -> Element {
+    let min_x = points.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+    let min_y = points.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min);
+    let max_x = points.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+    let max_y = points.iter().map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+    let pad = 4.0;
+    let width = (max_x - min_x + pad * 2.0).max(1.0);
+    let height = (max_y - min_y + pad * 2.0).max(1.0);
+    let mut path = String::new();
+    for (index, point) in points.iter().enumerate() {
+        let command = if index == 0 { 'M' } else { 'L' };
+        path.push_str(&format!(
+            "{command} {} {} ",
+            point[0] - min_x + pad,
+            point[1] - min_y + pad
+        ));
+    }
+    let source = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {width} {height}\"><path d=\"{path}\" fill=\"none\" stroke=\"rgb(105,101,219)\" stroke-width=\"1.5\" stroke-dasharray=\"4 3\"/></svg>"
+    );
+    rect()
+        .position(
+            Position::new_absolute()
+                .left(viewport.pan[0] + (min_x - pad) * viewport.zoom)
+                .top(viewport.pan[1] + (min_y - pad) * viewport.zoom),
+        )
+        .width(Size::px(width * viewport.zoom))
+        .height(Size::px(height * viewport.zoom))
+        .a11y_alt("Drawing lasso selection")
+        .child(
+            SvgViewer::new(("drawing-lasso-selection", Bytes::from(source.into_bytes())))
+                .width(Size::fill())
+                .height(Size::fill())
+                .show_loader(false),
+        )
+        .into_element()
+}
+'''
+          render_path.write_text(render)
+
+          test_path = Path('Elephant/freya/tests/drawing_additive_selection_contract.rs')
+          test_path.write_text(r'''#[path = "../src/app/drawing_canvas.rs"]
+mod drawing_canvas;
+use drawing_canvas::DrawingCanvasState;
+use serde_json::json;
+
+fn state() -> DrawingCanvasState {
+    DrawingCanvasState::from_json(&serde_json::to_string(&json!({
+        "type":"excalidraw",
+        "elements":[
+            {"id":"a","type":"rectangle","x":10,"y":10,"width":40,"height":40},
+            {"id":"b","type":"rectangle","x":80,"y":10,"width":40,"height":40},
+            {"id":"c","type":"rectangle","x":150,"y":10,"width":40,"height":40}
+        ],"appState":{},"files":{}
+    })).unwrap()).unwrap()
+}
+fn ids(canvas: &DrawingCanvasState) -> Vec<String> {
+    canvas.selected_element_ids().into_iter().map(str::to_owned).collect()
+}
+#[test]
+fn additive_click_toggles_elements_without_losing_existing_selection() {
+    let mut canvas = state();
+    canvas.begin_pointer([25.0,25.0]); canvas.end_pointer();
+    canvas.begin_pointer_with_additive([95.0,25.0], true); canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a","b"]);
+    canvas.begin_pointer_with_additive([95.0,25.0], true); canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a"]);
+}
+#[test]
+fn additive_box_unions_while_ordinary_box_replaces() {
+    let mut canvas = state();
+    canvas.begin_pointer([25.0,25.0]); canvas.end_pointer();
+    canvas.begin_pointer_with_additive([140.0,0.0], true);
+    canvas.move_pointer([205.0,60.0]); canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["a","c"]);
+    canvas.begin_pointer([70.0,0.0]); canvas.move_pointer([130.0,60.0]); canvas.end_pointer();
+    assert_eq!(ids(&canvas), vec!["b"]);
+}
+''')
+          PY
+
+          cargo fmt --manifest-path Elephant/freya/Cargo.toml
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_additive_selection_contract -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_lasso_freya_testing -- --test-threads=1 --nocapture
+
+      - name: Commit verified selection parity and remove one-shot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            Elephant/freya/src/app/drawing_scene.rs \
+            Elephant/freya/src/app/drawing_canvas.rs \
+            Elephant/freya/src/app/drawing_render.rs \
+            Elephant/freya/tests/drawing_additive_selection_contract.rs
+          git rm .github/workflows/patch-freya-draw-additive-selection.yml
+          git diff --cached --check
+          git commit -m 'feat(freya-draw): complete additive and lasso selection gestures'
+          git pull --rebase origin nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration

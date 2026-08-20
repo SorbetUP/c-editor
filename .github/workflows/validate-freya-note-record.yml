@@ -1,0 +1,74 @@
+name: Validate Freya Note parity
+
+on:
+  push:
+    branches: [nsb/freya-native-migration]
+    paths:
+      - '.github/workflows/validate-freya-note-record.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Freya Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Run validation and preserve diagnostics
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .ci
+          : > .ci/freya-note-validation.log
+
+          run_check() {
+            name="$1"; shift
+            printf '\n===== %s =====\n' "$name" | tee -a .ci/freya-note-validation.log
+            "$@" >> .ci/freya-note-validation.log 2>&1
+            code=$?
+            printf 'exit=%s\n' "$code" | tee -a .ci/freya-note-validation.log
+            return "$code"
+          }
+
+          overall=0
+          run_check core cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets || overall=1
+          run_check freya-check cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets || overall=1
+          run_check toolbar cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_toolbar_parity -- --test-threads=1 || overall=1
+          run_check keyboard cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_keyboard_freya_testing -- --test-threads=1 || overall=1
+          run_check undo-redo cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_undo_redo_freya_testing -- --test-threads=1 || overall=1
+          run_check rich cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_rich_interactions_freya_testing -- --test-threads=1 || overall=1
+          run_check lifecycle cargo test --manifest-path Elephant/freya/Cargo.toml --test muya_note_lifecycle_freya_testing -- --test-threads=1 || overall=1
+
+          sha="$(git rev-parse HEAD)"
+          if [ "$overall" -eq 0 ]; then verdict=GREEN; else verdict=FAILED; fi
+          cat > .ci/freya-note-validation.md <<EOF
+          # Freya Note validation
+
+          - source commit: \`$sha\`
+          - Rust: 1.91.0
+          - verdict: **$verdict**
+          - checks: muya-core all-targets, Freya all-targets check, toolbar, keyboard, undo/redo, rich interactions, lifecycle
+          EOF
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .ci/freya-note-validation.md .ci/freya-note-validation.log
+          git commit -m "ci(freya): record Note parity validation for $sha" || true
+          git pull --rebase origin nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration
+          exit "$overall"
