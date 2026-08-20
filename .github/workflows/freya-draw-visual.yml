@@ -63,6 +63,8 @@ jobs:
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_multiselect_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_multi_selection_contract -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_freya_testing -- --test-threads=1 --nocapture
