@@ -65,6 +65,8 @@ jobs:
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_multi_selection_contract -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_freya_testing -- --test-threads=1 --nocapture
@@ -82,6 +84,7 @@ jobs:
           required = [
               Path('/tmp/elephant-freya-drawing-canvas-primitives.png'),
               Path('/tmp/elephant-freya-drawing-multiselect.png'),
+              Path('/tmp/elephant-freya-drawing-arrowheads.png'),
               Path('/tmp/elephant-freya-hand-before.png'),
               Path('/tmp/elephant-freya-hand-after.png'),
               Path('/tmp/elephant-freya-drawing-frame.png'),
@@ -98,8 +101,18 @@ jobs:
                   raise AssertionError(f'{path.name}: screenshot is visually empty/monochrome')
               shutil.copy2(path, output / path.name)
 
-          before = Image.open(required[2]).convert('RGBA')
-          after = Image.open(required[3]).convert('RGBA')
+          arrowheads = Image.open(required[2]).convert('RGBA')
+          endpoint_crops = []
+          for column in range(2):
+              for row in range(7):
+                  x = 40 + column * 310 + 150
+                  y = 35 + row * 58 + 24
+                  endpoint_crops.append(arrowheads.crop((x - 24, y - 20, x + 16, y + 20)).tobytes())
+          if len({hash(crop) for crop in endpoint_crops}) < 8:
+              raise AssertionError('arrowhead endpoint crops are not graphically diverse enough')
+
+          before = Image.open(required[3]).convert('RGBA')
+          after = Image.open(required[4]).convert('RGBA')
           diff = ImageChops.difference(before, after)
           if diff.getbbox() is None:
               raise AssertionError('hand-pan screenshots are pixel-identical')
