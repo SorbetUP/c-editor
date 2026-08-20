@@ -6,6 +6,9 @@ on:
     paths:
       - '.github/workflows/patch-freya-note-renderer.yml'
       - 'tools/freya-note-finalize.py'
+  pull_request_target:
+    branches: [nsb/freya-native-migration]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
@@ -17,6 +20,7 @@ concurrency:
 
 jobs:
   finalize:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
