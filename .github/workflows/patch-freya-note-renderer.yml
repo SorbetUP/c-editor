@@ -1,4 +1,5 @@
 name: One-shot Freya Note renderer repair
+# Trigger the bounded renderer repair on the Freya migration branch.
 
 on:
   push:
