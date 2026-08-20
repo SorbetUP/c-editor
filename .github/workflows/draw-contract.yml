@@ -12,6 +12,7 @@ on:
       - ".github/scripts/sync_freya_draw_interactions.py"
       - ".github/scripts/sync_freya_draw_transform.py"
       - ".github/scripts/sync_freya_draw_clipboard.py"
+      - ".github/scripts/sync_freya_draw_library.py"
       - ".github/workflows/draw-contract.yml"
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - ".github/scripts/sync_freya_draw_interactions.py"
       - ".github/scripts/sync_freya_draw_transform.py"
       - ".github/scripts/sync_freya_draw_clipboard.py"
+      - ".github/scripts/sync_freya_draw_library.py"
       - ".github/workflows/draw-contract.yml"
   workflow_dispatch:
 
@@ -60,12 +62,14 @@ jobs:
           python3 .github/scripts/sync_freya_draw_interactions.py
           python3 .github/scripts/sync_freya_draw_transform.py
           python3 .github/scripts/sync_freya_draw_clipboard.py
+          python3 .github/scripts/sync_freya_draw_library.py
           rustfmt --edition 2021 \
             Elephant/freya/src/app/drawing.rs \
             Elephant/freya/src/app/drawing_canvas.rs \
             Elephant/freya/src/app/drawing_scene.rs \
             Elephant/freya/src/app/drawing_render.rs \
-            Elephant/freya/src/app/drawing_render_svg.rs
+            Elephant/freya/src/app/drawing_render_svg.rs \
+            Elephant/freya/src/app/drawing_library.rs
           git diff --check -- Elephant/freya/src/app/drawing*.rs
 
       - name: Install native Linux dependencies
@@ -77,7 +81,7 @@ jobs:
         run: cargo fmt --manifest-path Elephant/crates/draw-contract/Cargo.toml -- --check
 
       - name: Verify touched Freya files are formatted
-        run: rustfmt --edition 2021 --check Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_canvas.rs Elephant/freya/src/app/drawing_scene.rs Elephant/freya/src/app/drawing_render.rs Elephant/freya/src/app/drawing_render_svg.rs
+        run: rustfmt --edition 2021 --check Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_canvas.rs Elephant/freya/src/app/drawing_scene.rs Elephant/freya/src/app/drawing_render.rs Elephant/freya/src/app/drawing_render_svg.rs Elephant/freya/src/app/drawing_library.rs
 
       - name: Clippy contract
         run: cargo clippy --manifest-path Elephant/crates/draw-contract/Cargo.toml --all-targets -- -D warnings
@@ -91,6 +95,7 @@ jobs:
       - name: Verify native Draw toolbar and graphics
         run: |
           cargo test --manifest-path Elephant/freya/Cargo.toml drawing_toolbar_lasso_tests -- --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml drawing_library::tests -- --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_hierarchy_freya_testing -- --test-threads=1 --nocapture
