@@ -10,11 +10,12 @@ rust-version = "1.91"
 path = "src/lib.rs"
 
 [dependencies]
+base64 = "0.22"
 bytes = "1"
 elephant-native-core = { package = "elephantnote-native-core", path = "../backend/native-core" }
 elephantnote-knowledge-core = { path = "../backend/knowledge-core" }
-elephant-draw = { path = "../vendor/Draw" }
-elephant-note = { path = "../vendor/Note" }
+elephant-draw = { package = "elephant-draw-contract", path = "../crates/draw-contract" }
+elephant-note = { package = "elephant-note-contract", path = "../crates/note-contract" }
 freya = { version = "0.4.1", features = ["sdk"] }
 futures-timer = "3"
 muya-core = { path = "../crates/muya-core" }
