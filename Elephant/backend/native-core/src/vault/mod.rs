@@ -21,9 +21,6 @@ pub mod config {
     }
 }
 
-#[path = "../../../tauri/src/vault/types.rs"]
 pub mod types;
-#[path = "../../../tauri/src/vault/metadata.rs"]
 pub mod metadata;
-#[path = "../../../tauri/src/vault/entries.rs"]
 pub mod entries;
