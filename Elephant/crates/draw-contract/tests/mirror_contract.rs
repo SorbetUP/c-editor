@@ -67,9 +67,13 @@ fn specialized_factory_fields_match_draw() {
     assert_eq!(arrow.end_arrowhead.as_deref(), Some("arrow"));
 
     let frame = create_element(DrawingTool::Frame, [0.0, 0.0], "frame-1");
+    assert_eq!(frame.kind, "frame");
     assert_eq!(frame.stroke_color, "#bbb");
     assert_eq!(frame.extra.get("name"), Some(&serde_json::Value::Null));
     assert_eq!(frame.extra.get("roughness"), Some(&serde_json::json!(0)));
+    for key in ["version", "versionNonce", "index", "frameId", "locked"] {
+        assert!(frame.extra.contains_key(key), "Frame missing {key}");
+    }
 }
 
 #[test]
@@ -107,4 +111,6 @@ fn tool_aliases_match_the_canonical_draw_ids() {
     assert_eq!(DrawingTool::from_id("pencil"), DrawingTool::Freehand);
     assert_eq!(DrawingTool::Arrow.id(), "arrow");
     assert_eq!(DrawingTool::Image.id(), "image");
+    assert_eq!(DrawingTool::from_id("frame"), DrawingTool::Frame);
+    assert_eq!(DrawingTool::Frame.id(), "frame");
 }
