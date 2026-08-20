@@ -40,6 +40,8 @@ impl DrawingScene {
             return false;
         };
         if self.elements[arrow_index].kind != "arrow"
+            || self.elements[arrow_index].is_deleted
+            || self.elements[target_index].is_deleted
             || self.elements[arrow_index].is_locked()
             || self.elements[target_index].is_locked()
             || !is_bindable(&self.elements[target_index])
@@ -81,7 +83,10 @@ impl DrawingScene {
         let Some(arrow_index) = self.element_index(arrow_id) else {
             return false;
         };
-        if self.elements[arrow_index].kind != "arrow" || self.elements[arrow_index].is_locked() {
+        if self.elements[arrow_index].kind != "arrow"
+            || self.elements[arrow_index].is_deleted
+            || self.elements[arrow_index].is_locked()
+        {
             return false;
         }
         let Some(target_id) =
@@ -111,6 +116,8 @@ impl DrawingScene {
             return false;
         };
         if self.elements[text_index].kind != "text"
+            || self.elements[text_index].is_deleted
+            || self.elements[container_index].is_deleted
             || self.elements[text_index].is_locked()
             || self.elements[container_index].is_locked()
             || !is_text_container(&self.elements[container_index])
@@ -145,7 +152,10 @@ impl DrawingScene {
         let Some(text_index) = self.element_index(text_id) else {
             return false;
         };
-        if self.elements[text_index].kind != "text" || self.elements[text_index].is_locked() {
+        if self.elements[text_index].kind != "text"
+            || self.elements[text_index].is_deleted
+            || self.elements[text_index].is_locked()
+        {
             return false;
         }
         let Some(container_id) = self.elements[text_index]
@@ -171,14 +181,22 @@ impl DrawingScene {
 fn is_bindable(element: &DrawingElement) -> bool {
     matches!(
         element.kind.as_str(),
-        "rectangle" | "ellipse" | "diamond" | "text" | "image" | "frame"
+        "rectangle"
+            | "ellipse"
+            | "diamond"
+            | "text"
+            | "image"
+            | "iframe"
+            | "embeddable"
+            | "frame"
+            | "magicframe"
     )
 }
 
 fn is_text_container(element: &DrawingElement) -> bool {
     matches!(
         element.kind.as_str(),
-        "rectangle" | "ellipse" | "diamond" | "arrow" | "frame"
+        "rectangle" | "ellipse" | "diamond" | "arrow"
     )
 }
 
@@ -189,8 +207,9 @@ fn binding_value(target_id: &str, focus: f32, gap: f32, fixed_point: Option<[f32
     binding.insert("gap".to_owned(), json!(gap.max(0.0)));
     binding.insert(
         "fixedPoint".to_owned(),
-        fixed_point.map_or(Value::Null, |point| json!(point)),
+        json!(normalized_fixed_point(fixed_point)),
     );
+    binding.insert("mode".to_owned(), Value::String("orbit".to_owned()));
     Value::Object(binding)
 }
 
@@ -218,19 +237,24 @@ fn binding_matches(
         && binding.get("focus").and_then(Value::as_f64) == Some(f64::from(focus.clamp(-1.0, 1.0)))
         && binding.get("gap").and_then(Value::as_f64) == Some(f64::from(gap.max(0.0)))
         && fixed_point_matches(binding.get("fixedPoint"), fixed_point)
+        && binding.get("mode").and_then(Value::as_str) == Some("orbit")
+}
+
+fn normalized_fixed_point(point: Option<[f32; 2]>) -> [f32; 2] {
+    point.map_or([0.5, 0.5], |[x, y]| {
+        [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)]
+    })
 }
 
 fn fixed_point_matches(value: Option<&Value>, expected: Option<[f32; 2]>) -> bool {
-    match expected {
-        None => value.is_none() || value == Some(&Value::Null),
-        Some(expected) => value
-            .and_then(Value::as_array)
-            .filter(|array| array.len() == 2)
-            .is_some_and(|array| {
-                array[0].as_f64() == Some(f64::from(expected[0]))
-                    && array[1].as_f64() == Some(f64::from(expected[1]))
-            }),
-    }
+    let expected = normalized_fixed_point(expected);
+    value
+        .and_then(Value::as_array)
+        .filter(|array| array.len() == 2)
+        .is_some_and(|array| {
+            array[0].as_f64() == Some(f64::from(expected[0]))
+                && array[1].as_f64() == Some(f64::from(expected[1]))
+        })
 }
 
 fn add_bound_element(element: &mut DrawingElement, id: &str, kind: &str) {
