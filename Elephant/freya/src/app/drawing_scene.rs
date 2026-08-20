@@ -66,6 +66,7 @@ impl DrawingCanvasState {
             "Arrow" => "arrow",
             "Line" => "line",
             "Text" => "text",
+            "Image" => "image",
             "Eraser" => "eraser",
             "Hand" => "hand",
             _ => "selection",
@@ -73,6 +74,7 @@ impl DrawingCanvasState {
         .to_owned();
         if self.active_tool != next {
             self.active_tool = next;
+            self.interaction = Interaction::None;
             self.revision = self.revision.wrapping_add(1);
         }
     }
@@ -101,20 +103,30 @@ impl DrawingCanvasState {
 
     pub(crate) fn begin_pointer(&mut self, point: [f32; 2]) {
         let world = self.to_world(point);
-        self.selected = self.hit_test(world);
-        self.interaction = match self.selected {
-            Some(index) => {
-                let element = &self.document.elements[index];
-                Interaction::MoveElement {
-                    index,
-                    offset: [world[0] - element.x, world[1] - element.y],
-                }
+        match self.active_tool.as_str() {
+            "hand" => {
+                self.interaction = Interaction::Pan {
+                    start_pointer: point,
+                    start_pan: self.viewport.pan,
+                };
             }
-            None => Interaction::Pan {
-                start_pointer: point,
-                start_pan: self.viewport.pan,
-            },
-        };
+            "selection" => {
+                self.selected = self.hit_test(world);
+                self.interaction = match self.selected {
+                    Some(index) => {
+                        let element = &self.document.elements[index];
+                        Interaction::MoveElement {
+                            index,
+                            offset: [world[0] - element.x, world[1] - element.y],
+                        }
+                    }
+                    None => Interaction::None,
+                };
+            }
+            _ => {
+                self.interaction = Interaction::None;
+            }
+        }
     }
 
     pub(crate) fn move_pointer(&mut self, point: [f32; 2]) {
@@ -161,21 +173,13 @@ impl DrawingCanvasState {
     }
 
     pub(crate) fn zoom_at(&mut self, point: [f32; 2], delta_y: f64) {
-        let before = self.to_world(point);
-        let factor = if delta_y < 0. { 1.1 } else { 1. / 1.1 };
-        self.viewport.zoom = (self.viewport.zoom * factor as f32).clamp(0.2, 5.);
-        self.viewport.pan = [
-            point[0] - before[0] * self.viewport.zoom,
-            point[1] - before[1] * self.viewport.zoom,
-        ];
+        let factor = if delta_y < 0.0 { 1.1 } else { 1.0 / 1.1 };
+        self.viewport.zoom_at(point, factor);
         self.revision = self.revision.wrapping_add(1);
     }
 
     pub(crate) fn to_world(&self, point: [f32; 2]) -> [f32; 2] {
-        [
-            (point[0] - self.viewport.pan[0]) / self.viewport.zoom,
-            (point[1] - self.viewport.pan[1]) / self.viewport.zoom,
-        ]
+        self.viewport.to_world(point)
     }
 
     fn hit_test(&self, point: [f32; 2]) -> Option<usize> {
