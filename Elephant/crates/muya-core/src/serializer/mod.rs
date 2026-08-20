@@ -240,7 +240,15 @@ fn editable_payload(document: &Document, node: &Node, fallback: &str) -> String 
 fn serialize_inline(document: &Document, node: &Node) -> String {
   match &node.kind {
     NodeKind::Inline(InlineKind::Text { value }) => value.clone(),
-    NodeKind::Inline(InlineKind::Escaped { value }) => format!("\\{value}"),
+    NodeKind::Inline(InlineKind::Escaped { value }) => {
+      let original = value.to_string();
+      let visible = editable_payload(document, node, &original);
+      if visible == original {
+        format!("\\{value}")
+      } else {
+        visible
+      }
+    }
     NodeKind::Inline(InlineKind::Emphasis) => {
       format!("*{}*", serialize_inlines(document, node))
     }
@@ -296,8 +304,22 @@ fn serialize_inline(document: &Document, node: &Node) -> String {
       let label = editable_payload(document, node, label);
       format!("[^{label}]")
     }
-    NodeKind::Inline(InlineKind::SoftBreak) => "\n".to_string(),
-    NodeKind::Inline(InlineKind::HardBreak) => "  \n".to_string(),
+    NodeKind::Inline(InlineKind::SoftBreak) => {
+      let visible = editable_payload(document, node, "\n");
+      if visible == "\n" {
+        "\n".to_string()
+      } else {
+        visible
+      }
+    }
+    NodeKind::Inline(InlineKind::HardBreak) => {
+      let visible = editable_payload(document, node, "\n");
+      if visible == "\n" {
+        "  \n".to_string()
+      } else {
+        visible
+      }
+    }
     _ => serialize_inlines(document, node),
   }
 }
