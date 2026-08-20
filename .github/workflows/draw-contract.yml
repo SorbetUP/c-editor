@@ -8,19 +8,7 @@ on:
       - "Elephant/crates/draw-contract/**"
       - "Elephant/freya/src/app/drawing_*.rs"
       - "Elephant/freya/tests/drawing_*.rs"
-      - ".github/scripts/sync_freya_draw_lasso.py"
-      - ".github/scripts/sync_freya_draw_interactions.py"
-      - ".github/scripts/sync_freya_draw_transform.py"
-      - ".github/scripts/sync_freya_draw_additive.py"
-      - ".github/scripts/sync_freya_draw_clipboard.py"
-      - ".github/scripts/sync_freya_draw_commands.py"
-      - ".github/scripts/sync_freya_draw_library.py"
-      - ".github/scripts/sync_freya_draw_search.py"
-      - ".github/scripts/sync_freya_draw_properties.py"
-      - ".github/scripts/sync_freya_draw_links.py"
-      - ".github/scripts/sync_freya_draw_crop.py"
-      - ".github/scripts/sync_freya_draw_bindings.py"
-      - ".github/scripts/sync_freya_draw_more_tools.py"
+      - ".github/scripts/sync_freya_draw_*.py"
       - ".github/scripts/sync_freya_rough.py"
       - ".github/workflows/draw-contract.yml"
   pull_request:
@@ -28,19 +16,7 @@ on:
       - "Elephant/crates/draw-contract/**"
       - "Elephant/freya/src/app/drawing_*.rs"
       - "Elephant/freya/tests/drawing_*.rs"
-      - ".github/scripts/sync_freya_draw_lasso.py"
-      - ".github/scripts/sync_freya_draw_interactions.py"
-      - ".github/scripts/sync_freya_draw_transform.py"
-      - ".github/scripts/sync_freya_draw_additive.py"
-      - ".github/scripts/sync_freya_draw_clipboard.py"
-      - ".github/scripts/sync_freya_draw_commands.py"
-      - ".github/scripts/sync_freya_draw_library.py"
-      - ".github/scripts/sync_freya_draw_search.py"
-      - ".github/scripts/sync_freya_draw_properties.py"
-      - ".github/scripts/sync_freya_draw_links.py"
-      - ".github/scripts/sync_freya_draw_crop.py"
-      - ".github/scripts/sync_freya_draw_bindings.py"
-      - ".github/scripts/sync_freya_draw_more_tools.py"
+      - ".github/scripts/sync_freya_draw_*.py"
       - ".github/scripts/sync_freya_rough.py"
       - ".github/workflows/draw-contract.yml"
   workflow_dispatch:
@@ -69,7 +45,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Synchronize native Draw interactions in workspace
+      - name: Synchronize complete native Draw stack in workspace
         shell: bash
         run: |
           set -euo pipefail
@@ -89,6 +65,8 @@ jobs:
           python3 .github/scripts/sync_freya_draw_crop.py
           python3 .github/scripts/sync_freya_draw_bindings.py
           python3 .github/scripts/sync_freya_draw_more_tools.py
+          python3 .github/scripts/sync_freya_draw_laser.py
+          python3 .github/scripts/sync_freya_draw_background.py
           python3 .github/scripts/sync_freya_rough.py
           rustfmt --edition 2021 \
             Elephant/freya/src/app/drawing.rs \
@@ -99,8 +77,11 @@ jobs:
             Elephant/freya/src/app/drawing_library.rs \
             Elephant/freya/tests/drawing_additive_selection_contract.rs \
             Elephant/freya/tests/drawing_commands_contract.rs \
-            Elephant/freya/tests/drawing_crop_freya_testing.rs
-          git diff --check -- Elephant/freya/src/app/drawing*.rs Elephant/freya/tests/drawing_additive_selection_contract.rs Elephant/freya/tests/drawing_commands_contract.rs Elephant/freya/tests/drawing_crop_freya_testing.rs
+            Elephant/freya/tests/drawing_crop_freya_testing.rs \
+            Elephant/freya/tests/drawing_laser_freya_testing.rs \
+            Elephant/freya/tests/drawing_background_contract.rs \
+            Elephant/freya/tests/drawing_more_tools_freya_testing.rs
+          git diff --check -- Elephant/freya/src/app/drawing*.rs Elephant/freya/tests/drawing*.rs
 
       - name: Install native Linux dependencies
         run: |
@@ -111,7 +92,19 @@ jobs:
         run: cargo fmt --manifest-path Elephant/crates/draw-contract/Cargo.toml -- --check
 
       - name: Verify touched Freya files are formatted
-        run: rustfmt --edition 2021 --check Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_canvas.rs Elephant/freya/src/app/drawing_scene.rs Elephant/freya/src/app/drawing_render.rs Elephant/freya/src/app/drawing_render_svg.rs Elephant/freya/src/app/drawing_library.rs Elephant/freya/tests/drawing_additive_selection_contract.rs Elephant/freya/tests/drawing_commands_contract.rs Elephant/freya/tests/drawing_crop_freya_testing.rs
+        run: rustfmt --edition 2021 --check \
+          Elephant/freya/src/app/drawing.rs \
+          Elephant/freya/src/app/drawing_canvas.rs \
+          Elephant/freya/src/app/drawing_scene.rs \
+          Elephant/freya/src/app/drawing_render.rs \
+          Elephant/freya/src/app/drawing_render_svg.rs \
+          Elephant/freya/src/app/drawing_library.rs \
+          Elephant/freya/tests/drawing_additive_selection_contract.rs \
+          Elephant/freya/tests/drawing_commands_contract.rs \
+          Elephant/freya/tests/drawing_crop_freya_testing.rs \
+          Elephant/freya/tests/drawing_laser_freya_testing.rs \
+          Elephant/freya/tests/drawing_background_contract.rs \
+          Elephant/freya/tests/drawing_more_tools_freya_testing.rs
 
       - name: Clippy contract
         run: cargo clippy --manifest-path Elephant/crates/draw-contract/Cargo.toml --all-targets -- -D warnings
@@ -122,22 +115,28 @@ jobs:
       - name: Check Freya against mirrored Draw API
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
 
-      - name: Verify native Draw toolbar and graphics
+      - name: Verify native Draw interactions and graphics
         run: |
           cargo test --manifest-path Elephant/freya/Cargo.toml drawing_toolbar_lasso_tests -- --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml drawing_library::tests -- --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_additive_selection_contract -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_commands_contract -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_crop_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_hierarchy_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_lasso_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_transform_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_transform_handles_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_binding_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_excalidraw_styles_freya_testing -- --test-threads=1 --nocapture
+          for test in \
+            drawing_additive_selection_contract \
+            drawing_commands_contract \
+            drawing_crop_freya_testing \
+            drawing_background_contract \
+            drawing_more_tools_freya_testing \
+            drawing_laser_freya_testing \
+            drawing_frame_freya_testing \
+            drawing_canvas_freya_testing \
+            drawing_frame_hierarchy_freya_testing \
+            drawing_arrowheads_freya_testing \
+            drawing_lasso_freya_testing \
+            drawing_transform_freya_testing \
+            drawing_transform_handles_freya_testing \
+            drawing_binding_freya_testing \
+            drawing_excalidraw_styles_freya_testing; do
+            cargo test --manifest-path Elephant/freya/Cargo.toml --test "$test" -- --test-threads=1 --nocapture
+          done
 
       - name: Commit verified native Draw synchronization
         if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
