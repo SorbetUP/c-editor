@@ -1,0 +1,150 @@
+# Frozen proof trigger: 2026-08-20 native Draw parity pass
+name: Freya Draw visual contract
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - "Elephant/freya/src/app/drawing*.rs"
+      - "Elephant/freya/tests/drawing*.rs"
+      - "Elephant/crates/draw-contract/**"
+      - ".github/workflows/freya-draw-visual.yml"
+  pull_request:
+    paths:
+      - "Elephant/freya/src/app/drawing*.rs"
+      - "Elephant/freya/tests/drawing*.rs"
+      - "Elephant/crates/draw-contract/**"
+      - ".github/workflows/freya-draw-visual.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freya-draw-visual-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  draw-visual:
+    name: Native Draw graphical contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+
+      - name: Install project dependencies
+        uses: ./.github/actions/setup
+
+      - name: Install Freya and raster dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev \
+            python3-pil
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/freya -> target
+
+      - name: Run native Draw interaction and graphical suites
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_multiselect_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_multi_selection_contract -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_excalidraw_styles_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_freya_testing -- --test-threads=1 --nocapture
+
+      - name: Validate real Freya screenshot output
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/freya-draw-visual
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageChops, ImageStat
+          import shutil
+
+          required = [
+              Path('/tmp/elephant-freya-drawing-canvas-primitives.png'),
+              Path('/tmp/elephant-freya-drawing-multiselect.png'),
+              Path('/tmp/elephant-freya-drawing-arrowheads.png'),
+              Path('/tmp/elephant-freya-drawing-excalidraw-styles.png'),
+              Path('/tmp/elephant-freya-hand-before.png'),
+              Path('/tmp/elephant-freya-hand-after.png'),
+              Path('/tmp/elephant-freya-drawing-frame.png'),
+              Path('/tmp/elephant-freya-drawing-frame-like-imports.png'),
+          ]
+          output = Path('test-results/freya-draw-visual')
+          for path in required:
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise AssertionError(f'missing graphical evidence: {path}')
+              image = Image.open(path).convert('RGBA')
+              if image.size != (640, 480):
+                  raise AssertionError(f'{path.name}: expected 640x480, got {image.size}')
+              if len(image.getcolors(maxcolors=image.width * image.height) or []) < 2:
+                  raise AssertionError(f'{path.name}: screenshot is visually empty/monochrome')
+              shutil.copy2(path, output / path.name)
+
+          arrowheads = Image.open(required[2]).convert('RGBA')
+          endpoint_crops = []
+          for column in range(2):
+              for row in range(7):
+                  x = 40 + column * 310 + 150
+                  y = 35 + row * 58 + 24
+                  endpoint_crops.append(arrowheads.crop((x - 24, y - 20, x + 16, y + 20)).tobytes())
+          if len({hash(crop) for crop in endpoint_crops}) < 8:
+              raise AssertionError('arrowhead endpoint crops are not graphically diverse enough')
+
+          styles = Image.open(required[3]).convert('RGB')
+          regions = [
+              styles.crop((30, 30, 150, 110)),
+              styles.crop((180, 30, 300, 110)),
+              styles.crop((330, 30, 450, 110)),
+          ]
+          if any(ImageStat.Stat(region).var[0] < 25 for region in regions):
+              raise AssertionError('pattern-filled shapes do not contain enough graphical variance')
+          if len({hash(region.tobytes()) for region in regions}) != 3:
+              raise AssertionError('hachure/cross-hatch/zigzag regions are pixel-identical')
+
+          before = Image.open(required[4]).convert('RGBA')
+          after = Image.open(required[5]).convert('RGBA')
+          diff = ImageChops.difference(before, after)
+          if diff.getbbox() is None:
+              raise AssertionError('hand-pan screenshots are pixel-identical')
+          changed = sum(1 for px in diff.getdata() if px != (0, 0, 0, 0))
+          if changed < 100:
+              raise AssertionError(f'hand-pan changed too few pixels: {changed}')
+          print(f'validated {len(required)} Freya Draw screenshots; pan changed {changed} pixels')
+          PY
+
+      - name: Preserve graphical failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freya-draw-visual-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/freya-draw-visual/*.png
+            /tmp/elephant-freya-*.png
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 6

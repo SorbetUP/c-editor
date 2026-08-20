@@ -10,6 +10,7 @@ rust-version = "1.91"
 path = "src/lib.rs"
 
 [dependencies]
+base64 = "0.22"
 bytes = "1"
 elephantnote-knowledge-core = { path = "../backend/knowledge-core" }
 elephant-draw = { package = "elephant-draw-contract", path = "../crates/draw-contract" }
