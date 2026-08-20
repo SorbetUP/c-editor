@@ -8,7 +8,7 @@ Pinned canonical snapshot:
 
 - repository: `SorbetUP/Note`
 - commit: `ce1fd7aa5391e0561f514ec31b79ba873f764e05`
-- Elephant gitlink target: `ce1fd7aa5391e0561f514ec31b79ba873f764e05`
+- required Elephant gitlink target: `ce1fd7aa5391e0561f514ec31b79ba873f764e05`
 - `crates/muya-core/src` Git tree: `282cb8f63051a311264ce568919a5a7f9f47589a`
 - `crates/muya-core/data` Git tree: `7f09e2bd5ba5a1c014429a9f5e2ceeea9e452062`
 
