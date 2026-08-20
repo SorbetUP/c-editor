@@ -1,0 +1,100 @@
+name: Freya Note visual contract
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - "Elephant/freya/src/app/editor_*.rs"
+      - "Elephant/freya/tests/editor_*.rs"
+      - "Elephant/freya/tests/muya_*.rs"
+      - "Elephant/crates/muya-core/**"
+      - ".github/workflows/freya-note-visual.yml"
+  pull_request:
+    paths:
+      - "Elephant/freya/src/app/editor_*.rs"
+      - "Elephant/freya/tests/editor_*.rs"
+      - "Elephant/freya/tests/muya_*.rs"
+      - "Elephant/crates/muya-core/**"
+      - ".github/workflows/freya-note-visual.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freya-note-visual-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  note-visual:
+    name: Native Note graphical contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+
+      - name: Install project dependencies
+        uses: ./.github/actions/setup
+
+      - name: Install Freya and raster dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev \
+            python3-pil
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            Elephant/freya -> target
+
+      - name: Run native Note interaction and structure suites
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test editor_atomic_inline_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test editor_structured_markdown_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test muya_tauri_structural_parity -- --test-threads=1 --nocapture
+
+      - name: Validate real Freya Note screenshot output
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          path = Path('/tmp/elephant-freya-note-structured.png')
+          if not path.is_file() or path.stat().st_size == 0:
+              raise AssertionError(f'missing graphical evidence: {path}')
+          image = Image.open(path).convert('RGBA')
+          if image.size != (1400, 840):
+              raise AssertionError(f'expected 1400x840, got {image.size}')
+          colors = image.getcolors(maxcolors=image.width * image.height) or []
+          if len(colors) < 8:
+              raise AssertionError(f'Note screenshot is visually empty/degenerate: {len(colors)} colors')
+          print(f'validated Freya Note screenshot {image.size} with {len(colors)} colors')
+          PY
+
+      - name: Preserve graphical failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freya-note-visual-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/elephant-freya-note-structured.png
+          if-no-files-found: ignore
+          retention-days: 1
+          compression-level: 6

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::model::{BlockKind, DetachedSubtree, Document, InlineKind, Node, NodeId, NodeKind};
+use crate::model::{
+  BlockKind, DetachedSubtree, Document, InlineKind, InlineSyntax, Node, NodeId, NodeKind,
+};
+use crate::syntax::inline::extended;
 
 use super::EditError;
 
@@ -107,6 +110,7 @@ fn apply_replace_text(
     value.replace_range(start..end, inserted);
     deleted
   };
+  sync_autolink_parent(document, node_id);
   document.invalidate_source_chain(node_id);
 
   Ok(Operation::ReplaceText {
@@ -117,6 +121,67 @@ fn apply_replace_text(
     ),
     inserted: deleted,
   })
+}
+
+fn sync_autolink_parent(document: &mut Document, node_id: NodeId) {
+  let Some(parent_id) = document.node(node_id).and_then(|node| node.parent) else {
+    return;
+  };
+  let Some(parent) = document.node(parent_id) else {
+    return;
+  };
+  let is_bare = matches!(
+    &parent.inline_syntax,
+    Some(InlineSyntax::BareAutoLink { .. })
+  ) && matches!(&parent.kind, NodeKind::Inline(InlineKind::Link { .. }));
+  let is_angle = matches!(
+    &parent.kind,
+    NodeKind::Inline(InlineKind::AutoLink { .. })
+  );
+  if !is_bare && !is_angle {
+    return;
+  }
+
+  let text = parent
+    .children
+    .iter()
+    .filter_map(|child| match document.node(*child).map(|node| &node.kind) {
+      Some(NodeKind::Inline(InlineKind::Text { value })) => Some(value.as_str()),
+      _ => None,
+    })
+    .collect::<String>();
+
+  let destination = if is_bare {
+    extended::parse_bare_autolink(&text)
+      .filter(|parsed| parsed.consumed == text.len())
+      .map(|parsed| parsed.destination)
+      .unwrap_or_default()
+  } else {
+    let wrapped = format!("<{text}>");
+    extended::parse_autolink(&wrapped)
+      .filter(|parsed| parsed.consumed == wrapped.len())
+      .map(|parsed| extended::autolink_destination(parsed.value))
+      .unwrap_or_default()
+  };
+
+  let Some(parent) = document.node_mut(parent_id) else {
+    return;
+  };
+  match &mut parent.kind {
+    NodeKind::Inline(InlineKind::Link {
+      destination: current,
+      ..
+    }) if is_bare => {
+      *current = destination;
+      parent.inline_syntax = Some(InlineSyntax::BareAutoLink { text });
+    }
+    NodeKind::Inline(InlineKind::AutoLink {
+      destination: current,
+    }) if is_angle => {
+      *current = destination;
+    }
+    _ => {}
+  }
 }
 
 fn apply_insert_node(
@@ -282,7 +347,7 @@ pub(crate) fn utf16_to_byte(value: &str, node: NodeId, target: u32) -> Result<us
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::model::{BlockKind, InlineKind, NodeKind};
+  use crate::model::{BlockKind, InlineKind, InlineSyntax, NodeKind};
 
   #[test]
   fn replaces_text_and_returns_its_inverse() {
@@ -307,6 +372,140 @@ mod tests {
     assert!(matches!(
       &document.node(node).unwrap().kind,
       NodeKind::Inline(InlineKind::Text { value }) if value == "A😀B"
+    ));
+  }
+
+  #[test]
+  fn bare_link_target_tracks_edits_and_inverse_operations() {
+    let mut document = Document::new();
+    let paragraph = document.allocate(NodeKind::Block(BlockKind::Paragraph), None);
+    document.append_child(document.root, paragraph);
+    let link = document.allocate(
+      NodeKind::Inline(InlineKind::Link {
+        destination: "https://example.com".to_string(),
+        title: None,
+      }),
+      None,
+    );
+    document.node_mut(link).unwrap().inline_syntax = Some(InlineSyntax::BareAutoLink {
+      text: "https://example.com".to_string(),
+    });
+    document.append_child(paragraph, link);
+    let text = document.allocate(
+      NodeKind::Inline(InlineKind::Text {
+        value: "https://example.com".to_string(),
+      }),
+      None,
+    );
+    document.append_child(link, text);
+
+    let replace = Operation::ReplaceText {
+      node: text,
+      range: Utf16Range::new(0, 19),
+      inserted: "https://openai.com".to_string(),
+    };
+    let inverse = replace.apply(&mut document).unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::Link { destination, .. }) if destination == "https://openai.com"
+    ));
+    assert!(matches!(
+      &document.node(link).unwrap().inline_syntax,
+      Some(InlineSyntax::BareAutoLink { text }) if text == "https://openai.com"
+    ));
+
+    inverse.apply(&mut document).unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::Link { destination, .. }) if destination == "https://example.com"
+    ));
+  }
+
+  #[test]
+  fn invalidated_bare_link_never_keeps_a_stale_click_target() {
+    let mut document = Document::new();
+    let paragraph = document.allocate(NodeKind::Block(BlockKind::Paragraph), None);
+    document.append_child(document.root, paragraph);
+    let link = document.allocate(
+      NodeKind::Inline(InlineKind::Link {
+        destination: "https://example.com".to_string(),
+        title: None,
+      }),
+      None,
+    );
+    document.node_mut(link).unwrap().inline_syntax = Some(InlineSyntax::BareAutoLink {
+      text: "https://example.com".to_string(),
+    });
+    document.append_child(paragraph, link);
+    let text = document.allocate(
+      NodeKind::Inline(InlineKind::Text {
+        value: "https://example.com".to_string(),
+      }),
+      None,
+    );
+    document.append_child(link, text);
+
+    Operation::ReplaceText {
+      node: text,
+      range: Utf16Range::new(0, 19),
+      inserted: "plain text".to_string(),
+    }
+    .apply(&mut document)
+    .unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::Link { destination, .. }) if destination.is_empty()
+    ));
+  }
+
+  #[test]
+  fn angle_autolink_target_tracks_edits_and_invalidates_safely() {
+    let mut document = Document::new();
+    let paragraph = document.allocate(NodeKind::Block(BlockKind::Paragraph), None);
+    document.append_child(document.root, paragraph);
+    let link = document.allocate(
+      NodeKind::Inline(InlineKind::AutoLink {
+        destination: "mailto:dev@example.com".to_string(),
+      }),
+      None,
+    );
+    document.append_child(paragraph, link);
+    let text = document.allocate(
+      NodeKind::Inline(InlineKind::Text {
+        value: "dev@example.com".to_string(),
+      }),
+      None,
+    );
+    document.append_child(link, text);
+
+    let inverse = Operation::ReplaceText {
+      node: text,
+      range: Utf16Range::new(0, 15),
+      inserted: "ops@example.org".to_string(),
+    }
+    .apply(&mut document)
+    .unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::AutoLink { destination }) if destination == "mailto:ops@example.org"
+    ));
+
+    inverse.apply(&mut document).unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::AutoLink { destination }) if destination == "mailto:dev@example.com"
+    ));
+
+    Operation::ReplaceText {
+      node: text,
+      range: Utf16Range::new(0, 15),
+      inserted: "not an autolink".to_string(),
+    }
+    .apply(&mut document)
+    .unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::AutoLink { destination }) if destination.is_empty()
     ));
   }
 
