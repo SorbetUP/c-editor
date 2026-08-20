@@ -41,12 +41,39 @@ fn serialize_block(document: &Document, node: &Node) -> String {
         serialize_inlines(document, node)
       )
     }
+    NodeKind::Block(BlockKind::HtmlBlock) => serialize_inlines(document, node),
+    NodeKind::Block(BlockKind::MathBlock) => {
+      format!("$$\n{}\n$$", serialize_inlines(document, node))
+    }
+    NodeKind::Block(BlockKind::FootnoteDefinition { label }) => {
+      serialize_footnote_definition(label, &serialize_inlines(document, node))
+    }
+    NodeKind::Block(BlockKind::ReferenceDefinition { label }) => {
+      format!("[{label}]: {}", serialize_inlines(document, node))
+    }
+    NodeKind::Block(BlockKind::Diagram { language }) => {
+      format!(
+        "```{language}\n{}\n```",
+        serialize_inlines(document, node)
+      )
+    }
     NodeKind::Block(BlockKind::List { kind, start }) => {
       serialize_list(document, node, *kind, *start)
     }
     NodeKind::Block(BlockKind::Table) => serialize_table(document, node),
     _ => serialize_inlines(document, node),
   }
+}
+
+fn serialize_footnote_definition(label: &str, body: &str) -> String {
+  let mut lines = body.lines();
+  let first = lines.next().unwrap_or_default();
+  let mut output = format!("[^{label}]: {first}");
+  for line in lines {
+    output.push_str("\n  ");
+    output.push_str(line);
+  }
+  output
 }
 
 fn serialize_list(document: &Document, list: &Node, kind: ListKind, start: Option<u64>) -> String {
@@ -202,6 +229,14 @@ fn serialize_inlines(document: &Document, node: &Node) -> String {
     .join("")
 }
 
+fn editable_payload(document: &Document, node: &Node, fallback: &str) -> String {
+  if node.children.is_empty() {
+    fallback.to_string()
+  } else {
+    serialize_inlines(document, node)
+  }
+}
+
 fn serialize_inline(document: &Document, node: &Node) -> String {
   match &node.kind {
     NodeKind::Inline(InlineKind::Text { value }) => value.clone(),
@@ -231,14 +266,26 @@ fn serialize_inline(document: &Document, node: &Node) -> String {
       )
     }
     NodeKind::Inline(InlineKind::Image { source, title, alt }) => {
+      let alt = editable_payload(document, node, alt);
       format!("![{alt}]({source}{})", serialize_title(title))
     }
     NodeKind::Inline(InlineKind::AutoLink { destination }) => {
+      let destination = editable_payload(document, node, destination);
       format!("<{destination}>")
     }
-    NodeKind::Inline(InlineKind::InlineHtml { raw }) => raw.clone(),
-    NodeKind::Inline(InlineKind::InlineMath { source }) => format!("${source}$"),
-    NodeKind::Inline(InlineKind::Emoji { shortcode, .. }) => format!(":{shortcode}:"),
+    NodeKind::Inline(InlineKind::InlineHtml { raw }) => editable_payload(document, node, raw),
+    NodeKind::Inline(InlineKind::InlineMath { source }) => {
+      let source = editable_payload(document, node, source);
+      format!("${source}$")
+    }
+    NodeKind::Inline(InlineKind::Emoji { shortcode, value }) => {
+      let visible = editable_payload(document, node, value);
+      if visible == *value {
+        format!(":{shortcode}:")
+      } else {
+        visible
+      }
+    }
     NodeKind::Inline(InlineKind::Superscript) => {
       format!("^{}^", serialize_inlines(document, node))
     }
@@ -246,6 +293,7 @@ fn serialize_inline(document: &Document, node: &Node) -> String {
       format!("~{}~", serialize_inlines(document, node))
     }
     NodeKind::Inline(InlineKind::FootnoteReference { label }) => {
+      let label = editable_payload(document, node, label);
       format!("[^{label}]")
     }
     NodeKind::Inline(InlineKind::SoftBreak) => "\n".to_string(),
@@ -303,6 +351,19 @@ mod tests {
   }
 
   #[test]
+  fn serializes_tauri_special_blocks() {
+    let markdown = "$$\nx + y\n$$\n\n[^src]: cited **source**\n\n[openai]: https://openai.com \"Home\"\n\n<div>block</div>";
+    let document = parse_markdown(markdown);
+    assert_eq!(to_markdown(&document), markdown);
+  }
+
+  #[test]
+  fn canonicalizes_gitlab_math_fence_to_display_math() {
+    let document = parse_markdown("```math\nx^2\n```");
+    assert_eq!(to_markdown(&document), "$$\nx^2\n$$");
+  }
+
+  #[test]
   fn canonicalizes_setext_lists_and_tables() {
     let document = parse_markdown(
       "Title\n=====\n\n3. three\n4. four\n\n- [x] done\n- [ ] todo\n\n| Name | Score |\n| :--- | ---: |\n| Ada | 10 |\n",
@@ -334,5 +395,44 @@ mod tests {
     let markdown = "A **bold** *soft* ~~gone~~ [link](https://example.com \"Title\") ![alt](image.png) `code` \\*.";
     let document = parse_markdown(markdown);
     assert_eq!(to_markdown(&document), markdown);
+  }
+
+  #[test]
+  fn atomic_inline_edits_drive_serialization() {
+    let mut document = parse_markdown("$x$ :grinning: ![alt](image.png)");
+
+    let math_text = document
+      .nodes
+      .values()
+      .find_map(|node| match &node.kind {
+        NodeKind::Inline(InlineKind::InlineMath { .. }) => node.children.first().copied(),
+        _ => None,
+      })
+      .expect("math must expose editable payload");
+    if let Some(Node {
+      kind: NodeKind::Inline(InlineKind::Text { value }),
+      ..
+    }) = document.node_mut(math_text)
+    {
+      *value = "y".to_string();
+    }
+
+    let emoji_text = document
+      .nodes
+      .values()
+      .find_map(|node| match &node.kind {
+        NodeKind::Inline(InlineKind::Emoji { .. }) => node.children.first().copied(),
+        _ => None,
+      })
+      .expect("emoji must expose editable payload");
+    if let Some(Node {
+      kind: NodeKind::Inline(InlineKind::Text { value }),
+      ..
+    }) = document.node_mut(emoji_text)
+    {
+      *value = "😃".to_string();
+    }
+
+    assert_eq!(to_markdown(&document), "$y$ 😃 ![alt](image.png)");
   }
 }
