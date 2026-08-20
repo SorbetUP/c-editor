@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use elephant_draw::{Arrowhead, ArrowheadPrimitive};
 use freya::prelude::*;
 use serde_json::Value;
 use std::fmt::Write;
@@ -28,7 +29,17 @@ pub(super) fn shape(
         format!("x=\"0\" y=\"0\" width=\"{width}\" height=\"{height}\"")
     };
     let content = format!("<{tag} {geometry} {}/>", style(element, true));
-    rotated_surface(("drawing-shape", index), element, viewport, x, y, width, height, content, label)
+    rotated_surface(
+        ("drawing-shape", index),
+        element,
+        viewport,
+        x,
+        y,
+        width,
+        height,
+        content,
+        label,
+    )
 }
 
 pub(super) fn diamond(
@@ -79,14 +90,22 @@ pub(super) fn polyline(
     }
     let mut content = format!("<path d=\"{path}\" {}/>", style(element, false));
     if element.kind == "arrow" {
-        if element.start_arrowhead.as_deref() != Some("none") && element.start_arrowhead.is_some() {
+        if let Some(kind) = element
+            .start_arrowhead
+            .as_deref()
+            .filter(|kind| *kind != "none")
+        {
             if let Some(window) = points.windows(2).next() {
-                content.push_str(&arrowhead(element, window[1], window[0], x, y));
+                content.push_str(&arrowhead(element, kind, window[1], window[0], x, y));
             }
         }
-        if element.end_arrowhead.as_deref() != Some("none") {
+        if let Some(kind) = element
+            .end_arrowhead
+            .as_deref()
+            .filter(|kind| *kind != "none")
+        {
             if let Some(window) = points.windows(2).last() {
-                content.push_str(&arrowhead(element, window[0], window[1], x, y));
+                content.push_str(&arrowhead(element, kind, window[0], window[1], x, y));
             }
         }
     }
@@ -122,7 +141,17 @@ pub(super) fn text(
         element.font_size.max(1.0),
         escape(&element.text)
     );
-    rotated_surface(("drawing-text", index), element, viewport, element.x, element.y, width, height, content, label)
+    rotated_surface(
+        ("drawing-text", index),
+        element,
+        viewport,
+        element.x,
+        element.y,
+        width,
+        height,
+        content,
+        label,
+    )
 }
 
 pub(super) fn image(
@@ -146,7 +175,17 @@ pub(super) fn image(
             opacity(element)
         ),
     );
-    rotated_surface(("drawing-image", index), element, viewport, element.x, element.y, width, height, content, label)
+    rotated_surface(
+        ("drawing-image", index),
+        element,
+        viewport,
+        element.x,
+        element.y,
+        width,
+        height,
+        content,
+        label,
+    )
 }
 
 pub(super) fn selection(index: usize, element: &DrawingElement, viewport: Viewport) -> Element {
@@ -166,7 +205,11 @@ pub(super) fn selection(index: usize, element: &DrawingElement, viewport: Viewpo
 }
 
 fn style(element: &DrawingElement, fill: bool) -> String {
-    let fill = if fill { escape(&element.background_color) } else { "none".to_owned() };
+    let fill = if fill {
+        escape(&element.background_color)
+    } else {
+        "none".to_owned()
+    };
     let dash = match element.stroke_style.as_str() {
         "dashed" => " stroke-dasharray=\"8 6\"",
         "dotted" => " stroke-dasharray=\"2 5\"",
@@ -180,17 +223,88 @@ fn style(element: &DrawingElement, fill: bool) -> String {
     )
 }
 
-fn arrowhead(element: &DrawingElement, previous: [f32; 2], end: [f32; 2], x: f32, y: f32) -> String {
-    let dx = end[0] - previous[0];
-    let dy = end[1] - previous[1];
-    let length = (dx * dx + dy * dy).sqrt().max(1.0);
-    let (ux, uy) = (dx / length, dy / length);
+fn arrowhead(
+    element: &DrawingElement,
+    kind: &str,
+    previous: [f32; 2],
+    end: [f32; 2],
+    x: f32,
+    y: f32,
+) -> String {
+    let arrowhead = Arrowhead::from_id(kind).or_else(|| match kind {
+        "dot" => Some(Arrowhead::Circle),
+        "crowfoot_one" => Some(Arrowhead::CardinalityOne),
+        "crowfoot_many" => Some(Arrowhead::CardinalityMany),
+        "crowfoot_one_or_many" => Some(Arrowhead::CardinalityOneOrMany),
+        _ => None,
+    });
+    let Some(arrowhead) = arrowhead else {
+        return String::new();
+    };
+    let previous = [previous[0] - x, previous[1] - y];
     let end = [end[0] - x, end[1] - y];
-    let base = [end[0] - ux * 12.0, end[1] - uy * 12.0];
-    let wing = [-uy * 5.0, ux * 5.0];
+    let mut output = String::new();
+    for primitive in arrowhead.primitives(previous, end) {
+        match primitive {
+            ArrowheadPrimitive::Line { from, to } => {
+                let _ = write!(
+                    output,
+                    "<path data-excalidraw-arrowhead=\"{}\" d=\"M {} {} L {} {}\" {}/>",
+                    escape(kind),
+                    from[0],
+                    from[1],
+                    to[0],
+                    to[1],
+                    arrowhead_style(element, false)
+                );
+            }
+            ArrowheadPrimitive::Polygon { points, filled } => {
+                let mut serialized = String::new();
+                for (index, [px, py]) in points.iter().enumerate() {
+                    if index > 0 {
+                        serialized.push(' ');
+                    }
+                    let _ = write!(serialized, "{px},{py}");
+                }
+                let _ = write!(
+                    output,
+                    "<polygon data-excalidraw-arrowhead=\"{}\" points=\"{}\" {}/>",
+                    escape(kind),
+                    serialized,
+                    arrowhead_style(element, filled)
+                );
+            }
+            ArrowheadPrimitive::Circle {
+                center,
+                radius,
+                filled,
+            } => {
+                let _ = write!(
+                    output,
+                    "<circle data-excalidraw-arrowhead=\"{}\" cx=\"{}\" cy=\"{}\" r=\"{}\" {}/>",
+                    escape(kind),
+                    center[0],
+                    center[1],
+                    radius,
+                    arrowhead_style(element, filled)
+                );
+            }
+        }
+    }
+    output
+}
+
+fn arrowhead_style(element: &DrawingElement, filled: bool) -> String {
+    let fill = if filled {
+        escape(&element.stroke_color)
+    } else {
+        "none".to_owned()
+    };
     format!(
-        "<path d=\"M {} {} L {} {} M {} {} L {} {}\" {}/>",
-        end[0], end[1], base[0] + wing[0], base[1] + wing[1], end[0], end[1], base[0] - wing[0], base[1] - wing[1], style(element, false)
+        "fill=\"{fill}\" stroke=\"{}\" stroke-width=\"{}\" opacity=\"{}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"",
+        escape(&element.stroke_color),
+        element.stroke_width.max(0.5),
+        opacity(element)
     )
 }
 
@@ -213,9 +327,20 @@ fn rotated_surface(
     let (ox, oy) = ((rw - width) / 2.0, (rh - height) / 2.0);
     let content = format!(
         "<g transform=\"translate({ox} {oy}) rotate({} {} {})\">{content}</g>",
-        element.angle.to_degrees(), width / 2.0, height / 2.0
+        element.angle.to_degrees(),
+        width / 2.0,
+        height / 2.0
     );
-    surface(key, viewport, x + width / 2.0 - rw / 2.0, y + height / 2.0 - rh / 2.0, rw, rh, content, label)
+    surface(
+        key,
+        viewport,
+        x + width / 2.0 - rw / 2.0,
+        y + height / 2.0 - rh / 2.0,
+        rw,
+        rh,
+        content,
+        label,
+    )
 }
 
 fn surface(
@@ -229,21 +354,39 @@ fn surface(
     label: &str,
 ) -> Element {
     let (width, height) = (width.max(1.0), height.max(1.0));
-    let source = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {width} {height}\">{content}</svg>");
+    let source = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {width} {height}\">{content}</svg>"
+    );
     rect()
-        .position(Position::new_absolute().left(viewport.pan[0] + x * viewport.zoom).top(viewport.pan[1] + y * viewport.zoom))
+        .position(
+            Position::new_absolute()
+                .left(viewport.pan[0] + x * viewport.zoom)
+                .top(viewport.pan[1] + y * viewport.zoom),
+        )
         .width(Size::px(width * viewport.zoom))
         .height(Size::px(height * viewport.zoom))
         .a11y_alt(label.to_owned())
-        .child(SvgViewer::new((key, Bytes::from(source.into_bytes()))).width(Size::fill()).height(Size::fill()).show_loader(false))
+        .child(
+            SvgViewer::new((key, Bytes::from(source.into_bytes())))
+                .width(Size::fill())
+                .height(Size::fill())
+                .show_loader(false),
+        )
         .into_element()
 }
 
 fn absolute_points(element: &DrawingElement) -> Vec<[f32; 2]> {
     if element.points.is_empty() {
-        return vec![[element.x, element.y], [element.x + element.width, element.y + element.height]];
+        return vec![
+            [element.x, element.y],
+            [element.x + element.width, element.y + element.height],
+        ];
     }
-    element.points.iter().map(|[x, y]| [element.x + x, element.y + y]).collect()
+    element
+        .points
+        .iter()
+        .map(|[x, y]| [element.x + x, element.y + y])
+        .collect()
 }
 
 fn data_url<'a>(element: &DrawingElement, files: &'a Value) -> Option<&'a str> {
@@ -256,5 +399,9 @@ fn opacity(element: &DrawingElement) -> f32 {
 }
 
 fn escape(value: &str) -> String {
-    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
