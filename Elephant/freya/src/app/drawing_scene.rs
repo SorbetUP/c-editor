@@ -188,40 +188,27 @@ impl DrawingCanvasState {
     }
 
     pub fn delete_selection(&mut self) -> bool {
-        if self.selection.is_empty() {
-            return self
-                .mutate_selected(|element| {
-                    element.is_deleted = true;
-                    true
-                })
-                .then(|| {
-                    self.clear_selection();
-                    self.interaction = Interaction::None;
-                })
-                .is_some();
-        }
+        let selection = if self.selection.is_empty() {
+            let Some(element) = self.selected_element() else {
+                return false;
+            };
+            SelectionSet::from_ids(std::iter::once(element.id.clone()))
+        } else {
+            self.selection.clone()
+        };
 
-        let selection = self.selection.clone();
-        if !self.document.elements.iter().any(|element| {
-            selection.contains(&element.id) && !element.is_deleted && !is_locked(element)
-        }) {
+        let before = self.document.clone();
+        let outcome = self.document.delete_selection_excalidraw(&selection);
+        if outcome.changed == 0 {
             return false;
         }
-        self.checkpoint();
-        let mut changed = false;
-        for element in &mut self.document.elements {
-            if selection.contains(&element.id) && !element.is_deleted && !is_locked(element) {
-                element.is_deleted = true;
-                mark_changed(element);
-                changed = true;
-            }
-        }
-        if changed {
-            self.clear_selection();
-            self.interaction = Interaction::None;
-            self.changed();
-        }
-        changed
+
+        self.history.push(before);
+        self.selection = outcome.selection;
+        self.sync_primary_from_selection();
+        self.interaction = Interaction::None;
+        self.changed();
+        true
     }
 
     pub fn set_selected_stroke(&mut self, color: impl Into<String>) -> bool {
