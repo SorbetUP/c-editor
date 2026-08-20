@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: freya-draw-visual-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   draw-visual:
