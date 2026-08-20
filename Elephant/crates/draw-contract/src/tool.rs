@@ -11,6 +11,7 @@ pub enum DrawingTool {
     Text,
     Image,
     Eraser,
+    Frame,
 }
 
 impl DrawingTool {
@@ -27,6 +28,7 @@ impl DrawingTool {
             Self::Text => "text",
             Self::Image => "image",
             Self::Eraser => "eraser",
+            Self::Frame => "frame",
         }
     }
 
@@ -42,6 +44,7 @@ impl DrawingTool {
             "text" => Self::Text,
             "image" => Self::Image,
             "eraser" => Self::Eraser,
+            "frame" => Self::Frame,
             _ => Self::Selection,
         }
     }
