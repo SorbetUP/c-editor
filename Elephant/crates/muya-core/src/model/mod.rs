@@ -7,7 +7,7 @@ mod source_range;
 
 pub use block::{Alignment, BlockKind, FrontMatterStyle, ListKind};
 pub use document::{DetachedSubtree, Document};
-pub use inline::{InlineKind, InlineMarkKind, MarkFragmentEdge, ReferenceStyle};
+pub use inline::{InlineKind, InlineMarkKind, InlineSyntax, MarkFragmentEdge, ReferenceStyle};
 pub use node::{Node, NodeKind};
 pub use node_id::NodeId;
 pub use source_range::SourceRange;
