@@ -7,6 +7,9 @@ on:
       - '.github/workflows/patch-freya-note-renderer.yml'
       - 'tools/freya-note-finalize.py'
       - 'tools/freya-note-finalize-test-fix.py'
+  pull_request:
+    branches: [nsb/freya-native-migration]
+    types: [opened, synchronize, reopened]
   pull_request_target:
     branches: [nsb/freya-native-migration]
     types: [opened, synchronize, reopened]
@@ -16,12 +19,12 @@ permissions:
   contents: write
 
 concurrency:
-  group: one-shot-freya-note-final-renderer
+  group: one-shot-freya-note-final-renderer-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
   finalize:
-    if: github.event_name != 'pull_request_target' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -62,9 +65,7 @@ jobs:
           fi
 
       - name: Verify canonical Muya core mirror
-        run: |
-          set -euo pipefail
-          cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets
+        run: cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets
 
       - name: Verify Freya Note production adapter
         env:
@@ -108,6 +109,7 @@ jobs:
           PY
 
       - name: Commit verified renderer and remove one-shot machinery
+        if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
