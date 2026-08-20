@@ -1,4 +1,4 @@
-use crate::{DrawingElement, DrawingScene};
+use crate::{DrawingElement, DrawingScene, SelectionSet};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
@@ -174,6 +174,56 @@ impl DrawingScene {
             let belongs_to_frame = element.id == frame_id
                 || element.extra.get("frameId").and_then(Value::as_str) == Some(frame_id);
             if element.is_deleted || !belongs_to_frame {
+                continue;
+            }
+            element.x += delta[0];
+            element.y += delta[1];
+            mark_changed(element);
+            changed += 1;
+        }
+        changed
+    }
+
+    pub fn translate_selection_with_frame_children(
+        &mut self,
+        selection: &SelectionSet,
+        delta: [f32; 2],
+    ) -> usize {
+        if selection.is_empty()
+            || !delta[0].is_finite()
+            || !delta[1].is_finite()
+            || delta == [0.0, 0.0]
+        {
+            return 0;
+        }
+
+        let selected_frames = self
+            .elements
+            .iter()
+            .filter(|element| {
+                selection.contains(&element.id)
+                    && !element.is_deleted
+                    && is_frame_like(element)
+                    && !is_locked(element)
+            })
+            .map(|element| element.id.clone())
+            .collect::<HashSet<_>>();
+
+        let mut changed = 0;
+        for element in &mut self.elements {
+            if element.is_deleted {
+                continue;
+            }
+            let child_of_selected_frame = element
+                .extra
+                .get("frameId")
+                .and_then(Value::as_str)
+                .is_some_and(|frame_id| selected_frames.contains(frame_id));
+            let selected_frame = selected_frames.contains(&element.id);
+            let selected_regular = selection.contains(&element.id)
+                && !is_frame_like(element)
+                && !is_locked(element);
+            if !selected_frame && !child_of_selected_frame && !selected_regular {
                 continue;
             }
             element.x += delta[0];
