@@ -109,7 +109,7 @@ pub(super) fn polyline(
             }
         }
     }
-    rotated_surface(
+    rotated_padded_surface(
         ("drawing-polyline", index),
         element,
         viewport,
@@ -119,6 +119,7 @@ pub(super) fn polyline(
         height,
         content,
         label,
+        24.0,
     )
 }
 
@@ -306,6 +307,82 @@ fn arrowhead_style(element: &DrawingElement, filled: bool) -> String {
         element.stroke_width.max(0.5),
         opacity(element)
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn rotated_padded_surface(
+    key: impl std::hash::Hash,
+    element: &DrawingElement,
+    viewport: Viewport,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    content: String,
+    label: &str,
+    padding: f32,
+) -> Element {
+    if element.angle.abs() <= f32::EPSILON {
+        return padded_surface(key, viewport, x, y, width, height, content, label, padding);
+    }
+    let (sin, cos) = (element.angle.sin().abs(), element.angle.cos().abs());
+    let (rw, rh) = (width * cos + height * sin, width * sin + height * cos);
+    let (ox, oy) = ((rw - width) / 2.0, (rh - height) / 2.0);
+    let content = format!(
+        "<g transform=\"translate({ox} {oy}) rotate({} {} {})\">{content}</g>",
+        element.angle.to_degrees(),
+        width / 2.0,
+        height / 2.0
+    );
+    padded_surface(
+        key,
+        viewport,
+        x + width / 2.0 - rw / 2.0,
+        y + height / 2.0 - rh / 2.0,
+        rw,
+        rh,
+        content,
+        label,
+        padding,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn padded_surface(
+    key: impl std::hash::Hash,
+    viewport: Viewport,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    content: String,
+    label: &str,
+    padding: f32,
+) -> Element {
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    let padded_width = width + padding * 2.0;
+    let padded_height = height + padding * 2.0;
+    let source = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\">{content}</svg>",
+        -padding, -padding, padded_width, padded_height
+    );
+    rect()
+        .position(
+            Position::new_absolute()
+                .left(viewport.pan[0] + (x - padding) * viewport.zoom)
+                .top(viewport.pan[1] + (y - padding) * viewport.zoom),
+        )
+        .width(Size::px(padded_width * viewport.zoom))
+        .height(Size::px(padded_height * viewport.zoom))
+        .a11y_alt(label.to_owned())
+        .child(
+            SvgViewer::new((key, Bytes::from(source.into_bytes())))
+                .width(Size::fill())
+                .height(Size::fill())
+                .show_loader(false),
+        )
+        .into_element()
 }
 
 fn rotated_surface(
