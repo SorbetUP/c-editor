@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: one-shot-freya-note-renderer
+  cancel-in-progress: true
+
 jobs:
   patch:
     runs-on: ubuntu-latest
@@ -18,6 +22,17 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+
+      - name: Install Freya Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
 
       - name: Apply bounded renderer repair
         shell: bash
@@ -35,6 +50,12 @@ jobs:
               if count != 1:
                   raise SystemExit(f'expected exactly one anchor, found {count}: {old[:120]!r}')
               text = text.replace(old, new, 1)
+
+          if 'InlineSyntax' not in text.split('use std::path::Path;', 1)[0]:
+              once(
+                  'model::{BlockKind, InlineKind, InlineMarkKind, ListKind, NodeKind},',
+                  'model::{BlockKind, InlineKind, InlineMarkKind, InlineSyntax, ListKind, NodeKind},',
+              )
 
           if 'HTML block not rendered' in text:
               once('''        NodeKind::Block(BlockKind::HtmlBlock) => unsupported_block(
@@ -119,13 +140,6 @@ jobs:
         ),''')
 
               once('''fn unsupported_block(
-    state: State<ShellState>,''', '''fn semantic_source_block(
-    state: State<ShellState>,''')
-              once('''.color(theme::color(palette.danger))
-                .text(message.to_string()),''', '''.color(theme::color(palette.muted))
-                .text(message.to_string()),''')
-
-              once('''fn semantic_source_block(
     state: State<ShellState>,''', '''fn render_footnote_definition(
     state: State<ShellState>,
     document: &Document,
@@ -164,6 +178,10 @@ jobs:
 
 fn semantic_source_block(
     state: State<ShellState>,''')
+              once(
+                  '.color(theme::color(palette.danger))\n                .text(message.to_string()),',
+                  '.color(theme::color(palette.muted))\n                .text(message.to_string()),',
+              )
 
               once('''            InlineKind::Escaped { value } => {
                 spans.push(styled_span(value.to_string(), style, palette, text_scale))
@@ -175,16 +193,6 @@ fn semantic_source_block(
                 }
             }''')
 
-              once('''            InlineKind::Link { .. } => {
-                let mut next = style;
-                next.link = true;
-                collect_inline_children(document, node_id, next, palette, text_scale, spans);
-            }''', '''            InlineKind::Link { .. } | InlineKind::ReferenceLink { .. } => {
-                let mut next = style;
-                next.link = true;
-                collect_inline_children(document, node_id, next, palette, text_scale, spans);
-            }''')
-
               once('''            InlineKind::Image { source, alt, .. } => {
                 let mut next = style;
                 next.status = true;
@@ -194,7 +202,7 @@ fn semantic_source_block(
                     palette,
                     text_scale,
                 ));
-            }''', '''            InlineKind::Image { alt, .. } | InlineKind::ReferenceImage { alt, .. } => {
+            }''', '''            InlineKind::Image { alt, .. } => {
                 let mut next = style;
                 next.emphasis = true;
                 if node.children.is_empty() {
@@ -213,15 +221,6 @@ fn semantic_source_block(
                 next.link = true;
                 if node.children.is_empty() {
                     spans.push(styled_span(destination.clone(), next, palette, text_scale));
-                } else {
-                    collect_inline_children(document, node_id, next, palette, text_scale, spans);
-                }
-            }
-            InlineKind::BareAutoLink { text, .. } => {
-                let mut next = style;
-                next.link = true;
-                if node.children.is_empty() {
-                    spans.push(styled_span(text.clone(), next, palette, text_scale));
                 } else {
                     collect_inline_children(document, node_id, next, palette, text_scale, spans);
                 }
@@ -308,62 +307,53 @@ fn semantic_source_block(
             }
             _ => collect_inline_link_destinations(document, node.id, destinations),
         }''', '''        match &node.kind {
-            NodeKind::Inline(
-                InlineKind::Link { destination, .. }
-                | InlineKind::ReferenceLink { destination, .. },
-            ) => {
-                destinations.push(destination.clone());
+            NodeKind::Inline(InlineKind::Link { destination, .. }) => {
+                let destination = match &node.inline_syntax {
+                    Some(InlineSyntax::BareAutoLink { .. }) => {
+                        let mut editable = Vec::new();
+                        editable_text_nodes(document, node.id, &mut editable);
+                        let edited = editable.into_iter().map(|(_, value)| value).collect::<String>();
+                        if edited.is_empty() {
+                            destination.clone()
+                        } else if destination.starts_with("mailto:") && !edited.starts_with("mailto:") {
+                            format!("mailto:{edited}")
+                        } else if destination.starts_with("http://www.") && edited.starts_with("www.") {
+                            format!("http://{edited}")
+                        } else {
+                            edited
+                        }
+                    }
+                    Some(InlineSyntax::Reference { .. }) | None => destination.clone(),
+                };
+                destinations.push(destination);
                 collect_inline_link_destinations(document, node.id, destinations);
             }
             NodeKind::Inline(InlineKind::AutoLink { destination }) => {
                 let mut editable = Vec::new();
                 editable_text_nodes(document, node.id, &mut editable);
-                let destination = if editable.is_empty() {
-                    destination.clone()
-                } else {
-                    editable.into_iter().map(|(_, value)| value).collect::<String>()
-                };
-                destinations.push(destination);
-                collect_inline_link_destinations(document, node.id, destinations);
-            }
-            NodeKind::Inline(InlineKind::BareAutoLink { destination, .. }) => {
-                let mut editable = Vec::new();
-                editable_text_nodes(document, node.id, &mut editable);
                 let edited = editable.into_iter().map(|(_, value)| value).collect::<String>();
-                let destination = if edited.is_empty() {
-                    destination.clone()
-                } else if destination.starts_with("mailto:") && !edited.starts_with("mailto:") {
-                    format!("mailto:{edited}")
-                } else if destination.starts_with("http://www.") && edited.starts_with("www.") {
-                    format!("http://{edited}")
-                } else {
-                    edited
-                };
-                destinations.push(destination);
+                destinations.push(if edited.is_empty() { destination.clone() } else { edited });
                 collect_inline_link_destinations(document, node.id, destinations);
             }
             _ => collect_inline_link_destinations(document, node.id, destinations),
         }''')
-          else:
-              required = [
-                  'fn semantic_source_block(',
-                  'InlineKind::ReferenceLink',
-                  'InlineKind::ReferenceImage',
-                  'InlineKind::BareAutoLink',
-                  'fn render_footnote_definition(',
-              ]
-              missing = [marker for marker in required if marker not in text]
-              if missing:
-                  raise SystemExit(f'renderer is partially patched; missing {missing}')
 
           forbidden = ['not rendered', 'non rendu', 'non rendue', 'fn unsupported_block(']
           leaked = [marker for marker in forbidden if marker in text]
           if leaked:
               raise SystemExit(f'placeholder renderer markers remain: {leaked}')
+          required = [
+              'fn semantic_source_block(',
+              'fn render_footnote_definition(',
+              'InlineSyntax::BareAutoLink',
+              'InlineSyntax::Reference',
+          ]
+          missing = [marker for marker in required if marker not in text]
+          if missing:
+              raise SystemExit(f'renderer repair incomplete: {missing}')
 
           path.write_text(text)
           PY
-
           cargo fmt --manifest-path Elephant/freya/Cargo.toml
 
       - name: Verify native Note renderer
