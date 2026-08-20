@@ -3,7 +3,7 @@ mod drawing_canvas;
 
 use drawing_canvas::{drawing_canvas, DrawingCanvasState};
 use freya::prelude::State;
-use freya_testing::{TestingRunner, TestingNode};
+use freya_testing::{TestingNode, TestingRunner};
 use serde_json::json;
 use std::fs;
 
@@ -66,8 +66,16 @@ fn fixture() -> DrawingCanvasState {
 #[test]
 fn moving_frame_with_core_moves_child_and_changes_native_freya_pixels() {
     let before_state = fixture();
-    let before_frame = before_state.document.element_by_id("frame").unwrap().bounds();
-    let before_child = before_state.document.element_by_id("child").unwrap().bounds();
+    let before_frame = before_state
+        .document
+        .element_by_id("frame")
+        .unwrap()
+        .bounds();
+    let before_child = before_state
+        .document
+        .element_by_id("child")
+        .unwrap()
+        .bounds();
 
     let mut after_state = before_state.clone();
     assert_eq!(
@@ -81,11 +89,17 @@ fn moving_frame_with_core_moves_child_and_changes_native_freya_pixels() {
     let after_child = after_state.document.element_by_id("child").unwrap().bounds();
 
     assert_eq!(
-        (after_frame.0 - before_frame.0, after_frame.1 - before_frame.1),
+        (
+            after_frame.0 - before_frame.0,
+            after_frame.1 - before_frame.1
+        ),
         (80.0, 45.0)
     );
     assert_eq!(
-        (after_child.0 - before_child.0, after_child.1 - before_child.1),
+        (
+            after_child.0 - before_child.0,
+            after_child.1 - before_child.1
+        ),
         (80.0, 45.0)
     );
 
@@ -106,8 +120,18 @@ fn moving_frame_with_core_moves_child_and_changes_native_freya_pixels() {
 #[test]
 fn pointer_drag_on_frame_border_moves_frame_and_child_together() {
     let (mut runner, state) = runner_for(fixture());
-    let frame_before = state.peek().document.element_by_id("frame").unwrap().bounds();
-    let child_before = state.peek().document.element_by_id("child").unwrap().bounds();
+    let frame_before = state
+        .peek()
+        .document
+        .element_by_id("frame")
+        .unwrap()
+        .bounds();
+    let child_before = state
+        .peek()
+        .document
+        .element_by_id("child")
+        .unwrap()
+        .bounds();
 
     labeled_node(&runner, "Drawing element frame frame");
     runner.press_cursor((101.0, 170.0));
@@ -117,10 +141,26 @@ fn pointer_drag_on_frame_border_moves_frame_and_child_together() {
     let snapshot = state.peek();
     let frame_after = snapshot.document.element_by_id("frame").unwrap().bounds();
     let child_after = snapshot.document.element_by_id("child").unwrap().bounds();
-    assert_eq!((frame_after.0 - frame_before.0, frame_after.1 - frame_before.1), (50.0, 30.0));
-    assert_eq!((child_after.0 - child_before.0, child_after.1 - child_before.1), (50.0, 30.0));
     assert_eq!(
-        snapshot.document.element_by_id("child").unwrap().extra["frameId"],
+        (
+            frame_after.0 - frame_before.0,
+            frame_after.1 - frame_before.1
+        ),
+        (50.0, 30.0)
+    );
+    assert_eq!(
+        (
+            child_after.0 - child_before.0,
+            child_after.1 - child_before.1
+        ),
+        (50.0, 30.0)
+    );
+    assert_eq!(
+        snapshot
+            .document
+            .element_by_id("child")
+            .unwrap()
+            .extra["frameId"],
         "frame"
     );
 }
@@ -128,7 +168,12 @@ fn pointer_drag_on_frame_border_moves_frame_and_child_together() {
 #[test]
 fn pointer_drag_child_outside_frame_detaches_membership_on_release() {
     let (mut runner, state) = runner_for(fixture());
-    let frame_before = state.peek().document.element_by_id("frame").unwrap().bounds();
+    let frame_before = state
+        .peek()
+        .document
+        .element_by_id("frame")
+        .unwrap()
+        .bounds();
 
     labeled_node(&runner, "Drawing element child rectangle");
     runner.press_cursor((180.0, 155.0));
@@ -139,14 +184,40 @@ fn pointer_drag_child_outside_frame_detaches_membership_on_release() {
     let child = snapshot.document.element_by_id("child").unwrap();
     assert!(child.x > frame_before.0 + frame_before.2);
     assert!(child.extra["frameId"].is_null());
-    assert_eq!(snapshot.document.element_by_id("frame").unwrap().bounds(), frame_before);
+    assert_eq!(
+        snapshot.document.element_by_id("frame").unwrap().bounds(),
+        frame_before
+    );
+}
+
+#[test]
+fn deleting_selected_frame_keeps_child_visible_detached_and_selected() {
+    let (mut runner, mut state) = runner_for(fixture());
+    labeled_node(&runner, "Drawing element frame frame");
+    runner.press_cursor((101.0, 170.0));
+    runner.release_cursor((101.0, 170.0));
+
+    assert_eq!(state.peek().selected_element_id(), Some("frame"));
+    assert!(state.write().delete_selection());
+
+    let snapshot = state.peek();
+    assert!(snapshot.document.element_by_id("frame").unwrap().is_deleted);
+    let child = snapshot.document.element_by_id("child").unwrap();
+    assert!(!child.is_deleted);
+    assert!(child.extra["frameId"].is_null());
+    assert_eq!(snapshot.selected_element_id(), Some("child"));
 }
 
 #[test]
 fn geometry_membership_persists_frame_id_through_freya_serialization() {
     let mut state = fixture();
     state.document.remove_elements_from_frame(&["child"]);
-    assert!(state.document.element_by_id("child").unwrap().extra["frameId"].is_null());
+    assert!(state
+        .document
+        .element_by_id("child")
+        .unwrap()
+        .extra["frameId"]
+        .is_null());
     assert!(state.document.sync_element_frame_membership("child"));
 
     let raw = state.serialize_json().expect("serialize frame membership");
