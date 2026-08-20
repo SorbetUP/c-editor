@@ -19,6 +19,23 @@ pub enum Arrowhead {
     CardinalityZeroOrMany,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArrowheadPrimitive {
+    Line {
+        from: [f32; 2],
+        to: [f32; 2],
+    },
+    Polygon {
+        points: Vec<[f32; 2]>,
+        filled: bool,
+    },
+    Circle {
+        center: [f32; 2],
+        radius: f32,
+        filled: bool,
+    },
+}
+
 impl Arrowhead {
     pub const ALL: [Self; 14] = [
         Self::Arrow,
@@ -58,6 +75,129 @@ impl Arrowhead {
 
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|arrowhead| arrowhead.id() == id)
+    }
+
+    pub fn primitives(self, previous: [f32; 2], end: [f32; 2]) -> Vec<ArrowheadPrimitive> {
+        let Some(axis) = ArrowAxis::new(previous, end) else {
+            return Vec::new();
+        };
+        match self {
+            Self::Arrow => axis.crow(12.0, 5.0),
+            Self::Bar | Self::CardinalityOne => vec![axis.bar(1.5, 6.0)],
+            Self::Circle => vec![axis.circle(5.0, 5.0, true)],
+            Self::CircleOutline => vec![axis.circle(5.0, 5.0, false)],
+            Self::Triangle => vec![axis.triangle(12.0, 6.0, true)],
+            Self::TriangleOutline => vec![axis.triangle(12.0, 6.0, false)],
+            Self::Diamond => vec![axis.diamond(14.0, 5.0, true)],
+            Self::DiamondOutline => vec![axis.diamond(14.0, 5.0, false)],
+            Self::CardinalityMany => axis.crow(10.0, 6.0),
+            Self::CardinalityOneOrMany => {
+                let mut shapes = axis.crow(10.0, 6.0);
+                shapes.push(axis.bar(8.0, 6.0));
+                shapes
+            }
+            Self::CardinalityExactlyOne => vec![axis.bar(1.5, 6.0), axis.bar(8.0, 6.0)],
+            Self::CardinalityZeroOrOne => {
+                vec![axis.circle(5.5, 4.0, false), axis.bar(13.0, 6.0)]
+            }
+            Self::CardinalityZeroOrMany => {
+                let mut shapes = axis.crow(10.0, 6.0);
+                shapes.push(axis.circle(14.0, 4.0, false));
+                shapes
+            }
+        }
+    }
+}
+
+struct ArrowAxis {
+    end: [f32; 2],
+    unit: [f32; 2],
+    normal: [f32; 2],
+}
+
+impl ArrowAxis {
+    fn new(previous: [f32; 2], end: [f32; 2]) -> Option<Self> {
+        let dx = end[0] - previous[0];
+        let dy = end[1] - previous[1];
+        let length = (dx * dx + dy * dy).sqrt();
+        if !length.is_finite() || length <= f32::EPSILON {
+            return None;
+        }
+        let unit = [dx / length, dy / length];
+        Some(Self {
+            end,
+            unit,
+            normal: [-unit[1], unit[0]],
+        })
+    }
+
+    fn behind(&self, distance: f32) -> [f32; 2] {
+        [
+            self.end[0] - self.unit[0] * distance,
+            self.end[1] - self.unit[1] * distance,
+        ]
+    }
+
+    fn offset_normal(&self, point: [f32; 2], amount: f32) -> [f32; 2] {
+        [
+            point[0] + self.normal[0] * amount,
+            point[1] + self.normal[1] * amount,
+        ]
+    }
+
+    fn crow(&self, depth: f32, half_width: f32) -> Vec<ArrowheadPrimitive> {
+        let base = self.behind(depth);
+        vec![
+            ArrowheadPrimitive::Line {
+                from: self.end,
+                to: self.offset_normal(base, half_width),
+            },
+            ArrowheadPrimitive::Line {
+                from: self.end,
+                to: self.offset_normal(base, -half_width),
+            },
+        ]
+    }
+
+    fn bar(&self, distance: f32, half_width: f32) -> ArrowheadPrimitive {
+        let center = self.behind(distance);
+        ArrowheadPrimitive::Line {
+            from: self.offset_normal(center, half_width),
+            to: self.offset_normal(center, -half_width),
+        }
+    }
+
+    fn circle(&self, distance: f32, radius: f32, filled: bool) -> ArrowheadPrimitive {
+        ArrowheadPrimitive::Circle {
+            center: self.behind(distance),
+            radius,
+            filled,
+        }
+    }
+
+    fn triangle(&self, depth: f32, half_width: f32, filled: bool) -> ArrowheadPrimitive {
+        let base = self.behind(depth);
+        ArrowheadPrimitive::Polygon {
+            points: vec![
+                self.end,
+                self.offset_normal(base, half_width),
+                self.offset_normal(base, -half_width),
+            ],
+            filled,
+        }
+    }
+
+    fn diamond(&self, depth: f32, half_width: f32, filled: bool) -> ArrowheadPrimitive {
+        let middle = self.behind(depth / 2.0);
+        ArrowheadPrimitive::Polygon {
+            points: vec![
+                self.end,
+                self.offset_normal(middle, half_width),
+                self.behind(depth),
+                self.offset_normal(middle, -half_width),
+            ],
+            filled,
+        }
     }
 }
 
