@@ -22,5 +22,4 @@ pub mod theme;
 pub mod vault_adapter;
 mod vault_registry;
 
-#[path = "../../backend/tauri/src/vault_layout.rs"]
-pub mod vault_layout;
+pub use elephant_native_core::vault_layout;
