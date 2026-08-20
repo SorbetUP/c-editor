@@ -1,14 +1,5 @@
-//! Native Freya rendering and persistence for the existing Excalidraw scene.
-//!
-//! The file boundary preserves the Tauri scene contract while the visible
-//! canvas and pointer interactions are owned by Freya.
-//!
-//! Provenance integrated from the working Vue/Tauri path:
-//! - `a66ce839a`: Tauri scene/PNG write contract and `type=excalidraw` JSON.
-//! - `76f092759`: JSON validation plus persisted PNG companion requirement.
-//! - `cde9f2ebb`: direct `.excalidraw` library-entry opening contract.
-//! - `feature-incoming/drawing-entry-toolbar-clickability/BUG.md`: the
-//!   recorded Tauri/Playwright proof and its remaining packaged gap.
+//! Native Freya rendering and persistence for Excalidraw scenes.
+//! The persisted `.excalidraw` JSON remains the source of truth.
 
 use super::{
     navigation_icons::{svg_icon, Icon},
@@ -16,6 +7,7 @@ use super::{
 };
 use crate::theme;
 use freya::prelude::*;
+use serde_json::{Map, Value};
 
 #[path = "drawing_storage.rs"]
 mod storage;
@@ -23,8 +15,6 @@ mod storage;
 mod drawing_icons;
 use drawing_icons::{CHECK_ICON, HELP_ICON, LOCK_ICON, MENU_ICON, SHAPES_ICON, X_ICON};
 
-// The native renderer is compiled into the production Freya crate here. The
-// shell owns the route switch while this module owns drawing state and actions.
 #[path = "drawing_canvas.rs"]
 pub(super) mod canvas;
 pub(super) use canvas::DrawingCanvasState;
@@ -82,8 +72,8 @@ impl DrawingTool {
             Self::Select => "1",
             Self::Hand => "H",
             Self::Rectangle => "2",
-            Self::Ellipse => "4",
             Self::Diamond => "3",
+            Self::Ellipse => "4",
             Self::Arrow => "5",
             Self::Line => "6",
             Self::Pencil => "7",
@@ -151,12 +141,10 @@ pub(super) fn request_create(mut state: State<ShellState>) {
         shell.view = crate::navigation_contract::WorkspaceView::Notes;
         Ok(created)
     }) {
-        Ok(created) => {
-            eprintln!(
-                "[freya][drawing] action:complete action=create path={} renderer=native-freya",
-                created.path.display()
-            );
-        }
+        Ok(created) => eprintln!(
+            "[freya][drawing] action:complete action=create path={} renderer=native-freya",
+            created.path.display()
+        ),
         Err(error) => {
             eprintln!("[freya][drawing] action:failure action=create error={error}");
             state.write().error = Some(format!("Drawing create failed: {error}"));
@@ -174,30 +162,21 @@ pub(super) fn open_existing(mut state: State<ShellState>, relative_path: &str) {
     let result = root
         .ok_or_else(|| "No vault selected.".to_owned())
         .and_then(|root| storage::read_native_scene(&root, &path));
-
     match result {
-        Ok(scene) => {
-            eprintln!(
-                "[freya][drawing] action:complete action=open path={} renderer=native-freya",
-                path
-            );
-            match DrawingCanvasState::from_json(&scene.raw) {
-                Ok(canvas) => {
-                    let mut shell = state.write();
-                    shell.editor = None;
-                    shell.drawing = Some(canvas);
-                    shell.drawing_path = Some(scene.path);
-                    shell.error = None;
-                    shell.view = crate::navigation_contract::WorkspaceView::Notes;
-                }
-                Err(error) => state.write().error = Some(error),
+        Ok(scene) => match DrawingCanvasState::from_json(&scene.raw) {
+            Ok(canvas) => {
+                let mut shell = state.write();
+                shell.editor = None;
+                shell.drawing = Some(canvas);
+                shell.drawing_path = Some(scene.path);
+                shell.error = None;
+                shell.view = crate::navigation_contract::WorkspaceView::Notes;
+                eprintln!("[freya][drawing] action:complete action=open path={path} renderer=native-freya");
             }
-        }
+            Err(error) => state.write().error = Some(error),
+        },
         Err(error) => {
-            eprintln!(
-                "[freya][drawing] action:failure action=open path={} error={error}",
-                path
-            );
+            eprintln!("[freya][drawing] action:failure action=open path={path} error={error}");
             state.write().error = Some(error);
         }
     }
@@ -214,30 +193,19 @@ pub(super) fn save(
             return Err("Drawing has no persisted path.".to_owned());
         };
         let canvas = canvas_state.read().clone();
-        match canvas.serialize_json() {
-            Ok(raw) => (path.clone(), raw, canvas),
-            Err(error) => {
-                state.write().error = Some(error.clone());
-                return Err(error);
-            }
-        }
+        let raw = canvas.serialize_json()?;
+        (path.clone(), raw, canvas)
     };
     match storage::write_scene(&path, &raw) {
         Ok(()) => {
             let mut shell = state.write();
             shell.drawing = Some(canvas);
             shell.error = None;
-            eprintln!(
-                "[freya][drawing] action:complete action=save path={}",
-                path.display()
-            );
+            eprintln!("[freya][drawing] action:complete action=save path={}", path.display());
             Ok(())
         }
         Err(error) => {
-            eprintln!(
-                "[freya][drawing] action:failure action=save path={} error={error}",
-                path.display()
-            );
+            eprintln!("[freya][drawing] action:failure action=save path={} error={error}", path.display());
             state.write().error = Some(error.clone());
             Err(error)
         }
@@ -248,10 +216,7 @@ pub(super) fn close(
     mut state: State<ShellState>,
     canvas_state: State<DrawingCanvasState>,
 ) -> Result<(), String> {
-    if let Err(error) = save(state, canvas_state) {
-        eprintln!("[freya][drawing] action:close blocked reason=save-failure");
-        return Err(error);
-    }
+    save(state, canvas_state)?;
     let mut shell = state.write();
     shell.drawing = None;
     shell.drawing_path = None;
@@ -268,86 +233,26 @@ fn drawing_error_notice(error: &str) -> Element {
         .with_corner_radius(8.)
         .layer(Layer::OverlayLevel(30))
         .a11y_alt(error_accessibility_label(error))
-        .child(
-            label()
-                .color(theme::color(theme::DANGER))
-                .text(error.to_owned()),
-        )
+        .child(label().color(theme::color(theme::DANGER)).text(error.to_owned()))
         .into_element()
 }
 
-fn drawing_tool_button(
-    tool: DrawingTool,
-    active: DrawingTool,
-    mut selected: State<DrawingTool>,
-    mut canvas_state: State<DrawingCanvasState>,
-) -> Element {
-    let button_label = format!("{} tool ({})", tool.label(), tool.shortcut());
-    let is_active = tool == active;
-    let icon_color = if is_active {
-        Color::WHITE
-    } else {
-        Color::from_rgb(215, 215, 220)
-    };
-    rect()
-        .width(Size::px(38.))
-        .height(Size::px(38.))
-        .center()
-        .background(if is_active {
-            theme::color(theme::PRIMARY)
-        } else {
-            Color::TRANSPARENT
-        })
-        .with_corner_radius(7.)
-        .on_mouse_up(move |_| {
-            canvas_state.write().set_active_tool_label(tool.label());
-            selected.set(tool);
-        })
-        .a11y_alt(button_label)
-        .child(
-            rect()
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(2.)
-                .child(
-                    SvgViewer::new(tool.icon_source())
-                        .width(Size::px(18.))
-                        .height(Size::px(18.))
-                        .show_loader(false)
-                        .color(icon_color)
-                        .stroke(icon_color)
-                        .stroke_width(2.),
-                )
-                .child(
-                    label()
-                        .font_size(9.)
-                        .color(if is_active { Color::WHITE } else { Color::from_rgb(150, 150, 155) })
-                        .text(tool.shortcut()),
-                ),
-        )
-        .into_element()
-}
-
-fn drawing_icon_button(
+fn icon_button(
     source: &'static [u8],
-    label_text: &'static str,
+    alt: &'static str,
     size: f32,
     color: Color,
     background: Color,
-    mut on_press: impl FnMut(Event<MouseEventData>) + 'static,
+    mut action: impl FnMut(Event<MouseEventData>) + 'static,
 ) -> Element {
     rect()
         .width(Size::px(size))
         .height(Size::px(size))
         .center()
         .background(background)
-        .with_corner_radius(if matches!(label_text, "Close drawing" | "Cancel drawing" | "Save drawing") {
-            20.
-        } else {
-            9.
-        })
-        .a11y_alt(label_text)
-        .on_mouse_up(move |event| on_press(event))
+        .with_corner_radius(if matches!(alt, "Close drawing" | "Save drawing") { 20.0 } else { 9.0 })
+        .a11y_alt(alt)
+        .on_mouse_up(move |event| action(event))
         .child(
             SvgViewer::new(source)
                 .width(Size::px(20.))
@@ -355,220 +260,281 @@ fn drawing_icon_button(
                 .show_loader(false)
                 .color(color)
                 .stroke(color)
-                .stroke_width(2.),
+                .stroke_width(2.0),
         )
         .into_element()
 }
 
-fn drawing_toolbar_button(
+fn action_button(
+    caption: impl Into<String>,
+    alt: impl Into<String>,
+    width: f32,
+    mut action: impl FnMut(Event<MouseEventData>) + 'static,
+) -> Element {
+    rect()
+        .width(Size::px(width))
+        .height(Size::px(34.0))
+        .center()
+        .background(Color::from_rgb(48, 48, 58))
+        .with_corner_radius(7.0)
+        .a11y_alt(alt.into())
+        .on_mouse_up(move |event| action(event))
+        .child(label().font_size(12.0).color(Color::from_rgb(235, 235, 240)).text(caption.into()))
+        .into_element()
+}
+
+fn tool_button(
     tool: DrawingTool,
     active: DrawingTool,
-    selected: State<DrawingTool>,
-    canvas_state: State<DrawingCanvasState>,
+    mut selected: State<DrawingTool>,
+    mut canvas: State<DrawingCanvasState>,
 ) -> Element {
-    drawing_tool_button(tool, active, selected, canvas_state)
-}
-
-fn drawing_properties_panel(palette: Color) -> Element {
-    let panel = Color::from_rgb(35, 35, 42);
-    let control = Color::from_rgb(48, 48, 58);
-    let text_color = Color::from_rgb(235, 235, 240);
-    let swatch = |color: Color, name: &'static str| {
-        rect()
-            .width(Size::px(28.))
-            .height(Size::px(28.))
-            .background(color)
-            .border(Border::new().fill(Color::from_rgb(80, 80, 90)).width(1.))
-            .with_corner_radius(5.)
-            .a11y_alt(name)
-            .into_element()
-    };
-    let choice = |caption: &'static str, name: &'static str| {
-        rect()
-            .width(Size::px(42.))
-            .height(Size::px(36.))
-            .center()
-            .background(control)
-            .with_corner_radius(9.)
-            .a11y_alt(name)
-            .child(label().font_size(13.).color(text_color).text(caption))
-            .into_element()
-    };
+    let active = tool == active;
+    let color = if active { Color::WHITE } else { Color::from_rgb(215, 215, 220) };
     rect()
-        .position(Position::new_absolute().left(16.).top(72.))
-        .width(Size::px(290.))
-        .height(Size::px(468.))
-        .padding(Gaps::new(18., 16., 18., 16.))
-        .background(panel)
-        .with_corner_radius(10.)
-        .a11y_alt("Excalidraw properties")
-        .child(label().font_size(16.).color(text_color).text("Stroke"))
+        .width(Size::px(38.0))
+        .height(Size::px(38.0))
+        .center()
+        .background(if active { theme::color(theme::PRIMARY) } else { Color::TRANSPARENT })
+        .with_corner_radius(7.0)
+        .a11y_alt(format!("{} tool ({})", tool.label(), tool.shortcut()))
+        .on_mouse_up(move |_| {
+            canvas.write().set_active_tool_label(tool.label());
+            selected.set(tool);
+        })
         .child(
             rect()
-                .height(Size::px(38.))
                 .horizontal()
                 .cross_align(Alignment::Center)
-                .spacing(8.)
-                .child(swatch(Color::from_rgb(224, 224, 224), "Stroke white"))
-                .child(swatch(Color::from_rgb(255, 111, 117), "Stroke red"))
-                .child(swatch(Color::from_rgb(48, 155, 73), "Stroke green"))
-                .child(swatch(Color::from_rgb(78, 145, 216), "Stroke blue"))
-                .child(swatch(Color::from_rgb(184, 101, 0), "Stroke orange")),
+                .spacing(2.0)
+                .child(
+                    SvgViewer::new(tool.icon_source())
+                        .width(Size::px(18.0))
+                        .height(Size::px(18.0))
+                        .show_loader(false)
+                        .color(color)
+                        .stroke(color)
+                        .stroke_width(2.0),
+                )
+                .child(label().font_size(9.0).color(color).text(tool.shortcut())),
         )
-        .child(label().font_size(16.).color(text_color).text("Background"))
-        .child(
-            rect()
-                .height(Size::px(38.))
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(8.)
-                .child(swatch(Color::TRANSPARENT, "Transparent background"))
-                .child(swatch(Color::from_rgb(105, 50, 50), "Red background"))
-                .child(swatch(Color::from_rgb(0, 88, 24), "Green background"))
-                .child(swatch(Color::from_rgb(18, 75, 105), "Blue background"))
-                .child(swatch(Color::from_rgb(68, 50, 0), "Orange background")),
-        )
-        .child(label().font_size(16.).color(text_color).text("Stroke width"))
-        .child(
-            rect()
-                .height(Size::px(42.))
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(10.)
-                .child(choice("—", "Thin stroke"))
-                .child(choice("—", "Medium stroke"))
-                .child(choice("━", "Wide stroke")),
-        )
-        .child(label().font_size(16.).color(text_color).text("Stroke style"))
-        .child(
-            rect()
-                .height(Size::px(42.))
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(10.)
-                .child(choice("—", "Solid stroke"))
-                .child(choice("╌", "Dashed stroke"))
-                .child(choice("┈", "Dotted stroke")),
-        )
-        .child(label().font_size(16.).color(text_color).text("Opacity"))
-        .child(
-            rect()
-                .height(Size::px(18.))
-                .width(Size::fill())
-                .background(Color::from_rgb(30, 125, 245))
-                .with_corner_radius(9.)
-                .a11y_alt("Opacity 100 percent"),
-        )
-        .child(label().font_size(16.).color(text_color).text("Layers"))
-        .child(
-            rect()
-                .height(Size::px(42.))
-                .horizontal()
-                .cross_align(Alignment::Center)
-                .spacing(10.)
-                .child(choice("↗", "Bring to front"))
-                .child(choice("□", "Bring forward"))
-                .child(choice("↙", "Send backward"))
-                .child(choice("■", "Send to back")),
-        )
-        .child(rect().width(Size::px(1.)).height(Size::px(1.)).background(palette))
         .into_element()
 }
 
-fn drawing_library_panel(mut open: State<bool>) -> Element {
+fn swatch(
+    color: Color,
+    alt: &'static str,
+    mut action: impl FnMut(Event<MouseEventData>) + 'static,
+) -> Element {
     rect()
-        .position(Position::new_absolute().right(0.).top(0.).bottom(0.))
-        .width(Size::px(340.))
-        .height(Size::fill())
-        .padding(Gaps::new(22., 18., 22., 18.))
+        .width(Size::px(28.0))
+        .height(Size::px(28.0))
+        .background(color)
+        .border(Border::new().fill(Color::from_rgb(80, 80, 90)).width(1.0))
+        .with_corner_radius(5.0)
+        .a11y_alt(alt)
+        .on_mouse_up(move |event| action(event))
+        .into_element()
+}
+
+fn properties_panel(canvas: State<DrawingCanvasState>) -> Element {
+    let panel = Color::from_rgb(35, 35, 42);
+    let text = Color::from_rgb(235, 235, 240);
+    let mut stroke_white = canvas;
+    let mut stroke_red = canvas;
+    let mut stroke_green = canvas;
+    let mut stroke_blue = canvas;
+    let mut stroke_orange = canvas;
+    let mut bg_none = canvas;
+    let mut bg_red = canvas;
+    let mut bg_green = canvas;
+    let mut bg_blue = canvas;
+    let mut bg_orange = canvas;
+    let mut width_1 = canvas;
+    let mut width_2 = canvas;
+    let mut width_4 = canvas;
+    let mut style_solid = canvas;
+    let mut style_dash = canvas;
+    let mut style_dot = canvas;
+    let mut opacity_25 = canvas;
+    let mut opacity_50 = canvas;
+    let mut opacity_75 = canvas;
+    let mut opacity_100 = canvas;
+    let mut front = canvas;
+    let mut forward = canvas;
+    let mut backward = canvas;
+    let mut back = canvas;
+
+    rect()
+        .position(Position::new_absolute().left(16.0).top(72.0))
+        .width(Size::px(290.0))
+        .padding(Gaps::new(16.0, 14.0, 16.0, 14.0))
+        .background(panel)
+        .with_corner_radius(10.0)
+        .a11y_alt("Excalidraw properties")
+        .child(label().font_size(15.0).color(text).text("Stroke"))
+        .child(
+            rect().horizontal().spacing(8.0)
+                .child(swatch(Color::from_rgb(224, 224, 224), "Stroke white", move |_| { stroke_white.write().set_selected_stroke("#e0e0e0"); }))
+                .child(swatch(Color::from_rgb(255, 111, 117), "Stroke red", move |_| { stroke_red.write().set_selected_stroke("#ff6f75"); }))
+                .child(swatch(Color::from_rgb(48, 155, 73), "Stroke green", move |_| { stroke_green.write().set_selected_stroke("#309b49"); }))
+                .child(swatch(Color::from_rgb(78, 145, 216), "Stroke blue", move |_| { stroke_blue.write().set_selected_stroke("#4e91d8"); }))
+                .child(swatch(Color::from_rgb(184, 101, 0), "Stroke orange", move |_| { stroke_orange.write().set_selected_stroke("#b86500"); })),
+        )
+        .child(label().font_size(15.0).color(text).text("Background"))
+        .child(
+            rect().horizontal().spacing(8.0)
+                .child(swatch(Color::TRANSPARENT, "Transparent background", move |_| { bg_none.write().set_selected_background("transparent"); }))
+                .child(swatch(Color::from_rgb(105, 50, 50), "Red background", move |_| { bg_red.write().set_selected_background("#693232"); }))
+                .child(swatch(Color::from_rgb(0, 88, 24), "Green background", move |_| { bg_green.write().set_selected_background("#005818"); }))
+                .child(swatch(Color::from_rgb(18, 75, 105), "Blue background", move |_| { bg_blue.write().set_selected_background("#124b69"); }))
+                .child(swatch(Color::from_rgb(68, 50, 0), "Orange background", move |_| { bg_orange.write().set_selected_background("#443200"); })),
+        )
+        .child(label().font_size(15.0).color(text).text("Stroke width"))
+        .child(
+            rect().horizontal().spacing(8.0)
+                .child(action_button("1", "Thin stroke", 42.0, move |_| { width_1.write().set_selected_stroke_width(1.0); }))
+                .child(action_button("2", "Medium stroke", 42.0, move |_| { width_2.write().set_selected_stroke_width(2.0); }))
+                .child(action_button("4", "Wide stroke", 42.0, move |_| { width_4.write().set_selected_stroke_width(4.0); })),
+        )
+        .child(label().font_size(15.0).color(text).text("Stroke style"))
+        .child(
+            rect().horizontal().spacing(8.0)
+                .child(action_button("—", "Solid stroke", 42.0, move |_| { style_solid.write().set_selected_stroke_style("solid"); }))
+                .child(action_button("╌", "Dashed stroke", 42.0, move |_| { style_dash.write().set_selected_stroke_style("dashed"); }))
+                .child(action_button("┈", "Dotted stroke", 42.0, move |_| { style_dot.write().set_selected_stroke_style("dotted"); })),
+        )
+        .child(label().font_size(15.0).color(text).text("Opacity"))
+        .child(
+            rect().horizontal().spacing(8.0)
+                .child(action_button("25", "Opacity 25 percent", 48.0, move |_| { opacity_25.write().set_selected_opacity(25.0); }))
+                .child(action_button("50", "Opacity 50 percent", 48.0, move |_| { opacity_50.write().set_selected_opacity(50.0); }))
+                .child(action_button("75", "Opacity 75 percent", 48.0, move |_| { opacity_75.write().set_selected_opacity(75.0); }))
+                .child(action_button("100", "Opacity 100 percent", 48.0, move |_| { opacity_100.write().set_selected_opacity(100.0); })),
+        )
+        .child(label().font_size(15.0).color(text).text("Layers"))
+        .child(
+            rect().horizontal().spacing(8.0)
+                .child(action_button("↗", "Bring to front", 48.0, move |_| { front.write().bring_selection_to_front(); }))
+                .child(action_button("↑", "Bring forward", 48.0, move |_| { forward.write().bring_selection_forward(); }))
+                .child(action_button("↓", "Send backward", 48.0, move |_| { backward.write().send_selection_backward(); }))
+                .child(action_button("↙", "Send to back", 48.0, move |_| { back.write().send_selection_to_back(); })),
+        )
+        .into_element()
+}
+
+fn unlock_all(canvas: State<DrawingCanvasState>) {
+    let mut canvas = canvas;
+    let mut state = canvas.write();
+    let locked = state
+        .document
+        .elements
+        .iter()
+        .enumerate()
+        .filter_map(|(index, element)| {
+            element
+                .extra
+                .get("locked")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if locked.is_empty() {
+        return;
+    }
+    state.checkpoint();
+    for index in &locked {
+        state.document.elements[*index]
+            .extra
+            .insert("locked".to_owned(), Value::Bool(false));
+    }
+    for index in locked {
+        state.touch_element(index);
+    }
+}
+
+fn reset_canvas(canvas: State<DrawingCanvasState>) {
+    let mut canvas = canvas;
+    let mut state = canvas.write();
+    if state.document.elements.is_empty() && state.document.files.as_object().is_none_or(Map::is_empty) {
+        return;
+    }
+    state.checkpoint();
+    state.document.elements.clear();
+    state.document.files = Value::Object(Map::new());
+    state.revision = state.revision.wrapping_add(1);
+}
+
+fn menu_panel(mut open: State<bool>, canvas: State<DrawingCanvasState>) -> Element {
+    let mut reset = canvas;
+    let unlock = canvas;
+    rect()
+        .position(Position::new_absolute().left(16.0).top(64.0))
+        .width(Size::px(260.0))
+        .padding(Gaps::new_all(10.0))
+        .background(Color::from_rgb(35, 35, 42))
+        .layer(Layer::OverlayLevel(50))
+        .with_corner_radius(9.0)
+        .a11y_alt("Excalidraw menu")
+        .child(action_button("Reset canvas", "Reset drawing canvas", 220.0, move |_| reset_canvas(reset)))
+        .child(action_button("Unlock all", "Unlock all drawing elements", 220.0, move |_| unlock_all(unlock)))
+        .child(icon_button(X_ICON, "Close Excalidraw menu", 30.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, move |_| open.set(false)))
+        .into_element()
+}
+
+fn library_panel(mut open: State<bool>) -> Element {
+    rect()
+        .position(Position::new_absolute().right(0.0).top(0.0).bottom(0.0))
+        .width(Size::px(320.0))
+        .padding(Gaps::new_all(18.0))
         .background(Color::from_rgb(35, 35, 42))
         .layer(Layer::OverlayLevel(50))
         .a11y_alt("Excalidraw Library")
-        .child(
-            rect()
-                .height(Size::px(42.))
-                .horizontal()
-                .main_align(Alignment::SpaceBetween)
-                .cross_align(Alignment::Center)
-                .child(label().font_size(22.).color(Color::from_rgb(170, 160, 255)).text("Library"))
-                .child(drawing_icon_button(
-                    X_ICON,
-                    "Close library",
-                    36.,
-                    Color::from_rgb(235, 235, 240),
-                    Color::TRANSPARENT,
-                    move |_| open.set(false),
-                )),
-        )
-        .child(
-            rect()
-                .height(Size::px(1.))
-                .width(Size::fill())
-                .background(Color::from_rgb(70, 70, 78)),
-        )
-        .child(
-            rect()
-                .height(Size::fill())
-                .center()
-                .a11y_alt("Empty drawing library")
-                .child(label().font_size(18.).color(Color::from_rgb(180, 170, 255)).text("No items added yet..."))
-                .child(label().font_size(14.).color(Color::from_rgb(190, 190, 198)).text("Select an item on the canvas to add it here."))
-                .child(
-                    rect()
-                        .height(Size::px(42.))
-                        .width(Size::fill())
-                        .center()
-                        .background(Color::from_rgb(170, 160, 255))
-                        .with_corner_radius(8.)
-                        .a11y_alt("Browse drawing libraries")
-                        .child(label().color(Color::from_rgb(25, 25, 30)).text("Browse libraries")),
-                ),
-        )
+        .child(label().font_size(22.0).color(Color::from_rgb(170, 160, 255)).text("Library"))
+        .child(label().font_size(14.0).color(Color::from_rgb(190, 190, 198)).text("No library items in this vault."))
+        .child(icon_button(X_ICON, "Close library", 34.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, move |_| open.set(false)))
         .into_element()
 }
 
-fn drawing_menu_panel(mut open: State<bool>) -> Element {
-    let item = |text: &'static str, alt: &'static str| {
-        rect()
-            .height(Size::px(40.))
-            .width(Size::fill())
-            .cross_align(Alignment::Center)
-            .padding(Gaps::new(0., 10., 0., 10.))
-            .a11y_alt(alt)
-            .child(label().color(Color::from_rgb(235, 235, 240)).text(text))
-            .into_element()
-    };
+fn zoom_controls(canvas: State<DrawingCanvasState>) -> Element {
+    let zoom = (canvas.read().viewport.zoom * 100.0).round() as i32;
+    let mut out = canvas;
+    let mut reset = canvas;
+    let mut input = canvas;
     rect()
-        .position(Position::new_absolute().left(16.).top(64.))
-        .width(Size::px(300.))
-        .height(Size::px(300.))
-        .padding(Gaps::new(10., 8., 10., 8.))
-        .background(Color::from_rgb(35, 35, 42))
-        .layer(Layer::OverlayLevel(50))
-        .with_corner_radius(9.)
-        .a11y_alt("Excalidraw menu")
-        .child(item("Export image…", "Export drawing image"))
-        .child(item("Help", "Open drawing help"))
-        .child(item("Reset the canvas", "Reset drawing canvas"))
-        .child(
-            rect()
-                .height(Size::px(1.))
-                .width(Size::fill())
-                .background(Color::from_rgb(70, 70, 78)),
-        )
-        .child(item("GitHub", "Open Excalidraw GitHub"))
-        .child(item("Discord", "Open Excalidraw Discord"))
-        .child(drawing_icon_button(
-            X_ICON,
-            "Close Excalidraw menu",
-            30.,
-            Color::from_rgb(235, 235, 240),
-            Color::TRANSPARENT,
-            move |_| open.set(false),
-        ))
+        .position(Position::new_absolute().left(16.0).bottom(16.0))
+        .height(Size::px(42.0))
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .spacing(6.0)
+        .padding(Gaps::new(4.0, 6.0, 4.0, 6.0))
+        .background(Color::from_rgb(35, 35, 40))
+        .with_corner_radius(9.0)
+        .a11y_alt("Drawing zoom")
+        .child(action_button("−", "Zoom out", 34.0, move |_| out.write().zoom_out()))
+        .child(action_button(format!("{zoom}%"), "Reset zoom", 58.0, move |_| reset.write().reset_zoom()))
+        .child(action_button("+", "Zoom in", 34.0, move |_| input.write().zoom_in()))
         .into_element()
 }
 
+fn history_controls(canvas: State<DrawingCanvasState>) -> Element {
+    let mut undo = canvas;
+    let mut redo = canvas;
+    rect()
+        .position(Position::new_absolute().left(176.0).bottom(16.0))
+        .height(Size::px(42.0))
+        .horizontal()
+        .cross_align(Alignment::Center)
+        .spacing(6.0)
+        .padding(Gaps::new(4.0, 6.0, 4.0, 6.0))
+        .background(Color::from_rgb(35, 35, 40))
+        .with_corner_radius(9.0)
+        .a11y_alt("Drawing history")
+        .child(action_button("↶", "Undo drawing", 38.0, move |_| { undo.write().undo(); }))
+        .child(action_button("↷", "Redo drawing", 38.0, move |_| { redo.write().redo(); }))
+        .into_element()
+}
 
 #[derive(PartialEq)]
 struct DrawingView {
@@ -583,23 +549,17 @@ impl Component for DrawingView {
                 DrawingCanvasState::new(canvas::DrawingScene {
                     scene_type: "excalidraw".to_owned(),
                     elements: Vec::new(),
-                    app_state: serde_json::Value::Object(Default::default()),
-                    files: serde_json::Value::Object(Default::default()),
-                    extra: Default::default(),
+                    app_state: Value::Object(Map::new()),
+                    files: Value::Object(Map::new()),
+                    extra: Map::new(),
                 })
             })
         });
         let toolbar_error = use_state(|| Option::<String>::None);
-        let save_state = state;
-        let close_state = state;
-        let save_canvas = canvas_state;
-        let close_canvas = canvas_state;
         let active_tool = use_state(|| DrawingTool::Select);
         let library_open = use_state(|| false);
         let menu_open = use_state(|| false);
         let mut keyboard_tool = active_tool;
-        let mut save_error = toolbar_error;
-        let mut close_error = toolbar_error;
         let mut keyboard_error = toolbar_error;
         let keyboard_state = state;
         let mut keyboard_canvas = canvas_state;
@@ -610,16 +570,31 @@ impl Component for DrawingView {
             .background(Color::from_rgb(238, 238, 238))
             .a11y_alt("Drawing editor")
             .on_global_key_down(move |event: Event<KeyboardEventData>| {
-                if event.modifiers.contains(Modifiers::ctrl_or_meta())
-                    && matches!(&event.key, Key::Character(value) if value.eq_ignore_ascii_case("s"))
-                {
-                    keyboard_error.set(save(keyboard_state, keyboard_canvas).err());
-                    event.stop_propagation();
-                    return;
+                let command = event.modifiers.contains(Modifiers::ctrl_or_meta());
+                if command {
+                    if matches!(&event.key, Key::Character(value) if value.eq_ignore_ascii_case("s")) {
+                        keyboard_error.set(save(keyboard_state, keyboard_canvas).err());
+                        event.stop_propagation();
+                        return;
+                    }
+                    if matches!(&event.key, Key::Character(value) if value.eq_ignore_ascii_case("z")) {
+                        keyboard_canvas.write().undo();
+                        event.stop_propagation();
+                        return;
+                    }
+                    if matches!(&event.key, Key::Character(value) if value.eq_ignore_ascii_case("y")) {
+                        keyboard_canvas.write().redo();
+                        event.stop_propagation();
+                        return;
+                    }
                 }
                 match &event.key {
                     Key::Named(NamedKey::Escape) => {
                         keyboard_error.set(close(keyboard_state, keyboard_canvas).err());
+                        event.stop_propagation();
+                    }
+                    Key::Named(NamedKey::Backspace) | Key::Named(NamedKey::Delete) => {
+                        keyboard_canvas.write().delete_selection();
                         event.stop_propagation();
                     }
                     Key::Character(value) => {
@@ -638,205 +613,99 @@ impl Component for DrawingView {
             .child(canvas::drawing_canvas_with_state_and_palette(canvas_state, false))
             .child(
                 rect()
-                    .position(Position::new_absolute().left(0.).right(0.).top(16.))
+                    .position(Position::new_absolute().left(0.0).right(0.0).top(16.0))
                     .width(Size::fill())
-                    .height(Size::px(54.))
+                    .height(Size::px(54.0))
                     .horizontal()
                     .main_align(Alignment::Center)
                     .cross_align(Alignment::Center)
                     .child(
                         rect()
-                            .width(Size::auto())
-                            .height(Size::px(54.))
-                            .padding(Gaps::new(8., 12., 8., 12.))
+                            .height(Size::px(54.0))
+                            .padding(Gaps::new(8.0, 12.0, 8.0, 12.0))
                             .horizontal()
-                            .spacing(5.)
+                            .spacing(5.0)
                             .background(Color::from_rgb(35, 35, 40))
-                            .with_corner_radius(10.)
+                            .with_corner_radius(10.0)
                             .a11y_alt("Drawing tools")
-                            .child(
-                                rect()
-                                    .width(Size::px(1.))
-                                    .height(Size::px(1.))
-                                    .a11y_alt(format!(
-                                        "Drawing toolbar active tool: {}",
-                                        active_tool.read().label()
-                                    )),
-                            )
-                            .child(drawing_icon_button(
-                                LOCK_ICON,
-                                "Lock toolbar",
-                                38.,
-                                Color::from_rgb(235, 235, 240),
-                                Color::TRANSPARENT,
-                                |_| {},
-                            ))
-                            .child(
-                                rect()
-                                    .width(Size::px(1.))
-                                    .height(Size::px(30.))
-                                    .background(Color::from_rgb(75, 75, 82)),
-                            )
-                            .children(
-                                DrawingTool::ALL
-                                    .into_iter()
-                                    .map(|tool| {
-                                        drawing_toolbar_button(
-                                            tool,
-                                            *active_tool.read(),
-                                            active_tool,
-                                            canvas_state,
-                                        )
-                                    })
-                                    .collect::<Vec<_>>(),
-                            )
-                            .child(
-                                rect()
-                                    .width(Size::px(1.))
-                                    .height(Size::px(30.))
-                                    .background(Color::from_rgb(75, 75, 82)),
-                            )
-                            .child(drawing_icon_button(
-                                SHAPES_ICON,
-                                "More drawing tools",
-                                38.,
-                                Color::from_rgb(235, 235, 240),
-                                Color::TRANSPARENT,
-                                |_| {},
-                            )),
+                            .child(rect().width(Size::px(1.0)).height(Size::px(1.0)).a11y_alt(format!("Drawing toolbar active tool: {}", active_tool.read().label())))
+                            .child({
+                                let mut lock_canvas = canvas_state;
+                                icon_button(LOCK_ICON, "Lock selected element or unlock all", 38.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, move |_| {
+                                    if lock_canvas.read().selected_element_id().is_some() {
+                                        lock_canvas.write().set_selection_locked(true);
+                                    } else {
+                                        unlock_all(lock_canvas);
+                                    }
+                                })
+                            })
+                            .child(rect().width(Size::px(1.0)).height(Size::px(30.0)).background(Color::from_rgb(75, 75, 82)))
+                            .children(DrawingTool::ALL.into_iter().map(|tool| tool_button(tool, *active_tool.read(), active_tool, canvas_state)).collect::<Vec<_>>())
+                            .child(rect().width(Size::px(1.0)).height(Size::px(30.0)).background(Color::from_rgb(75, 75, 82)))
+                            .child(icon_button(SHAPES_ICON, "More drawing tools", 38.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, |_| {})),
                     ),
             )
-            .maybe_child((!matches!(
-                *active_tool.read(),
-                DrawingTool::Select | DrawingTool::Hand
-            ))
-                .then(|| drawing_properties_panel(theme::color(theme::PRIMARY))))
+            .maybe_child(canvas_state.read().selected_element_id().is_some().then(|| properties_panel(canvas_state)))
             .child(
-                rect()
-                    .position(Position::new_absolute().left(16.).top(16.))
-                    .child(drawing_icon_button(
-                        MENU_ICON,
-                        "Open Excalidraw menu",
-                        40.,
-                        Color::from_rgb(235, 235, 240),
-                        Color::from_rgb(35, 35, 40),
-                        {
-                            let mut menu = menu_open;
-                            move |_| {
-                                let next = !*menu.read();
-                                menu.set(next);
-                            }
-                        },
-                    )),
+                rect().position(Position::new_absolute().left(16.0).top(16.0)).child(
+                    icon_button(MENU_ICON, "Open Excalidraw menu", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(35, 35, 40), {
+                        let mut menu = menu_open;
+                        move |_| menu.set(!*menu.read())
+                    }),
+                ),
             )
             .child(
                 rect()
-                    .position(Position::new_absolute().right(16.).top(16.))
-                    .height(Size::px(40.))
+                    .position(Position::new_absolute().right(16.0).top(16.0))
+                    .height(Size::px(40.0))
                     .horizontal()
                     .cross_align(Alignment::Center)
-                    .spacing(8.)
+                    .spacing(8.0)
                     .child({
-                        let close_state = close_state;
-                        let close_canvas = close_canvas;
-                        drawing_icon_button(
-                            X_ICON,
-                            "Close drawing",
-                            40.,
-                            Color::from_rgb(235, 235, 240),
-                            Color::from_rgb(65, 65, 70),
-                            move |_| {
-                                close_error.set(close(close_state, close_canvas).err());
-                            },
-                        )
+                        let mut error = toolbar_error;
+                        icon_button(X_ICON, "Close drawing", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(65, 65, 70), move |_| error.set(close(state, canvas_state).err()))
                     })
                     .child({
-                        let save_state = save_state;
-                        let save_canvas = save_canvas;
-                        drawing_icon_button(
-                            CHECK_ICON,
-                            "Save drawing",
-                            40.,
-                            Color::from_rgb(235, 235, 240),
-                            Color::from_rgb(65, 65, 70),
-                            move |_| {
-                                save_error.set(save(save_state, save_canvas).err());
-                            },
-                        )
+                        let mut error = toolbar_error;
+                        icon_button(CHECK_ICON, "Save drawing", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(65, 65, 70), move |_| error.set(save(state, canvas_state).err()))
                     })
                     .child(
                         rect()
-                            .height(Size::px(40.))
-                            .padding(Gaps::new(0., 16., 0., 16.))
+                            .height(Size::px(40.0))
+                            .padding(Gaps::new(0.0, 16.0, 0.0, 16.0))
                             .center()
                             .background(Color::from_rgb(35, 35, 40))
-                            .with_corner_radius(9.)
+                            .with_corner_radius(9.0)
                             .a11y_alt("Open drawing library")
                             .on_mouse_up({
                                 let mut library = library_open;
-                                move |_| {
-                                    let next = !*library.read();
-                                    library.set(next);
-                                }
+                                move |_| library.set(!*library.read())
                             })
-                            .child(svg_icon(Icon::BookOpen, Color::from_rgb(235, 235, 240), 19.))
+                            .child(svg_icon(Icon::BookOpen, Color::from_rgb(235, 235, 240), 19.0))
                             .child(label().color(Color::from_rgb(235, 235, 240)).text("Library")),
                     ),
             )
             .child(
                 rect()
-                    .position(Position::new_absolute().left(0.).top(100.))
-                    .width(Size::px(10.))
-                    .height(Size::px(10.))
+                    .position(Position::new_absolute().left(0.0).top(100.0))
+                    .width(Size::px(10.0))
+                    .height(Size::px(10.0))
                     .background(Color::TRANSPARENT)
                     .a11y_alt("Back to library")
-                    .on_press(move |_| {
-                        close_error.set(close(close_state, close_canvas).err());
+                    .on_press({
+                        let mut error = toolbar_error;
+                        move |_| error.set(close(state, canvas_state).err())
                     }),
             )
+            .child(zoom_controls(canvas_state))
+            .child(history_controls(canvas_state))
             .child(
-                rect()
-                    .position(Position::new_absolute().left(16.).bottom(16.))
-                    .height(Size::px(42.))
-                    .horizontal()
-                    .cross_align(Alignment::Center)
-                    .spacing(18.)
-                    .padding(Gaps::new(0., 12., 0., 12.))
-                    .background(Color::from_rgb(35, 35, 40))
-                    .with_corner_radius(9.)
-                    .a11y_alt("Drawing zoom")
-                    .child(label().color(Color::from_rgb(235, 235, 240)).text("−"))
-                    .child(label().color(Color::from_rgb(235, 235, 240)).text("100%"))
-                    .child(label().color(Color::from_rgb(235, 235, 240)).text("+")),
+                rect().position(Position::new_absolute().right(16.0).bottom(16.0)).child(
+                    icon_button(HELP_ICON, "Open drawing help", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(35, 35, 40), |_| {}),
+                ),
             )
-            .child(
-                rect()
-                    .position(Position::new_absolute().left(176.).bottom(16.))
-                    .height(Size::px(42.))
-                    .horizontal()
-                    .cross_align(Alignment::Center)
-                    .spacing(18.)
-                    .padding(Gaps::new(0., 12., 0., 12.))
-                    .background(Color::from_rgb(35, 35, 40))
-                    .with_corner_radius(9.)
-                    .a11y_alt("Drawing history")
-                    .child(label().color(Color::from_rgb(235, 235, 240)).text("↶"))
-                    .child(label().color(Color::from_rgb(235, 235, 240)).text("↷")),
-            )
-            .child(
-                rect()
-                    .position(Position::new_absolute().right(16.).bottom(16.))
-                    .child(drawing_icon_button(
-                        HELP_ICON,
-                        "Open drawing help",
-                        40.,
-                        Color::from_rgb(235, 235, 240),
-                        Color::from_rgb(35, 35, 40),
-                        |_| {},
-                    )),
-            )
-            .maybe_child((*menu_open.read()).then(|| drawing_menu_panel(menu_open)))
-            .maybe_child((*library_open.read()).then(|| drawing_library_panel(library_open)))
+            .maybe_child((*menu_open.read()).then(|| menu_panel(menu_open, canvas_state)))
+            .maybe_child((*library_open.read()).then(|| library_panel(library_open)))
             .maybe_child(
                 toolbar_error
                     .read()
