@@ -8,12 +8,14 @@ on:
       - "Elephant/freya/src/app/drawing*.rs"
       - "Elephant/freya/tests/drawing*.rs"
       - "Elephant/crates/draw-contract/**"
+      - ".github/scripts/sync_freya_draw_*.py"
       - ".github/workflows/freya-draw-visual.yml"
   pull_request:
     paths:
       - "Elephant/freya/src/app/drawing*.rs"
       - "Elephant/freya/tests/drawing*.rs"
       - "Elephant/crates/draw-contract/**"
+      - ".github/scripts/sync_freya_draw_*.py"
       - ".github/workflows/freya-draw-visual.yml"
   workflow_dispatch:
 
@@ -28,13 +30,41 @@ jobs:
   draw-visual:
     name: Native Draw graphical contract
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+
+      - name: Synchronize native Draw interaction stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/sync_freya_draw_lasso.py
+          python3 .github/scripts/sync_freya_draw_interactions.py
+          python3 .github/scripts/sync_freya_draw_transform.py
+          python3 .github/scripts/sync_freya_draw_additive.py
+          python3 .github/scripts/sync_freya_draw_clipboard.py
+          python3 .github/scripts/sync_freya_draw_library.py
+          python3 .github/scripts/sync_freya_draw_search.py
+          python3 .github/scripts/sync_freya_draw_links.py
+          python3 .github/scripts/sync_freya_draw_bindings.py
+          python3 .github/scripts/sync_freya_draw_properties.py
+          rustfmt --edition 2021 \
+            Elephant/freya/src/app/drawing.rs \
+            Elephant/freya/src/app/drawing_canvas.rs \
+            Elephant/freya/src/app/drawing_scene.rs \
+            Elephant/freya/src/app/drawing_render.rs \
+            Elephant/freya/src/app/drawing_render_svg.rs \
+            Elephant/freya/src/app/drawing_library.rs \
+            Elephant/freya/tests/drawing_additive_selection_contract.rs \
+            Elephant/freya/tests/drawing_binding_freya_testing.rs \
+            Elephant/freya/tests/drawing_transform_handles_freya_testing.rs
+          git diff --check -- Elephant/freya/src/app/drawing*.rs Elephant/freya/tests/drawing*.rs
 
       - name: Install project dependencies
         uses: ./.github/actions/setup
@@ -65,11 +95,17 @@ jobs:
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_multi_selection_contract -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_additive_selection_contract -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_excalidraw_styles_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_transform_handles_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_binding_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_freya_testing -- --test-threads=1 --nocapture
 
@@ -92,6 +128,7 @@ jobs:
               Path('/tmp/elephant-freya-hand-after.png'),
               Path('/tmp/elephant-freya-drawing-frame.png'),
               Path('/tmp/elephant-freya-drawing-frame-like-imports.png'),
+              Path('/tmp/elephant-freya-drawing-transform-handles.png'),
           ]
           output = Path('test-results/freya-draw-visual')
           for path in required:
