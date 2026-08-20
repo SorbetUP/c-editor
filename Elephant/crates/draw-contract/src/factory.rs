@@ -49,7 +49,7 @@ pub fn create_element(tool: DrawingTool, start: [f32; 2], id: impl Into<String>)
         extra.insert("startBinding".to_owned(), Value::Null);
         extra.insert("endBinding".to_owned(), Value::Null);
     }
-    if tool == DrawingTool::Frame {
+    if matches!(tool, DrawingTool::Frame | DrawingTool::MagicFrame) {
         extra.insert("name".to_owned(), Value::Null);
         extra.insert("roughness".to_owned(), json!(0));
     }
@@ -72,7 +72,7 @@ pub fn create_element(tool: DrawingTool, start: [f32; 2], id: impl Into<String>)
         text: String::new(),
         stroke_color: match tool {
             DrawingTool::Image => "transparent",
-            DrawingTool::Frame => "#bbb",
+            DrawingTool::Frame | DrawingTool::MagicFrame => "#bbb",
             _ => "#1e1e1e",
         }
         .to_owned(),
