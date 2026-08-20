@@ -12,6 +12,8 @@ pub enum DrawingTool {
     Image,
     Eraser,
     Frame,
+    MagicFrame,
+    Embeddable,
 }
 
 impl DrawingTool {
@@ -29,6 +31,8 @@ impl DrawingTool {
             Self::Image => "image",
             Self::Eraser => "eraser",
             Self::Frame => "frame",
+            Self::MagicFrame => "magicframe",
+            Self::Embeddable => "embeddable",
         }
     }
 
@@ -45,6 +49,8 @@ impl DrawingTool {
             "image" => Self::Image,
             "eraser" => Self::Eraser,
             "frame" => Self::Frame,
+            "magicframe" => Self::MagicFrame,
+            "embeddable" | "iframe" => Self::Embeddable,
             _ => Self::Selection,
         }
     }
