@@ -61,6 +61,8 @@ jobs:
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_multiselect_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_freya_testing -- --test-threads=1 --nocapture
@@ -77,6 +79,7 @@ jobs:
 
           required = [
               Path('/tmp/elephant-freya-drawing-canvas-primitives.png'),
+              Path('/tmp/elephant-freya-drawing-multiselect.png'),
               Path('/tmp/elephant-freya-hand-before.png'),
               Path('/tmp/elephant-freya-hand-after.png'),
               Path('/tmp/elephant-freya-drawing-frame.png'),
@@ -93,8 +96,8 @@ jobs:
                   raise AssertionError(f'{path.name}: screenshot is visually empty/monochrome')
               shutil.copy2(path, output / path.name)
 
-          before = Image.open(required[1]).convert('RGBA')
-          after = Image.open(required[2]).convert('RGBA')
+          before = Image.open(required[2]).convert('RGBA')
+          after = Image.open(required[3]).convert('RGBA')
           diff = ImageChops.difference(before, after)
           if diff.getbbox() is None:
               raise AssertionError('hand-pan screenshots are pixel-identical')
