@@ -26,7 +26,9 @@ fn element_factory_keeps_excalidraw_reconciliation_metadata() {
 fn specialized_factory_fields_match_draw() {
     let text = create_element(DrawingTool::Text, [0.0, 0.0], "text-1");
     assert_eq!(
-        text.extra.get("originalText").and_then(|value| value.as_str()),
+        text.extra
+            .get("originalText")
+            .and_then(|value| value.as_str()),
         Some("")
     );
     let image = create_element(DrawingTool::Image, [0.0, 0.0], "image-1");
