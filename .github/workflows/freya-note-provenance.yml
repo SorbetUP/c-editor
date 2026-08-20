@@ -1,0 +1,70 @@
+name: Freya Note provenance
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - "Elephant/crates/muya-core/**"
+      - "Elephant/feature-incoming/Note"
+      - ".github/workflows/freya-note-provenance.yml"
+  pull_request:
+    paths:
+      - "Elephant/crates/muya-core/**"
+      - "Elephant/feature-incoming/Note"
+      - ".github/workflows/freya-note-provenance.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freya-note-provenance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  canonical-snapshot:
+    name: Canonical Note snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify pinned Note commit and vendored Git trees
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected_commit="35bc6816a1160d9e4c0422f8431f3cdc7a0cd77e"
+          expected_src_tree="0404aeaa23877fcb0536645c2da56c1204ac3631"
+          expected_data_tree="7f09e2bd5ba5a1c014429a9f5e2ceeea9e452062"
+
+          actual_commit="$(git ls-tree HEAD Elephant/feature-incoming/Note | awk '{print $3}')"
+          actual_src_tree="$(git rev-parse HEAD:Elephant/crates/muya-core/src)"
+          actual_data_tree="$(git rev-parse HEAD:Elephant/crates/muya-core/data)"
+
+          printf 'Note commit: expected=%s actual=%s\n' "$expected_commit" "$actual_commit"
+          printf 'Muya src tree: expected=%s actual=%s\n' "$expected_src_tree" "$actual_src_tree"
+          printf 'Muya data tree: expected=%s actual=%s\n' "$expected_data_tree" "$actual_data_tree"
+
+          test "$actual_commit" = "$expected_commit" || {
+            echo "::error title=Note submodule drift::Elephant/feature-incoming/Note does not point at the canonical Note commit."
+            exit 1
+          }
+          test "$actual_src_tree" = "$expected_src_tree" || {
+            echo "::error title=Muya source drift::Elephant/crates/muya-core/src differs from the canonical Note snapshot. Develop the core in SorbetUP/Note first, then mirror it exactly."
+            exit 1
+          }
+          test "$actual_data_tree" = "$expected_data_tree" || {
+            echo "::error title=Muya data drift::Elephant/crates/muya-core/data differs from the canonical Note snapshot."
+            exit 1
+          }
+
+          {
+            echo '## Canonical Note provenance'
+            echo
+            echo "- Note commit: \`$actual_commit\`"
+            echo "- Muya source tree: \`$actual_src_tree\`"
+            echo "- Muya data tree: \`$actual_data_tree\`"
+            echo '- Result: exact canonical snapshot'
+          } >> "$GITHUB_STEP_SUMMARY"
