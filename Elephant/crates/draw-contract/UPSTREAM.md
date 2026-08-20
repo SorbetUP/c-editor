@@ -1,12 +1,12 @@
 # Draw contract provenance
 
-This crate is a vendored public-build compatibility slice of the private `SorbetUP/Draw` repository.
-It contains the exact `DrawingScene`, `DrawingElement`, `Viewport`, geometry and color contract consumed by Elephant/Freya.
-
-Canonical development stays in `SorbetUP/Draw`.
+This crate is a vendored compatibility slice of the private `SorbetUP/Draw` repository. It exists so Elephant/Freya can compile and test without requiring cross-repository credentials at build time while canonical development stays in Draw.
 
 - source repository: `SorbetUP/Draw`
-- source commit: `7a802d4e8f1d38557c63a0f282ddf6cc9676a746`
-- mirrored source files: `src/document.rs`, `src/geometry.rs`
+- source commit: `0bb1a17aee152eb7fbd983a9901b1823288b0d73`
+- mirrored source files: `src/binding.rs`, `src/document.rs`, `src/geometry.rs`, `src/history.rs`, `src/scene_ops.rs`, `src/selection.rs`, `src/tool.rs`
+- mirrored symbol: `create_element` from `src/editor.rs`, kept in `src/factory.rs` here to avoid vendoring the full editor runtime
 
-The full editor/history/SVG implementation is intentionally not duplicated here because Freya does not import those symbols through this dependency. Changes to the shared scene/geometry contract must be authored in Draw first and mirrored here in the same Elephant commit that consumes them.
+The mirror is deliberately small. Freya owns native widget/event adaptation while canonical Draw owns scene mutations, Excalidraw binding metadata, selection geometry and newly-created element defaults.
+
+Any change to a mirrored contract must be authored in `SorbetUP/Draw` first, then copied here with this source commit updated in the same Elephant branch. Only pin a Draw source commit after both its Rust quality gate and raster visual contract are green. The contract tests must continue to assert the Excalidraw reconciliation metadata, bindings, selection geometry and history semantics relied on by Freya.

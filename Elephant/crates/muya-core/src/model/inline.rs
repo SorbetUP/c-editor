@@ -16,6 +16,14 @@ pub enum MarkFragmentEdge {
   End,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceStyle {
+  Full,
+  Collapsed,
+  Shortcut,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InlineKind {
@@ -45,8 +53,25 @@ pub enum InlineKind {
     title: Option<String>,
     alt: String,
   },
+  ReferenceLink {
+    destination: String,
+    title: Option<String>,
+    reference: String,
+    style: ReferenceStyle,
+  },
+  ReferenceImage {
+    source: String,
+    title: Option<String>,
+    alt: String,
+    reference: String,
+    style: ReferenceStyle,
+  },
   AutoLink {
     destination: String,
+  },
+  BareAutoLink {
+    destination: String,
+    text: String,
   },
   InlineHtml {
     raw: String,
