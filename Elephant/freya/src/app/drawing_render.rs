@@ -37,7 +37,9 @@ fn render_element(
 ) {
     let label = format!("Drawing element {} {}", element.id, element.kind);
     match element.kind.as_str() {
-        "rectangle" => output.push(svg::shape(element, index, &label, viewport, false)),
+        "rectangle" | "frame" | "magicframe" | "embeddable" | "iframe" => {
+            output.push(svg::shape(element, index, &label, viewport, false));
+        }
         "ellipse" => output.push(svg::shape(element, index, &label, viewport, true)),
         "diamond" => output.push(svg::diamond(element, index, &label, viewport)),
         "line" | "arrow" | "freedraw" => {
