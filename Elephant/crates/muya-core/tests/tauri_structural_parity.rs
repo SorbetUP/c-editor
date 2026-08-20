@@ -154,3 +154,21 @@ fn bare_links_keep_renderer_activation_destinations() {
     ]
   );
 }
+
+#[test]
+fn reference_images_stay_on_the_existing_image_renderer_kind() {
+  let markdown = "![Logo][img]\n\n[img]: image.png \"Logo\"";
+  let document = parse_markdown(markdown);
+  assert_eq!(to_markdown(&document), markdown);
+  assert!(document.nodes.values().any(|node| matches!(
+    (&node.kind, &node.inline_syntax),
+    (
+      NodeKind::Inline(InlineKind::Image {
+        source,
+        title: Some(title),
+        alt,
+      }),
+      Some(InlineSyntax::Reference { .. })
+    ) if source == "image.png" && title == "Logo" && alt == "Logo"
+  )));
+}
