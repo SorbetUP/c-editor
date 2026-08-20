@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/patch-freya-note-renderer.yml'
       - 'tools/freya-note-finalize.py'
+      - 'tools/freya-note-finalize-test-fix.py'
   pull_request_target:
     branches: [nsb/freya-native-migration]
     types: [opened, synchronize, reopened]
@@ -16,7 +17,7 @@ permissions:
 
 concurrency:
   group: one-shot-freya-note-final-renderer
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   finalize:
@@ -46,8 +47,9 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/freya-note-finalize.py
+          python3 tools/freya-note-finalize-test-fix.py
           cargo fmt --manifest-path Elephant/freya/Cargo.toml
-          allowed='^(Elephant/freya/src/app.rs|Elephant/freya/src/app/editor_view.rs|Elephant/freya/src/app/editor_image_preview.rs|Elephant/freya/tests/editor_image_markdown_freya_testing.rs|tools/freya-note-finalize.py|.github/workflows/patch-freya-note-renderer.yml)$'
+          allowed='^(Elephant/freya/src/app.rs|Elephant/freya/src/app/editor_view.rs|Elephant/freya/src/app/editor_image_preview.rs|Elephant/freya/tests/editor_image_markdown_freya_testing.rs|tools/freya-note-finalize.py|tools/freya-note-finalize-test-fix.py|.github/workflows/patch-freya-note-renderer.yml)$'
           unexpected="$(git diff --name-only | grep -Ev "$allowed" || true)"
           if [ -n "$unexpected" ]; then
             echo "Unexpected formatter changes:" >&2
@@ -115,7 +117,10 @@ jobs:
             Elephant/freya/src/app/editor_view.rs \
             Elephant/freya/src/app/editor_image_preview.rs \
             Elephant/freya/tests/editor_image_markdown_freya_testing.rs
-          git rm -- .github/workflows/patch-freya-note-renderer.yml tools/freya-note-finalize.py
+          git rm -- \
+            .github/workflows/patch-freya-note-renderer.yml \
+            tools/freya-note-finalize.py \
+            tools/freya-note-finalize-test-fix.py
           git diff --cached --check
           git commit -m 'fix(freya): finalize native Muya Note rendering'
           git pull --rebase origin nsb/freya-native-migration
