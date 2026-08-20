@@ -9,4 +9,4 @@ This crate is a vendored compatibility slice of the private `SorbetUP/Draw` repo
 
 The mirror is deliberately small. Freya owns native widget/event adaptation while canonical Draw owns scene mutations, Excalidraw binding metadata, selection geometry and newly-created element defaults.
 
-Any change to a mirrored contract must be authored in `SorbetUP/Draw` first, then copied here with this source commit updated in the same Elephant branch. The contract tests must continue to assert the Excalidraw reconciliation metadata, bindings, selection geometry and history semantics relied on by Freya.
+Any change to a mirrored contract must be authored in `SorbetUP/Draw` first, then copied here with this source commit updated in the same Elephant branch. Only pin a Draw source commit after both its Rust quality gate and raster visual contract are green. The contract tests must continue to assert the Excalidraw reconciliation metadata, bindings, selection geometry and history semantics relied on by Freya.
