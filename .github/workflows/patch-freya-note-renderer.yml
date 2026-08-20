@@ -1,3 +1,4 @@
+# Triggered for final Note integration validation on 2026-08-20.
 name: One-shot Freya Note renderer repair
 
 on:
@@ -300,8 +301,6 @@ fn semantic_source_block(
                 }
             }''', 'footnote and break inline')
 
-          # The renderer must trust muya-core's semantic destination. It must
-          # not implement a second Markdown/autolink parser in the UI layer.
           old_links = '''        match &node.kind {
             NodeKind::Inline(InlineKind::Link { destination, .. }) => {
                 let destination = match &node.inline_syntax {
@@ -344,7 +343,6 @@ fn semantic_source_block(
           if old_links in text:
               text = text.replace(old_links, semantic_links, 1)
 
-          # Remove a now-unused InlineSyntax import left by an older one-shot.
           text = text.replace(
               'model::{BlockKind, InlineKind, InlineMarkKind, InlineSyntax, ListKind, NodeKind},',
               'model::{BlockKind, InlineKind, InlineMarkKind, ListKind, NodeKind},',
