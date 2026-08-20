@@ -14,6 +14,7 @@ mod scene_ops;
 mod selection;
 mod text;
 mod tool;
+mod tool_type;
 
 pub use arrow::{Arrowhead, ArrowheadPrimitive};
 pub use binding::ArrowEndpoint;
@@ -30,3 +31,4 @@ pub use history::HistoryState;
 pub use selection::{SelectionMode, SelectionSet};
 pub use text::{font_family_css, layout_text, TextLayout, TextLineLayout};
 pub use tool::DrawingTool;
+pub use tool_type::{ToolShortcut, ToolType};
