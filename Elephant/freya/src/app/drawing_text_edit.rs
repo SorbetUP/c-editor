@@ -1,5 +1,4 @@
 use freya::prelude::*;
-use serde_json::Value;
 
 use super::drawing_scene::DrawingCanvasState;
 
@@ -110,7 +109,11 @@ impl Component for TextEditOverlay {
                     })
                     .on_key_down(move |event: Event<KeyboardEventData>| {
                         if matches!(event.key, Key::Named(NamedKey::Escape)) {
-                            sync_editor(&mut key_canvas, index, &key_editable.editor().read().to_string());
+                            sync_editor(
+                                &mut key_canvas,
+                                index,
+                                &key_editable.editor().read().to_string(),
+                            );
                             key_editing.set(None);
                             event.stop_propagation();
                             return;
@@ -119,7 +122,11 @@ impl Component for TextEditOverlay {
                             key: &event.key,
                             modifiers: event.modifiers,
                         });
-                        sync_editor(&mut key_canvas, index, &key_editable.editor().read().to_string());
+                        sync_editor(
+                            &mut key_canvas,
+                            index,
+                            &key_editable.editor().read().to_string(),
+                        );
                         event.stop_propagation();
                     })
                     .on_key_up(move |event: Event<KeyboardEventData>| {
@@ -139,32 +146,16 @@ impl Component for TextEditOverlay {
 
 fn sync_editor(canvas: &mut State<DrawingCanvasState>, index: usize, text: &str) {
     let mut state = canvas.write();
-    let mut changed = false;
-    {
-        let Some(element) = state.document.elements.get_mut(index) else {
-            return;
-        };
-        if element.is_deleted || element.kind != "text" || element.text == text {
-            return;
-        }
-        element.text = text.to_owned();
-        element
-            .extra
-            .insert("originalText".to_owned(), Value::String(text.to_owned()));
-        let layout = elephant_draw::layout_text(element);
-        if element
-            .extra
-            .get("autoResize")
-            .and_then(Value::as_bool)
-            .unwrap_or(true)
-        {
-            element.width = layout.width.max(1.0);
-            element.height = layout.height.max(element.font_size.max(1.0));
-        }
-        changed = true;
-    }
-    if changed {
-        state.touch_element(index);
+    let Some(id) = state
+        .document
+        .elements
+        .get(index)
+        .map(|element| element.id.clone())
+    else {
+        return;
+    };
+    if state.document.set_text_content(&id, text) {
+        state.revision = state.revision.wrapping_add(1);
     }
 }
 
