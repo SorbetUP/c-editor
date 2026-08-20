@@ -1,0 +1,90 @@
+name: Freya Note final proof
+
+on:
+  pull_request:
+    branches: [nsb/freya-native-migration]
+    paths:
+      - '.github/workflows/freya-note-final-proof.yml'
+      - 'tools/freya-note-core-finalize.py'
+      - 'tools/freya-note-finalize.py'
+      - 'tools/freya-note-finalize-test-fix.py'
+      - 'Elephant/crates/muya-core/**'
+      - 'Elephant/freya/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt,clippy
+      - name: Install Freya graphical dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev python3-pil
+      - name: Materialize final Note integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/freya-note-core-finalize.py
+          python3 tools/freya-note-finalize.py
+          python3 tools/freya-note-finalize-test-fix.py
+          cargo fmt --manifest-path Elephant/crates/muya-core/Cargo.toml
+          cargo fmt --manifest-path Elephant/freya/Cargo.toml
+          ! grep -nEi 'not rendered|non rendu|non rendue|fn unsupported_block\(' Elephant/freya/src/app/editor_view.rs
+          ! grep -n 'Err(EditorError::Edit(EditError::CrossNodeSelection))' Elephant/freya/src/editor.rs
+          git diff --check
+      - name: Verify Muya core
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets
+          cargo clippy --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets -- -D warnings
+      - name: Verify Freya editor
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets
+          for test in \
+            editor_cross_wrapper_freya_testing \
+            editor_atomic_inline_freya_testing \
+            editor_structured_markdown_freya_testing \
+            editor_image_markdown_freya_testing \
+            editor_link_freya_testing \
+            editor_keyboard_freya_testing \
+            editor_lifecycle_freya_testing \
+            editor_undo_redo_freya_testing \
+            editor_rich_interactions_freya_testing \
+            editor_toolbar_parity \
+            muya_note_lifecycle_freya_testing \
+            muya_tauri_structural_parity
+          do
+            cargo test --manifest-path Elephant/freya/Cargo.toml --test "$test" -- --test-threads=1 --nocapture
+          done
+      - name: Validate screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          for path in [Path('/tmp/elephant-freya-note-structured.png'), Path('/tmp/elephant-freya-note-image.png')]:
+              if not path.is_file() or path.stat().st_size < 1024:
+                  raise SystemExit(f'missing/degenerate graphical evidence: {path}')
+              image = Image.open(path).convert('RGBA')
+              if image.width < 100 or image.height < 100:
+                  raise SystemExit(f'degenerate graphical dimensions {path}: {image.size}')
+              colors = image.getcolors(maxcolors=image.width * image.height) or []
+              if len(colors) < 8:
+                  raise SystemExit(f'visually degenerate evidence {path}: {len(colors)} colors')
+              print(path, image.size, path.stat().st_size, len(colors))
+          PY
