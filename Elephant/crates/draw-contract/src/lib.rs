@@ -1,9 +1,12 @@
 mod arrow;
 mod autoshape;
+mod autoshape_convert;
 mod binding;
 mod bucket_fill;
+mod bucket_fill_action;
 mod clipboard;
 mod crop;
+mod current_style;
 mod delete;
 mod document;
 mod duplicate;
@@ -29,13 +32,19 @@ mod transform;
 
 pub use arrow::{Arrowhead, ArrowheadPrimitive};
 pub use autoshape::{recognize_shape, recognized_arrow_endpoint, RecognizedShape, ShapeRecognition};
+pub use autoshape_convert::convert_autoshape;
 pub use binding::ArrowEndpoint;
 pub use bucket_fill::{
     compute_bucket_fill, BucketFillFailureReason, BucketFillInsertion, BucketFillOptions,
     BucketFillPlacement, BucketFillResult,
 };
+pub use bucket_fill_action::{
+    apply_bucket_fill, is_bucket_fill_compatible, BucketFillMutation,
+    DEFAULT_BUCKET_FILL_BACKGROUND,
+};
 pub use clipboard::SceneFragment;
 pub use crop::{crop_source_rect, ImageCrop, MINIMAL_CROP_SIZE};
+pub use current_style::DrawingCurrentStyle;
 pub use delete::DeleteSelectionOutcome;
 pub use document::{DrawingElement, DrawingScene, SceneError};
 pub use duplicate::DuplicateSelectionOutcome;
