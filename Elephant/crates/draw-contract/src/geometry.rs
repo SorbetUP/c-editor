@@ -79,10 +79,7 @@ pub fn rotate_point(point: [f32; 2], center: [f32; 2], angle: f32) -> [f32; 2] {
     let cos = angle.cos();
     let x = point[0] - center[0];
     let y = point[1] - center[1];
-    [
-        center[0] + x * cos - y * sin,
-        center[1] + x * sin + y * cos,
-    ]
+    [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
 }
 
 pub fn rgba(value: &str, opacity: f32) -> [u8; 4] {
@@ -92,10 +89,7 @@ pub fn rgba(value: &str, opacity: f32) -> [u8; 4] {
     }
     let value = value.trim_start_matches('#');
     let (value, alpha) = match value.len() {
-        3 => (
-            value.chars().flat_map(|c| [c, c]).collect::<String>(),
-            255,
-        ),
+        3 => (value.chars().flat_map(|c| [c, c]).collect::<String>(), 255),
         6 => (value.to_owned(), 255),
         8 => (
             value[..6].to_owned(),

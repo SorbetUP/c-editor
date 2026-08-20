@@ -4,16 +4,22 @@ use serde_json::{Map, Value};
 use std::fmt;
 
 fn default_stroke() -> String {
-    "#000000".to_owned()
+    "#1e1e1e".to_owned()
 }
 fn default_background() -> String {
     "transparent".to_owned()
 }
-fn default_width() -> f32 {
-    1.0
+fn default_stroke_width() -> f32 {
+    2.0
+}
+fn default_style() -> String {
+    "solid".to_owned()
 }
 fn default_opacity() -> f32 {
     100.0
+}
+fn default_font_size() -> f32 {
+    20.0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -52,17 +58,17 @@ pub struct DrawingElement {
     pub stroke_color: String,
     #[serde(rename = "backgroundColor", default = "default_background")]
     pub background_color: String,
-    #[serde(rename = "strokeWidth", default = "default_width")]
+    #[serde(rename = "strokeWidth", default = "default_stroke_width")]
     pub stroke_width: f32,
-    #[serde(rename = "strokeStyle", default)]
+    #[serde(rename = "strokeStyle", default = "default_style")]
     pub stroke_style: String,
-    #[serde(rename = "fillStyle", default)]
+    #[serde(rename = "fillStyle", default = "default_style")]
     pub fill_style: String,
     #[serde(default = "default_opacity")]
     pub opacity: f32,
     #[serde(default)]
     pub angle: f32,
-    #[serde(rename = "fontSize", default)]
+    #[serde(rename = "fontSize", default = "default_font_size")]
     pub font_size: f32,
     #[serde(rename = "endArrowhead", default)]
     pub end_arrowhead: Option<String>,
@@ -77,6 +83,13 @@ pub struct DrawingElement {
 impl DrawingElement {
     pub fn is_linear(&self) -> bool {
         matches!(self.kind.as_str(), "line" | "arrow" | "freedraw")
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.extra
+            .get("locked")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
     }
 
     pub fn bounds(&self) -> (f32, f32, f32, f32) {
@@ -106,7 +119,7 @@ impl DrawingElement {
     }
 
     pub fn hit_test_with_tolerance(&self, point: [f32; 2], tolerance: f32) -> bool {
-        if self.is_deleted {
+        if self.is_deleted || self.is_locked() {
             return false;
         }
         let tolerance = tolerance.max(0.0);
@@ -132,8 +145,25 @@ impl DrawingElement {
                 if rx <= f32::EPSILON || ry <= f32::EPSILON {
                     return false;
                 }
-                ((point[0] - center[0]).abs() / rx) + ((point[1] - center[1]).abs() / ry)
-                    <= 1.0
+                ((point[0] - center[0]).abs() / rx) + ((point[1] - center[1]).abs() / ry) <= 1.0
+            }
+            "frame" | "magicframe" => {
+                let outer = point[0] >= x - tolerance
+                    && point[0] <= x + width + tolerance
+                    && point[1] >= y - tolerance
+                    && point[1] <= y + height + tolerance;
+                if !outer {
+                    return false;
+                }
+                let border = tolerance.max(self.stroke_width.abs() / 2.0).max(1.0);
+                if width <= border * 2.0 || height <= border * 2.0 {
+                    return true;
+                }
+                let inside_inner = point[0] > x + border
+                    && point[0] < x + width - border
+                    && point[1] > y + border
+                    && point[1] < y + height - border;
+                !inside_inner
             }
             _ => {
                 point[0] >= x - tolerance

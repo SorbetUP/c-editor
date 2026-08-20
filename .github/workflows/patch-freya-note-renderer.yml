@@ -1,0 +1,397 @@
+name: One-shot Freya Note renderer repair
+
+on:
+  push:
+    branches: [nsb/freya-native-migration]
+    paths:
+      - '.github/workflows/patch-freya-note-renderer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-freya-note-renderer
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: nsb/freya-native-migration
+          fetch-depth: 0
+
+      - name: Fast-forward migration branch
+        run: git pull --ff-only origin nsb/freya-native-migration
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt,clippy
+
+      - name: Install Freya Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Apply bounded renderer repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('Elephant/freya/src/app/editor_view.rs')
+          text = path.read_text()
+
+          def once(old: str, new: str, label: str):
+              global text
+              if new in text:
+                  return
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one anchor, found {count}')
+              text = text.replace(old, new, 1)
+
+          once('''        NodeKind::Block(BlockKind::HtmlBlock) => unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            "HTML block not rendered",
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::MathBlock) => unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            "Math block not rendered",
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::FootnoteDefinition { label }) => unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            &format!("Footnote definition not rendered: {label}"),
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::ReferenceDefinition { label }) => unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            &format!("Reference definition not rendered: {label}"),
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::Diagram { language }) => unsupported_block(
+            state,
+            autosave_generation,
+            node_id,
+            &format!("Diagram not rendered: {language}"),
+            palette,
+            text_scale,
+        ),''', '''        NodeKind::Block(BlockKind::HtmlBlock) => semantic_source_block(
+            state,
+            autosave_generation,
+            node_id,
+            "HTML",
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::MathBlock) => semantic_source_block(
+            state,
+            autosave_generation,
+            node_id,
+            "Math",
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::FootnoteDefinition { label }) => render_footnote_definition(
+            state,
+            document,
+            node_id,
+            label,
+            autosave_generation,
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::ReferenceDefinition { label }) => semantic_source_block(
+            state,
+            autosave_generation,
+            node_id,
+            &format!("Reference {label}"),
+            palette,
+            text_scale,
+        ),
+        NodeKind::Block(BlockKind::Diagram { language }) => semantic_source_block(
+            state,
+            autosave_generation,
+            node_id,
+            &format!("{language} diagram"),
+            palette,
+            text_scale,
+        ),''', 'special block renderer')
+
+          once('''fn unsupported_block(
+    state: State<ShellState>,''', '''fn render_footnote_definition(
+    state: State<ShellState>,
+    document: &Document,
+    node_id: NodeId,
+    footnote_label: &str,
+    autosave_generation: State<u64>,
+    palette: theme::ThemePalette,
+    text_scale: f32,
+) -> Element {
+    rect()
+        .width(Size::fill())
+        .spacing(6.)
+        .padding(Gaps::new_all(8.))
+        .background(theme::color(palette.soft))
+        .border(Border::new().fill(theme::color(palette.border)).width(1.))
+        .with_corner_radius(7.)
+        .child(
+            label()
+                .font_family(UI_FONT)
+                .font_size(12. * text_scale)
+                .font_weight(FontWeight::BOLD)
+                .color(theme::color(palette.muted))
+                .text(format!("[^{footnote_label}]")),
+        )
+        .child(render_block_children(
+            state,
+            document,
+            node_id,
+            autosave_generation,
+            palette,
+            text_scale,
+        ))
+        .a11y_alt(format!("Footnote {footnote_label}"))
+        .into_element()
+}
+
+fn semantic_source_block(
+    state: State<ShellState>,''', 'semantic block helper')
+
+          once(
+              '.color(theme::color(palette.danger))\n                .text(message.to_string()),',
+              '.color(theme::color(palette.muted))\n                .text(message.to_string()),',
+              'semantic block color',
+          )
+
+          once('''            InlineKind::Escaped { value } => {
+                spans.push(styled_span(value.to_string(), style, palette, text_scale))
+            }''', '''            InlineKind::Escaped { value } => {
+                if node.children.is_empty() {
+                    spans.push(styled_span(value.to_string(), style, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, style, palette, text_scale, spans);
+                }
+            }''', 'escaped inline')
+
+          once('''            InlineKind::Image { source, alt, .. } => {
+                let mut next = style;
+                next.status = true;
+                spans.push(styled_span(
+                    format!("[Image non rendue: alt=\\\"{alt}\\\" source=\\\"{source}\\\"]"),
+                    next,
+                    palette,
+                    text_scale,
+                ));
+            }''', '''            InlineKind::Image { alt, .. } => {
+                let mut next = style;
+                next.emphasis = true;
+                if node.children.is_empty() {
+                    spans.push(styled_span(alt.clone(), next, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, next, palette, text_scale, spans);
+                }
+            }''', 'image inline')
+
+          once('''            InlineKind::AutoLink { destination } => {
+                let mut next = style;
+                next.link = true;
+                spans.push(styled_span(destination.clone(), next, palette, text_scale));
+            }''', '''            InlineKind::AutoLink { destination } => {
+                let mut next = style;
+                next.link = true;
+                if node.children.is_empty() {
+                    spans.push(styled_span(destination.clone(), next, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, next, palette, text_scale, spans);
+                }
+            }''', 'autolink inline')
+
+          once('''            InlineKind::InlineHtml { raw } => {
+                let mut next = style;
+                next.status = true;
+                spans.push(styled_span(
+                    format!("[HTML inline non rendu: {raw}]"),
+                    next,
+                    palette,
+                    text_scale,
+                ));
+            }''', '''            InlineKind::InlineHtml { raw } => {
+                let mut next = style;
+                next.code = true;
+                if node.children.is_empty() {
+                    spans.push(styled_span(raw.clone(), next, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, next, palette, text_scale, spans);
+                }
+            }''', 'inline HTML')
+
+          once('''            InlineKind::InlineMath { source } => {
+                let mut next = style;
+                next.status = true;
+                spans.push(styled_span(
+                    format!("[Math inline non rendu: {source}]"),
+                    next,
+                    palette,
+                    text_scale,
+                ));
+            }''', '''            InlineKind::InlineMath { source } => {
+                let mut next = style;
+                next.code = true;
+                if node.children.is_empty() {
+                    spans.push(styled_span(source.clone(), next, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, next, palette, text_scale, spans);
+                }
+            }''', 'inline math')
+
+          once('''            InlineKind::Emoji { value, .. } => {
+                spans.push(styled_span(value.clone(), style, palette, text_scale))
+            }''', '''            InlineKind::Emoji { value, .. } => {
+                if node.children.is_empty() {
+                    spans.push(styled_span(value.clone(), style, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, style, palette, text_scale, spans);
+                }
+            }''', 'emoji inline')
+
+          once('''            InlineKind::FootnoteReference { label } => spans.push(styled_span(
+                format!("[footnote: {label}]"),
+                style,
+                palette,
+                text_scale,
+            )),
+            InlineKind::SoftBreak | InlineKind::HardBreak => {
+                spans.push(styled_span("\\n".to_string(), style, palette, text_scale))
+            }''', '''            InlineKind::FootnoteReference { label } => {
+                let mut next = style;
+                next.script = ScriptStyle::Superscript;
+                if node.children.is_empty() {
+                    spans.push(styled_span(label.clone(), next, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, next, palette, text_scale, spans);
+                }
+            }
+            InlineKind::SoftBreak | InlineKind::HardBreak => {
+                if node.children.is_empty() {
+                    spans.push(styled_span("\\n".to_string(), style, palette, text_scale));
+                } else {
+                    collect_inline_children(document, node_id, style, palette, text_scale, spans);
+                }
+            }''', 'footnote and break inline')
+
+          # The renderer must trust muya-core's semantic destination. It must
+          # not implement a second Markdown/autolink parser in the UI layer.
+          old_links = '''        match &node.kind {
+            NodeKind::Inline(InlineKind::Link { destination, .. }) => {
+                let destination = match &node.inline_syntax {
+                    Some(InlineSyntax::BareAutoLink { .. }) => {
+                        let mut editable = Vec::new();
+                        editable_text_nodes(document, node.id, &mut editable);
+                        let edited = editable.into_iter().map(|(_, value)| value).collect::<String>();
+                        if edited.is_empty() {
+                            destination.clone()
+                        } else if destination.starts_with("mailto:") && !edited.starts_with("mailto:") {
+                            format!("mailto:{edited}")
+                        } else if destination.starts_with("http://www.") && edited.starts_with("www.") {
+                            format!("http://{edited}")
+                        } else {
+                            edited
+                        }
+                    }
+                    Some(InlineSyntax::Reference { .. }) | None => destination.clone(),
+                };
+                destinations.push(destination);
+                collect_inline_link_destinations(document, node.id, destinations);
+            }
+            NodeKind::Inline(InlineKind::AutoLink { destination }) => {
+                let mut editable = Vec::new();
+                editable_text_nodes(document, node.id, &mut editable);
+                let edited = editable.into_iter().map(|(_, value)| value).collect::<String>();
+                destinations.push(if edited.is_empty() { destination.clone() } else { edited });
+                collect_inline_link_destinations(document, node.id, destinations);
+            }
+            _ => collect_inline_link_destinations(document, node.id, destinations),
+        }'''
+          semantic_links = '''        match &node.kind {
+            NodeKind::Inline(InlineKind::Link { destination, .. })
+            | NodeKind::Inline(InlineKind::AutoLink { destination }) => {
+                destinations.push(destination.clone());
+                collect_inline_link_destinations(document, node.id, destinations);
+            }
+            _ => collect_inline_link_destinations(document, node.id, destinations),
+        }'''
+          if old_links in text:
+              text = text.replace(old_links, semantic_links, 1)
+
+          # Remove a now-unused InlineSyntax import left by an older one-shot.
+          text = text.replace(
+              'model::{BlockKind, InlineKind, InlineMarkKind, InlineSyntax, ListKind, NodeKind},',
+              'model::{BlockKind, InlineKind, InlineMarkKind, ListKind, NodeKind},',
+          )
+
+          forbidden = ['not rendered', 'non rendu', 'non rendue', 'fn unsupported_block(', 'InlineSyntax::BareAutoLink']
+          leaked = [marker for marker in forbidden if marker in text]
+          if leaked:
+              raise SystemExit(f'placeholder/UI-parser markers remain: {leaked}')
+          required = ['fn semantic_source_block(', 'fn render_footnote_definition(']
+          missing = [marker for marker in required if marker not in text]
+          if missing:
+              raise SystemExit(f'renderer repair incomplete: {missing}')
+
+          path.write_text(text)
+          PY
+          cargo fmt --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Verify native Note renderer and editing integration
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets
+          for test in \
+            editor_atomic_inline_freya_testing \
+            editor_structured_markdown_freya_testing \
+            editor_link_freya_testing \
+            editor_keyboard_freya_testing \
+            editor_lifecycle_freya_testing \
+            editor_undo_redo_freya_testing \
+            muya_note_lifecycle_freya_testing \
+            muya_tauri_structural_parity
+          do
+            cargo test --manifest-path Elephant/freya/Cargo.toml --test "$test" -- --test-threads=1 --nocapture
+          done
+
+      - name: Commit verified renderer and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Elephant/freya/src/app/editor_view.rs
+          git rm .github/workflows/patch-freya-note-renderer.yml
+          git diff --cached --check
+          git commit -m 'fix(freya): render structured Muya Note content natively'
+          git pull --rebase origin nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration
