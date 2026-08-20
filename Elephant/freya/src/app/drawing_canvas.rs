@@ -140,11 +140,11 @@ pub fn drawing_canvas_with_state_and_palette(
                 pointer_down.set(true);
                 let point = point(event.global_location());
                 let tool = DrawingTool::from_id(pointer_state.read().active_tool.as_str());
-                if tool == DrawingTool::Selection || tool == DrawingTool::Hand {
+                if matches!(
+                    tool,
+                    DrawingTool::Selection | DrawingTool::Hand | DrawingTool::Eraser
+                ) {
                     pointer_state.write().begin_pointer(point);
-                    pointer_gesture.set(None);
-                } else if tool == DrawingTool::Eraser {
-                    pointer_state.write().erase_at(point);
                     pointer_gesture.set(None);
                 } else if tool == DrawingTool::Image {
                     pointer_state.write().end_pointer();
@@ -153,6 +153,7 @@ pub fn drawing_canvas_with_state_and_palette(
                     let mut canvas = pointer_state.write();
                     let world = canvas.to_world(point);
                     let index = canvas.document.elements.len();
+                    canvas.checkpoint();
                     canvas
                         .document
                         .elements
@@ -174,11 +175,12 @@ pub fn drawing_canvas_with_state_and_palette(
             }
             let location = point(event.global_location());
             let active_tool = DrawingTool::from_id(move_state.read().active_tool.as_str());
-            if active_tool == DrawingTool::Eraser {
-                move_state.write().erase_at(location);
-            } else if let Some(gesture) = *move_gesture.read() {
+            if let Some(gesture) = *move_gesture.read() {
                 draw_gesture(&mut move_state.write(), gesture, location);
-            } else if matches!(active_tool, DrawingTool::Selection | DrawingTool::Hand) {
+            } else if matches!(
+                active_tool,
+                DrawingTool::Selection | DrawingTool::Hand | DrawingTool::Eraser
+            ) {
                 move_state.write().move_pointer(location);
             }
             event.stop_propagation();
