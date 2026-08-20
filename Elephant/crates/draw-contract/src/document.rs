@@ -4,16 +4,22 @@ use serde_json::{Map, Value};
 use std::fmt;
 
 fn default_stroke() -> String {
-    "#000000".to_owned()
+    "#1e1e1e".to_owned()
 }
 fn default_background() -> String {
     "transparent".to_owned()
 }
-fn default_width() -> f32 {
-    1.0
+fn default_stroke_width() -> f32 {
+    2.0
+}
+fn default_style() -> String {
+    "solid".to_owned()
 }
 fn default_opacity() -> f32 {
     100.0
+}
+fn default_font_size() -> f32 {
+    20.0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -52,17 +58,17 @@ pub struct DrawingElement {
     pub stroke_color: String,
     #[serde(rename = "backgroundColor", default = "default_background")]
     pub background_color: String,
-    #[serde(rename = "strokeWidth", default = "default_width")]
+    #[serde(rename = "strokeWidth", default = "default_stroke_width")]
     pub stroke_width: f32,
-    #[serde(rename = "strokeStyle", default)]
+    #[serde(rename = "strokeStyle", default = "default_style")]
     pub stroke_style: String,
-    #[serde(rename = "fillStyle", default)]
+    #[serde(rename = "fillStyle", default = "default_style")]
     pub fill_style: String,
     #[serde(default = "default_opacity")]
     pub opacity: f32,
     #[serde(default)]
     pub angle: f32,
-    #[serde(rename = "fontSize", default)]
+    #[serde(rename = "fontSize", default = "default_font_size")]
     pub font_size: f32,
     #[serde(rename = "endArrowhead", default)]
     pub end_arrowhead: Option<String>,
