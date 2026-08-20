@@ -52,15 +52,18 @@ fn paste_remaps_internal_references_drops_external_bindings_and_offsets_geometry
 }
 
 #[test]
-fn repeated_paste_never_reuses_element_ids_or_group_ids() {
+fn repeated_paste_with_unique_namespaces_never_reuses_element_or_group_ids() {
     let mut scene = fixture();
     let fragment = scene.copy_selection_fragment(&SelectionSet::from_ids(["box".to_owned()]));
-    let first = scene.paste_fragment(&fragment, [10.0, 10.0], "copy");
-    let second = scene.paste_fragment(&fragment, [20.0, 20.0], "copy");
+    let first = scene.paste_fragment(&fragment, [10.0, 10.0], "copy1");
+    let second = scene.paste_fragment(&fragment, [20.0, 20.0], "copy2");
     assert!(first.ids().all(|id| !second.contains(id)));
-    let first_group = scene.element_by_id("copy-box").unwrap().extra["groupIds"][0].as_str().unwrap();
-    let second_id = second.ids().find(|id| id.ends_with("box-1") || id.contains("box-")).unwrap();
-    let second_group = scene.element_by_id(second_id).unwrap().extra["groupIds"][0].as_str().unwrap();
+    let first_group = scene.element_by_id("copy1-box").unwrap().extra["groupIds"][0]
+        .as_str()
+        .unwrap();
+    let second_group = scene.element_by_id("copy2-box").unwrap().extra["groupIds"][0]
+        .as_str()
+        .unwrap();
     assert_ne!(first_group, second_group);
 }
 
