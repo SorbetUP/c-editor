@@ -135,7 +135,7 @@ fn pointer_selection_and_drag_update_model_and_excalidraw_serialization() {
 }
 
 #[test]
-fn wheel_zoom_and_blank_drag_pan_change_the_viewport() {
+fn wheel_zoom_selection_blank_drag_and_hand_pan_match_excalidraw_semantics() {
     let (mut runner, state) = test_runner();
     let before = state.peek().viewport;
     runner.scroll((320., 240.), (0., -120.));
@@ -145,8 +145,59 @@ fn wheel_zoom_and_blank_drag_pan_change_the_viewport() {
     runner.press_cursor((520., 420.));
     runner.move_cursor((560., 450.));
     runner.release_cursor((560., 450.));
-    let panned = state.peek().viewport;
-    assert_ne!(panned.pan, zoomed.pan);
+    assert_eq!(
+        state.peek().viewport.pan,
+        zoomed.pan,
+        "selection drag on empty canvas must not pan"
+    );
+
+    let hand = labeled_node(&runner, "Hand tool");
+    runner.click_cursor(hand.layout().area.center().to_f64());
+    assert_eq!(state.peek().active_tool, "hand");
+    let element_before = (
+        state.peek().document.elements[0].x,
+        state.peek().document.elements[0].y,
+    );
+    let visual_before = std::env::temp_dir().join("elephant-freya-hand-before.png");
+    let visual_after = std::env::temp_dir().join("elephant-freya-hand-after.png");
+    runner.render_to_file(&visual_before);
+
+    runner.press_cursor((100., 100.));
+    runner.move_cursor((135., 125.));
+    runner.release_cursor((135., 125.));
+
+    assert_ne!(state.peek().viewport.pan, zoomed.pan);
+    assert_eq!(
+        (
+            state.peek().document.elements[0].x,
+            state.peek().document.elements[0].y,
+        ),
+        element_before,
+        "hand must pan without moving the element under the cursor"
+    );
+    runner.render_to_file(&visual_after);
+    assert_ne!(
+        fs::read(visual_before).expect("before screenshot"),
+        fs::read(visual_after).expect("after screenshot"),
+        "native graphical output must change when the viewport pans"
+    );
+}
+
+#[test]
+fn image_tool_is_not_misrouted_to_selection() {
+    let (mut runner, state) = test_runner();
+    let image = labeled_node(&runner, "Image tool");
+    runner.click_cursor(image.layout().area.center().to_f64());
+    assert_eq!(state.peek().active_tool, "image");
+    let before = state.peek().document.clone();
+    let viewport = state.peek().viewport;
+
+    runner.press_cursor((140., 110.));
+    runner.move_cursor((190., 145.));
+    runner.release_cursor((190., 145.));
+
+    assert_eq!(state.peek().document, before);
+    assert_eq!(state.peek().viewport, viewport);
 }
 
 #[test]
@@ -184,6 +235,8 @@ fn active_freehand_tool_draws_into_shared_state_and_serializes() {
         .expect("drawing gesture must append a real element");
     assert_eq!(element.kind, "freedraw");
     assert!(element.points.len() >= 2);
+    assert!(element.extra.contains_key("version"));
+    assert!(element.extra.contains_key("versionNonce"));
     let serialized = snapshot.serialize_json().expect("serialize drawn scene");
     assert!(serialized.contains(&element.id));
 }
