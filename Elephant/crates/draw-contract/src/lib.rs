@@ -10,6 +10,7 @@ mod history;
 mod normalize;
 mod scene_ops;
 mod selection;
+mod text;
 mod tool;
 
 pub use arrow::{Arrowhead, ArrowheadPrimitive};
@@ -23,4 +24,5 @@ pub use fractional_index::{
 pub use geometry::{distance_to_segment, rgba, rotate_point, Viewport, MAX_ZOOM, MIN_ZOOM};
 pub use history::HistoryState;
 pub use selection::{SelectionMode, SelectionSet};
+pub use text::{font_family_css, layout_text, TextLayout, TextLineLayout};
 pub use tool::DrawingTool;
