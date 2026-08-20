@@ -23,8 +23,13 @@ fn transform_snap_crop_search_and_library_contracts_match_excalidraw_shapes() {
     .unwrap();
 
     let frame = SelectionSet::from_ids(["frame".to_owned()]);
-    assert_eq!(scene.scale_selection(&frame, [0.0, 0.0], [2.0, 2.0]).changed, 4);
-    assert_eq!(scene.element_by_id("line").unwrap().points, vec![[0.0, 0.0], [80.0, 40.0]]);
+    let child_before = scene.element_by_id("child").unwrap().clone();
+    let line_before = scene.element_by_id("line").unwrap().clone();
+    assert_eq!(scene.scale_selection(&frame, [0.0, 0.0], [2.0, 2.0]).changed, 1);
+    assert_eq!(scene.element_by_id("frame").map(|e| (e.width, e.height)), Some((400.0, 240.0)));
+    assert_eq!(scene.element_by_id("child").unwrap(), &child_before);
+    assert_eq!(scene.element_by_id("line").unwrap(), &line_before);
+    assert_eq!(scene.rotate_selection(&frame, std::f32::consts::FRAC_PI_2).changed, 0);
     assert!(scene.rotate_selection(&SelectionSet::from_ids(["child".to_owned()]), std::f32::consts::FRAC_PI_2).changed > 0);
 
     let moving = SelectionSet::from_ids(["image".to_owned()]);
@@ -32,8 +37,12 @@ fn transform_snap_crop_search_and_library_contracts_match_excalidraw_shapes() {
     assert!(snap.guides.iter().all(|guide| matches!(guide.axis, SnapAxis::X | SnapAxis::Y)));
 
     assert!(scene.set_image_crop("image", Some(ImageCrop {
-        x: 90.0, y: 70.0, width: 1.0, height: 2.0,
-        natural_width: 120.0, natural_height: 90.0,
+        x: 90.0,
+        y: 70.0,
+        width: 1.0,
+        height: 2.0,
+        natural_width: 120.0,
+        natural_height: 90.0,
     })));
     let crop = scene.image_crop("image").unwrap();
     assert_eq!((crop.width, crop.height), (MINIMAL_CROP_SIZE, MINIMAL_CROP_SIZE));
