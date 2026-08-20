@@ -122,7 +122,7 @@ fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 }
 
 fn gif_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() < 10 || !matches!(&bytes[..6], b"GIF87a" | b"GIF89a") {
+    if bytes.len() < 10 || (&bytes[..6] != b"GIF87a" && &bytes[..6] != b"GIF89a") {
         return None;
     }
     let width = u16::from_le_bytes(bytes[6..8].try_into().ok()?) as u32;
