@@ -1,4 +1,4 @@
-use crate::DrawingScene;
+use crate::{generate_n_keys_between, DrawingScene};
 use serde_json::{json, Value};
 
 impl DrawingScene {
@@ -89,6 +89,28 @@ impl DrawingScene {
         true
     }
 
+    /// Synchronize the persisted Excalidraw fractional `index` with the array
+    /// order used by the native renderer. Deleted elements are included because
+    /// Excalidraw reconciliation orders the complete scene, not only visible
+    /// elements.
+    pub fn sync_fractional_indices(&mut self) -> usize {
+        let Some(indices) = generate_n_keys_between(None, None, self.elements.len()) else {
+            return 0;
+        };
+        let mut changed = 0;
+        for (element, index) in self.elements.iter_mut().zip(indices) {
+            if element.extra.get("index").and_then(Value::as_str) == Some(index.as_str()) {
+                continue;
+            }
+            element
+                .extra
+                .insert("index".to_owned(), Value::String(index));
+            mark_changed(element);
+            changed += 1;
+        }
+        changed
+    }
+
     pub fn bring_element_to_front(&mut self, id: &str) -> bool {
         let Some(index) = self.mutable_index(id) else {
             return false;
@@ -98,6 +120,7 @@ impl DrawingScene {
         }
         let element = self.elements.remove(index);
         self.elements.push(element);
+        self.sync_fractional_indices();
         true
     }
 
@@ -110,6 +133,7 @@ impl DrawingScene {
         }
         let element = self.elements.remove(index);
         self.elements.insert(0, element);
+        self.sync_fractional_indices();
         true
     }
 
@@ -121,6 +145,7 @@ impl DrawingScene {
             return false;
         }
         self.elements.swap(index, index + 1);
+        self.sync_fractional_indices();
         true
     }
 
@@ -132,6 +157,7 @@ impl DrawingScene {
             return false;
         }
         self.elements.swap(index, index - 1);
+        self.sync_fractional_indices();
         true
     }
 
