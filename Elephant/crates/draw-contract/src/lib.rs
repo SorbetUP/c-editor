@@ -11,7 +11,7 @@ mod scene_ops;
 mod selection;
 mod tool;
 
-pub use arrow::Arrowhead;
+pub use arrow::{Arrowhead, ArrowheadPrimitive};
 pub use binding::ArrowEndpoint;
 pub use document::{DrawingElement, DrawingScene, SceneError};
 pub use factory::create_element;
