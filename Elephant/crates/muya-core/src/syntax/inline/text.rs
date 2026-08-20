@@ -1,4 +1,4 @@
-const SPECIAL: &[char] = &['\\', '`', '!', '[', '*', '_', '~', '\n'];
+const SPECIAL: &[char] = &['\\', '`', '!', '[', '*', '_', '~', '\n', '<', '$', '^'];
 
 pub fn take(source: &str) -> &str {
   let mut end = source.len();
@@ -22,6 +22,9 @@ mod tests {
   #[test]
   fn consumes_plain_text_until_the_next_inline_marker() {
     assert_eq!(take("hello **world**"), "hello ");
+    assert_eq!(take("before $math$"), "before ");
+    assert_eq!(take("before <https://example.com>"), "before ");
+    assert_eq!(take("before ^2^"), "before ");
     assert_eq!(take("😀text"), "😀text");
     assert_eq!(take("*"), "*");
   }
