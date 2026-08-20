@@ -78,9 +78,16 @@ pub(super) fn polyline(
         let _ = write!(path, "{command} {} {} ", px - x, py - y);
     }
     let mut content = format!("<path d=\"{path}\" {}/>", style(element, false));
-    if element.kind == "arrow" && element.end_arrowhead.as_deref() != Some("none") {
-        if let Some(window) = points.windows(2).last() {
-            content.push_str(&arrowhead(element, window[0], window[1], x, y));
+    if element.kind == "arrow" {
+        if element.start_arrowhead.as_deref() != Some("none") && element.start_arrowhead.is_some() {
+            if let Some(window) = points.windows(2).next() {
+                content.push_str(&arrowhead(element, window[1], window[0], x, y));
+            }
+        }
+        if element.end_arrowhead.as_deref() != Some("none") {
+            if let Some(window) = points.windows(2).last() {
+                content.push_str(&arrowhead(element, window[0], window[1], x, y));
+            }
         }
     }
     rotated_surface(
