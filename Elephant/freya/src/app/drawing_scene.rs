@@ -1,4 +1,6 @@
-pub use elephant_draw::{rgba, DrawingElement, DrawingScene, HistoryState, Viewport};
+pub use elephant_draw::{
+    rgba, DrawingElement, DrawingScene, HistoryState, SelectionMode, SelectionSet, Viewport,
+};
 use serde_json::{json, Value};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -18,6 +20,14 @@ enum Interaction {
         offset: [f32; 2],
         checkpointed: bool,
     },
+    MoveSelection {
+        last_world: [f32; 2],
+        checkpointed: bool,
+    },
+    BoxSelect {
+        start_world: [f32; 2],
+        current_world: [f32; 2],
+    },
     Pan {
         start_pointer: [f32; 2],
         start_pan: [f32; 2],
@@ -33,6 +43,7 @@ pub struct DrawingCanvasState {
     pub viewport: Viewport,
     pub active_tool: String,
     selected: Option<usize>,
+    selection: SelectionSet,
     interaction: Interaction,
     history: HistoryState,
     pub revision: u64,
@@ -54,6 +65,7 @@ impl DrawingCanvasState {
             viewport: Viewport::default(),
             active_tool: "selection".to_owned(),
             selected: None,
+            selection: SelectionSet::new(),
             interaction: Interaction::None,
             history: HistoryState::default(),
             revision: 0,
@@ -76,6 +88,7 @@ impl DrawingCanvasState {
             "Image" => "image",
             "Eraser" => "eraser",
             "Hand" => "hand",
+            "Frame" => "frame",
             _ => "selection",
         }
         .to_owned();
@@ -87,13 +100,58 @@ impl DrawingCanvasState {
     }
 
     pub fn selected_element_id(&self) -> Option<&str> {
+        if self.selection.len() == 1 {
+            return self.selection.ids().next();
+        }
+        if self.selection.len() > 1 {
+            return None;
+        }
         self.selected_element().map(|element| element.id.as_str())
     }
 
+    pub fn selected_element_ids(&self) -> Vec<&str> {
+        if self.selection.is_empty() {
+            return self.selected_element_id().into_iter().collect();
+        }
+        self.selection.ids().collect()
+    }
+
+    pub fn is_element_selected(&self, id: &str) -> bool {
+        if !self.selection.is_empty() {
+            return self.selection.contains(id);
+        }
+        self.selected_element_id() == Some(id)
+    }
+
     pub fn selected_element(&self) -> Option<&DrawingElement> {
+        if self.selection.len() == 1 {
+            let id = self.selection.ids().next()?;
+            return self.document.element_by_id(id).filter(|element| !is_locked(element));
+        }
+        if !self.selection.is_empty() {
+            return None;
+        }
         self.selected
             .and_then(|index| self.document.elements.get(index))
             .filter(|element| !element.is_deleted && !is_locked(element))
+    }
+
+    pub fn selection_bounds(&self) -> Option<(f32, f32, f32, f32)> {
+        if !self.selection.is_empty() {
+            return self.selection.bounds(&self.document);
+        }
+        self.selected_element().map(DrawingElement::bounds)
+    }
+
+    pub fn selection_marquee_world(&self) -> Option<(f32, f32, f32, f32)> {
+        let Interaction::BoxSelect {
+            start_world,
+            current_world,
+        } = self.interaction
+        else {
+            return None;
+        };
+        Some(normalized_bounds(start_world, current_world))
     }
 
     pub fn can_undo(&self) -> bool {
@@ -109,7 +167,7 @@ impl DrawingCanvasState {
             return false;
         };
         self.document = document;
-        self.selected = None;
+        self.clear_selection();
         self.interaction = Interaction::None;
         self.changed();
         true
@@ -120,22 +178,47 @@ impl DrawingCanvasState {
             return false;
         };
         self.document = document;
-        self.selected = None;
+        self.clear_selection();
         self.interaction = Interaction::None;
         self.changed();
         true
     }
 
     pub fn delete_selection(&mut self) -> bool {
-        self.mutate_selected(|element| {
-            element.is_deleted = true;
-            true
-        })
-        .then(|| {
-            self.selected = None;
+        if self.selection.is_empty() {
+            return self
+                .mutate_selected(|element| {
+                    element.is_deleted = true;
+                    true
+                })
+                .then(|| {
+                    self.clear_selection();
+                    self.interaction = Interaction::None;
+                })
+                .is_some();
+        }
+
+        let selection = self.selection.clone();
+        if !self.document.elements.iter().any(|element| {
+            selection.contains(&element.id) && !element.is_deleted && !is_locked(element)
+        }) {
+            return false;
+        }
+        self.checkpoint();
+        let mut changed = false;
+        for element in &mut self.document.elements {
+            if selection.contains(&element.id) && !element.is_deleted && !is_locked(element) {
+                element.is_deleted = true;
+                mark_changed(element);
+                changed = true;
+            }
+        }
+        if changed {
+            self.clear_selection();
             self.interaction = Interaction::None;
-        })
-        .is_some()
+            self.changed();
+        }
+        changed
     }
 
     pub fn set_selected_stroke(&mut self, color: impl Into<String>) -> bool {
@@ -144,7 +227,7 @@ impl DrawingCanvasState {
             if element.stroke_color == color {
                 return false;
             }
-            element.stroke_color = color;
+            element.stroke_color = color.clone();
             true
         })
     }
@@ -155,7 +238,7 @@ impl DrawingCanvasState {
             if element.background_color == color {
                 return false;
             }
-            element.background_color = color;
+            element.background_color = color.clone();
             true
         })
     }
@@ -180,7 +263,7 @@ impl DrawingCanvasState {
             if element.stroke_style == style {
                 return false;
             }
-            element.stroke_style = style;
+            element.stroke_style = style.clone();
             true
         })
     }
@@ -200,6 +283,37 @@ impl DrawingCanvasState {
     }
 
     pub fn set_selection_locked(&mut self, locked: bool) -> bool {
+        if self.selection.len() > 1 {
+            let selection = self.selection.clone();
+            if !self.document.elements.iter().any(|element| {
+                selection.contains(&element.id)
+                    && !element.is_deleted
+                    && is_locked(element) != locked
+            }) {
+                return false;
+            }
+            self.checkpoint();
+            let mut changed = false;
+            for element in &mut self.document.elements {
+                if !selection.contains(&element.id)
+                    || element.is_deleted
+                    || is_locked(element) == locked
+                {
+                    continue;
+                }
+                element.extra.insert("locked".to_owned(), json!(locked));
+                mark_changed(element);
+                changed = true;
+            }
+            if changed {
+                if locked {
+                    self.clear_selection();
+                }
+                self.changed();
+            }
+            return changed;
+        }
+
         let Some(index) = self.selected else {
             return false;
         };
@@ -214,7 +328,7 @@ impl DrawingCanvasState {
         element.extra.insert("locked".to_owned(), json!(locked));
         mark_changed(element);
         if locked {
-            self.selected = None;
+            self.clear_selection();
         }
         self.changed();
         true
@@ -237,7 +351,7 @@ impl DrawingCanvasState {
     }
 
     pub fn cancel_interaction(&mut self) {
-        self.selected = None;
+        self.clear_selection();
         self.interaction = Interaction::None;
         self.set_active_tool_label("Selection");
         self.changed();
@@ -304,18 +418,31 @@ impl DrawingCanvasState {
                 };
             }
             "selection" => {
-                self.selected = self.hit_test(world);
-                self.interaction = match self.selected {
-                    Some(index) => {
+                if let Some(index) = self.hit_test(world) {
+                    let id = self.document.elements[index].id.clone();
+                    if self.selection.len() > 1 && self.selection.contains(&id) {
+                        self.selected = None;
+                        self.interaction = Interaction::MoveSelection {
+                            last_world: world,
+                            checkpointed: false,
+                        };
+                    } else {
+                        self.selection = SelectionSet::from_ids(std::iter::once(id));
+                        self.selected = Some(index);
                         let element = &self.document.elements[index];
-                        Interaction::MoveElement {
+                        self.interaction = Interaction::MoveElement {
                             index,
                             offset: [world[0] - element.x, world[1] - element.y],
                             checkpointed: false,
-                        }
+                        };
                     }
-                    None => Interaction::None,
-                };
+                } else {
+                    self.clear_selection();
+                    self.interaction = Interaction::BoxSelect {
+                        start_world: world,
+                        current_world: world,
+                    };
+                }
             }
             "eraser" => {
                 let changed = self.erase_world(world, false);
@@ -351,6 +478,43 @@ impl DrawingCanvasState {
                     self.changed();
                 }
             }
+            Interaction::MoveSelection {
+                last_world,
+                checkpointed,
+            } => {
+                let world = self.to_world(point);
+                let delta = [world[0] - last_world[0], world[1] - last_world[1]];
+                if delta == [0.0, 0.0] {
+                    return;
+                }
+                if !checkpointed {
+                    self.checkpoint();
+                }
+                let selection = self.selection.clone();
+                let changed = self.document.translate_selection(&selection, delta);
+                self.interaction = Interaction::MoveSelection {
+                    last_world: world,
+                    checkpointed: checkpointed || changed > 0,
+                };
+                if changed > 0 {
+                    self.changed();
+                }
+            }
+            Interaction::BoxSelect {
+                start_world,
+                current_world: _,
+            } => {
+                let world = self.to_world(point);
+                self.selection =
+                    self.document
+                        .select_in_rect(start_world, world, SelectionMode::Contained);
+                self.selected = None;
+                self.interaction = Interaction::BoxSelect {
+                    start_world,
+                    current_world: world,
+                };
+                self.changed();
+            }
             Interaction::Pan {
                 start_pointer,
                 start_pan,
@@ -375,6 +539,9 @@ impl DrawingCanvasState {
     }
 
     pub(crate) fn end_pointer(&mut self) {
+        if matches!(self.interaction, Interaction::BoxSelect { .. }) {
+            self.sync_primary_from_selection();
+        }
         self.interaction = Interaction::None;
     }
 
@@ -410,6 +577,9 @@ impl DrawingCanvasState {
     }
 
     fn reorder_selection(&mut self, direction: Reorder) -> bool {
+        if self.selection.len() > 1 {
+            return false;
+        }
         let Some(index) = self.selected else {
             return false;
         };
@@ -447,15 +617,18 @@ impl DrawingCanvasState {
         if !checkpointed {
             self.checkpoint();
         }
+        let id = self.document.elements[index].id.clone();
         let element = &mut self.document.elements[index];
         if element.is_deleted || is_locked(element) {
             return false;
         }
         element.is_deleted = true;
         mark_changed(element);
+        self.selection.remove(&id);
         if self.selected == Some(index) {
             self.selected = None;
         }
+        self.sync_primary_from_selection();
         self.changed();
         true
     }
@@ -472,6 +645,22 @@ impl DrawingCanvasState {
             .map(|(index, _)| index)
     }
 
+    fn clear_selection(&mut self) {
+        self.selected = None;
+        self.selection.clear();
+    }
+
+    fn sync_primary_from_selection(&mut self) {
+        self.selected = if self.selection.len() == 1 {
+            self.selection
+                .ids()
+                .next()
+                .and_then(|id| self.document.element_index(id))
+        } else {
+            None
+        };
+    }
+
     fn changed(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
@@ -483,6 +672,17 @@ enum Reorder {
     Back,
     Forward,
     Backward,
+}
+
+fn normalized_bounds(start: [f32; 2], end: [f32; 2]) -> (f32, f32, f32, f32) {
+    let min_x = start[0].min(end[0]);
+    let min_y = start[1].min(end[1]);
+    (
+        min_x,
+        min_y,
+        start[0].max(end[0]) - min_x,
+        start[1].max(end[1]) - min_y,
+    )
 }
 
 fn is_locked(element: &DrawingElement) -> bool {
