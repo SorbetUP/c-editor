@@ -1,0 +1,129 @@
+name: Freya Draw toolbar autofix
+
+on:
+  push:
+    branches:
+      - nsb/freya-native-migration
+    paths:
+      - ".github/workflows/freya-draw-toolbar-autofix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: freya-draw-toolbar-autofix
+  cancel-in-progress: false
+
+jobs:
+  patch-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Freya migration branch
+        uses: actions/checkout@v5
+        with:
+          ref: nsb/freya-native-migration
+          fetch-depth: 0
+
+      - name: Fast-forward to current branch head
+        run: git pull --ff-only origin nsb/freya-native-migration
+
+      - name: Expose Frame in the real Elephant Draw toolbar
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if new in text:
+                  return text
+              if old not in text:
+                  raise SystemExit(f'{label}: expected anchor not found')
+              return text.replace(old, new, 1)
+
+          drawing = Path('Elephant/freya/src/app/drawing.rs')
+          text = drawing.read_text()
+          text = replace_once(text,
+              '    Image,\n    Eraser,\n}',
+              '    Image,\n    Frame,\n    Eraser,\n}',
+              'toolbar enum')
+          text = replace_once(text,
+              '    const ALL: [Self; 11] = [',
+              '    const ALL: [Self; 12] = [',
+              'toolbar count')
+          text = replace_once(text,
+              '        Self::Image,\n        Self::Eraser,',
+              '        Self::Image,\n        Self::Frame,\n        Self::Eraser,',
+              'toolbar list')
+          text = replace_once(text,
+              '            Self::Image => "Image",\n            Self::Eraser => "Eraser",',
+              '            Self::Image => "Image",\n            Self::Frame => "Frame",\n            Self::Eraser => "Eraser",',
+              'toolbar label')
+          text = replace_once(text,
+              '            Self::Image => "9",\n            Self::Eraser => "0",',
+              '            Self::Image => "9",\n            Self::Frame => "F",\n            Self::Eraser => "0",',
+              'toolbar shortcut')
+          image_icon = '''            Self::Image => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>"#,
+            Self::Eraser =>'''
+          frame_icon = '''            Self::Image => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>"#,
+            Self::Frame => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"/><path d="M8 4v16M16 4v16"/></svg>"#,
+            Self::Eraser =>'''
+          text = replace_once(text, image_icon, frame_icon, 'frame icon')
+          if 'fn main_toolbar_exposes_frame_tool()' not in text:
+              text += '''
+
+#[cfg(test)]
+mod drawing_toolbar_tests {
+    use super::DrawingTool;
+
+    #[test]
+    fn main_toolbar_exposes_frame_tool() {
+        assert!(DrawingTool::ALL.contains(&DrawingTool::Frame));
+        assert_eq!(DrawingTool::Frame.label(), "Frame");
+        assert_eq!(DrawingTool::Frame.shortcut(), "F");
+    }
+}
+'''
+          drawing.write_text(text)
+
+          scene = Path('Elephant/freya/src/app/drawing_scene.rs')
+          text = scene.read_text()
+          text = replace_once(text,
+              '            "Image" => "image",\n            "Eraser" => "eraser",',
+              '            "Image" => "image",\n            "Frame" => "frame",\n            "Eraser" => "eraser",',
+              'Frame state mapping')
+          scene.write_text(text)
+          PY
+
+      - name: Format touched Rust
+        run: cargo fmt --manifest-path Elephant/freya/Cargo.toml -- Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_scene.rs
+
+      - name: Check native Freya Draw
+        run: cargo check --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Test native Draw frame and renderer contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path Elephant/freya/Cargo.toml main_toolbar_exposes_frame_tool -- --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
+
+      - name: Commit verified toolbar fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_scene.rs
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'Toolbar already synchronized.'
+            exit 0
+          fi
+          git commit -m 'fix(freya-draw): expose native Excalidraw frame tool'
+          git fetch origin nsb/freya-native-migration
+          git rebase origin/nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration
