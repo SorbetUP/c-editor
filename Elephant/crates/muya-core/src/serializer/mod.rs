@@ -4,11 +4,29 @@ use crate::model::{
 };
 
 pub fn to_markdown(document: &Document) -> String {
-  let mut blocks = Vec::new();
-  for node in document.children(document.root) {
-    blocks.push(serialize_block(document, node));
+  let blocks = document.children(document.root).collect::<Vec<_>>();
+  let mut output = String::new();
+  for (index, node) in blocks.iter().enumerate() {
+    if index > 0 {
+      output.push_str(block_separator(blocks[index - 1], node));
+    }
+    output.push_str(&serialize_block(document, node));
   }
-  blocks.join("\n\n")
+  output
+}
+
+fn block_separator(previous: &Node, current: &Node) -> &'static str {
+  if matches!(
+    (&previous.kind, &current.kind),
+    (
+      NodeKind::Block(BlockKind::ReferenceDefinition { .. }),
+      NodeKind::Block(BlockKind::ReferenceDefinition { .. })
+    )
+  ) {
+    "\n"
+  } else {
+    "\n\n"
+  }
 }
 
 fn serialize_block(document: &Document, node: &Node) -> String {
@@ -22,17 +40,22 @@ fn serialize_block(document: &Document, node: &Node) -> String {
       )
     }
     NodeKind::Block(BlockKind::ThematicBreak) => "---".to_string(),
-    NodeKind::Block(BlockKind::BlockQuote) => serialize_inlines(document, node)
-      .lines()
-      .map(|line| format!("> {line}"))
-      .collect::<Vec<_>>()
-      .join("\n"),
-    NodeKind::Block(BlockKind::CodeBlock { language, .. }) => {
-      format!(
-        "```{}\n{}\n```",
-        language.as_deref().unwrap_or(""),
-        serialize_inlines(document, node)
-      )
+    NodeKind::Block(BlockKind::BlockQuote) => serialize_blockquote(document, node),
+    NodeKind::Block(BlockKind::CodeBlock { language, fenced }) => {
+      let content = serialize_inlines(document, node);
+      if *fenced {
+        format!(
+          "```{}\n{}\n```",
+          language.as_deref().unwrap_or(""),
+          content
+        )
+      } else {
+        content
+          .split('\n')
+          .map(|line| format!("    {line}"))
+          .collect::<Vec<_>>()
+          .join("\n")
+      }
     }
     NodeKind::Block(BlockKind::FrontMatter { style }) => {
       let (opening, closing) = style.delimiters();
@@ -65,6 +88,33 @@ fn serialize_block(document: &Document, node: &Node) -> String {
   }
 }
 
+fn serialize_blockquote(document: &Document, quote: &Node) -> String {
+  let children = document.children(quote.id).collect::<Vec<_>>();
+  let content = if children
+    .iter()
+    .any(|child| matches!(child.kind, NodeKind::Block(_)))
+  {
+    children
+      .into_iter()
+      .map(|child| serialize_block(document, child))
+      .collect::<Vec<_>>()
+      .join("\n\n")
+  } else {
+    serialize_inlines(document, quote)
+  };
+  content
+    .lines()
+    .map(|line| {
+      if line.is_empty() {
+        ">".to_string()
+      } else {
+        format!("> {line}")
+      }
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
 fn serialize_footnote_definition(label: &str, body: &str) -> String {
   let mut lines = body.lines();
   let first = lines.next().unwrap_or_default();
@@ -93,11 +143,6 @@ fn serialize_list_item(
   index: usize,
 ) -> String {
   let children = document.children(item.id).collect::<Vec<_>>();
-  let content = children
-    .first()
-    .filter(|child| matches!(child.kind, NodeKind::Block(BlockKind::Paragraph)))
-    .map(|paragraph| serialize_inlines(document, paragraph))
-    .unwrap_or_default();
   let marker = match kind {
     ListKind::Unordered => "-".to_string(),
     ListKind::Ordered => format!("{}.", start.unwrap_or(1) + index as u64),
@@ -112,9 +157,17 @@ fn serialize_list_item(
     }
   };
 
-  let mut lines = vec![format!("{marker} {content}")];
-  for child in children.into_iter().skip(1) {
-    if matches!(child.kind, NodeKind::Block(BlockKind::CodeBlock { .. })) {
+  let (mut lines, remaining) = match children.first() {
+    Some(first) if matches!(first.kind, NodeKind::Block(BlockKind::Paragraph)) => (
+      vec![format!("{marker} {}", serialize_inlines(document, first))],
+      &children[1..],
+    ),
+    _ => (vec![marker], children.as_slice()),
+  };
+
+  for child in remaining {
+    let nested_list = matches!(child.kind, NodeKind::Block(BlockKind::List { .. }));
+    if !nested_list {
       lines.push("  ".to_string());
     }
     let nested = serialize_block(document, child);
@@ -410,6 +463,15 @@ mod tests {
     let markdown = "- parent\n  - child\n    3. grandchild\n- sibling";
     let document = parse_markdown(markdown);
     assert_eq!(to_markdown(&document), markdown);
+  }
+
+  #[test]
+  fn round_trips_structured_blockquote_and_indented_code() {
+    let quote = "> # Heading\n>\n> - item\n>   - nested";
+    assert_eq!(to_markdown(&parse_markdown(quote)), quote);
+
+    let indented = "    alpha\n    beta";
+    assert_eq!(to_markdown(&parse_markdown(indented)), indented);
   }
 
   #[test]
