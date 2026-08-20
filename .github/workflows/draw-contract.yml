@@ -13,6 +13,7 @@ on:
       - ".github/scripts/sync_freya_draw_transform.py"
       - ".github/scripts/sync_freya_draw_clipboard.py"
       - ".github/scripts/sync_freya_draw_library.py"
+      - ".github/scripts/sync_freya_draw_bindings.py"
       - ".github/workflows/draw-contract.yml"
   pull_request:
     paths:
@@ -24,6 +25,7 @@ on:
       - ".github/scripts/sync_freya_draw_transform.py"
       - ".github/scripts/sync_freya_draw_clipboard.py"
       - ".github/scripts/sync_freya_draw_library.py"
+      - ".github/scripts/sync_freya_draw_bindings.py"
       - ".github/workflows/draw-contract.yml"
   workflow_dispatch:
 
@@ -63,6 +65,7 @@ jobs:
           python3 .github/scripts/sync_freya_draw_transform.py
           python3 .github/scripts/sync_freya_draw_clipboard.py
           python3 .github/scripts/sync_freya_draw_library.py
+          python3 .github/scripts/sync_freya_draw_bindings.py
           rustfmt --edition 2021 \
             Elephant/freya/src/app/drawing.rs \
             Elephant/freya/src/app/drawing_canvas.rs \
@@ -102,6 +105,8 @@ jobs:
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_lasso_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_transform_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_transform_handles_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_binding_freya_testing -- --test-threads=1 --nocapture
 
       - name: Commit verified native Draw synchronization
         if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
