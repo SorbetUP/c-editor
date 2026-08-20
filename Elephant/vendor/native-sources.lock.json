@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "dependencies": {
+    "Draw": {
+      "repository": "SorbetUP/Draw",
+      "commit": "81992ff1287c5dfcc502bf9051eb0fd0eb203af3",
+      "mode": "exact-source-snapshot"
+    },
+    "Note": {
+      "repository": "SorbetUP/Note",
+      "commit": "99c5222fe145a3ecfec743296437b04e0ed76c89",
+      "mode": "source-snapshot-with-integration-manifest",
+      "note": "The upstream workspace/dev-only muya-core dependency is intentionally omitted; Elephant uses its own pinned ../crates/muya-core for the editor runtime."
+    }
+  }
+}

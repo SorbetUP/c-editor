@@ -12,8 +12,8 @@ path = "src/lib.rs"
 [dependencies]
 bytes = "1"
 elephantnote-knowledge-core = { path = "../backend/knowledge-core" }
-elephant-draw = { path = "../feature-incoming/Draw" }
-elephant-note = { path = "../feature-incoming/Note" }
+elephant-draw = { path = "../vendor/Draw" }
+elephant-note = { path = "../vendor/Note" }
 freya = { version = "0.4.1", features = ["sdk"] }
 futures-timer = "3"
 muya-core = { path = "../crates/muya-core" }
