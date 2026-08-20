@@ -3,6 +3,7 @@ mod binding;
 mod document;
 mod factory;
 mod fractional_index;
+mod frame;
 mod geometry;
 mod history;
 mod normalize;
