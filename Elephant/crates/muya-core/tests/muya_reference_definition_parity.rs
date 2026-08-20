@@ -1,4 +1,7 @@
-use muya_core::{model::{BlockKind, NodeKind}, EditorSession};
+use muya_core::{
+    model::{BlockKind, NodeKind},
+    EditorSession,
+};
 
 #[test]
 fn consecutive_tauri_reference_definitions_stay_independent_and_round_trip() {
@@ -18,10 +21,7 @@ fn consecutive_tauri_reference_definitions_stay_independent_and_round_trip() {
         &blocks[1].kind,
         NodeKind::Block(BlockKind::ReferenceDefinition { label }) if label == "two"
     ));
-    assert_eq!(
-        session.snapshot().markdown,
-        "[one]: https://one.example\n\n[two]: <https://two.example> \"Two\""
-    );
+    assert_eq!(session.snapshot().markdown, markdown);
 }
 
 #[test]
