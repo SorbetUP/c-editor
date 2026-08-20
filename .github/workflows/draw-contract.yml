@@ -8,14 +8,14 @@ on:
       - "Elephant/crates/draw-contract/**"
       - "Elephant/freya/src/app/drawing_*.rs"
       - "Elephant/freya/tests/drawing_*.rs"
-      - ".github/scripts/sync_freya_draw_tools.py"
+      - ".github/scripts/sync_freya_draw_lasso.py"
       - ".github/workflows/draw-contract.yml"
   pull_request:
     paths:
       - "Elephant/crates/draw-contract/**"
       - "Elephant/freya/src/app/drawing_*.rs"
       - "Elephant/freya/tests/drawing_*.rs"
-      - ".github/scripts/sync_freya_draw_tools.py"
+      - ".github/scripts/sync_freya_draw_lasso.py"
       - ".github/workflows/draw-contract.yml"
   workflow_dispatch:
 
@@ -43,14 +43,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Synchronize native Draw tools in workspace
+      - name: Synchronize native Lasso in workspace
         shell: bash
         run: |
           set -euo pipefail
           if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
             git pull --ff-only origin nsb/freya-native-migration
           fi
-          python3 .github/scripts/sync_freya_draw_tools.py
+          python3 .github/scripts/sync_freya_draw_lasso.py
           rustfmt --edition 2021 \
             Elephant/freya/src/app/drawing.rs \
             Elephant/freya/src/app/drawing_canvas.rs \
@@ -81,14 +81,14 @@ jobs:
 
       - name: Verify native Draw toolbar and graphics
         run: |
-          cargo test --manifest-path Elephant/freya/Cargo.toml drawing_toolbar_tests -- --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml drawing_toolbar_lasso_tests -- --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_hierarchy_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_lasso_freya_testing -- --test-threads=1 --nocapture
 
-      - name: Commit verified native Draw tool synchronization
+      - name: Commit verified native Lasso synchronization
         if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
         shell: bash
         run: |
@@ -103,10 +103,10 @@ jobs:
             Elephant/freya/src/app/drawing_render_svg.rs
           git diff --cached --check
           if git diff --cached --quiet; then
-            echo 'Native Draw tools already synchronized.'
+            echo 'Native Lasso already synchronized.'
             exit 0
           fi
-          git commit -m 'feat(freya-draw): expose native Excalidraw Frame and Lasso tools'
+          git commit -m 'feat(freya-draw): expose native Excalidraw Lasso tool'
           git fetch origin nsb/freya-native-migration
           git rebase origin/nsb/freya-native-migration
           git push origin HEAD:nsb/freya-native-migration
