@@ -103,15 +103,17 @@ fn atomic_muya_nodes_do_not_break_freya_text_mapping_or_save() {
 
     click_paragraph_edge(&mut runner, false);
     runner.write_text("!");
+    runner.sync_and_update();
     assert!(paragraph_text(&runner).ends_with("after!"));
 
     click_paragraph_edge(&mut runner, true);
     runner.write_text("START ");
+    runner.sync_and_update();
     assert!(paragraph_text(&runner).starts_with("START before"));
 
-    click_label(&mut runner, "Save note");
+    click_label(&mut runner, "Save");
     runner.sync_and_update();
-    let saved = fs::read_to_string(note_path).expect("save must write real fixture file");
+    let saved = fs::read_to_string(note_path).expect("Save must write real fixture file");
     assert!(saved.starts_with("START before"), "saved Markdown: {saved:?}");
     assert!(saved.ends_with("after!"), "saved Markdown: {saved:?}");
     assert!(saved.contains(":grinning:"), "emoji shortcode must survive save: {saved:?}");
