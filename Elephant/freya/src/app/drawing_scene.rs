@@ -1,4 +1,4 @@
-pub use elephant_draw::{rgba, DrawingElement, DrawingScene, Viewport};
+pub use elephant_draw::{rgba, DrawingElement, DrawingScene, HistoryState, Viewport};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RenderableElement {
@@ -15,10 +15,14 @@ enum Interaction {
     MoveElement {
         index: usize,
         offset: [f32; 2],
+        checkpointed: bool,
     },
     Pan {
         start_pointer: [f32; 2],
         start_pan: [f32; 2],
+    },
+    Erase {
+        checkpointed: bool,
     },
 }
 
@@ -29,6 +33,7 @@ pub struct DrawingCanvasState {
     pub active_tool: String,
     selected: Option<usize>,
     interaction: Interaction,
+    history: HistoryState,
     pub revision: u64,
 }
 
@@ -49,6 +54,7 @@ impl DrawingCanvasState {
             active_tool: "selection".to_owned(),
             selected: None,
             interaction: Interaction::None,
+            history: HistoryState::default(),
             revision: 0,
         }
     }
@@ -82,7 +88,78 @@ impl DrawingCanvasState {
     pub fn selected_element_id(&self) -> Option<&str> {
         self.selected
             .and_then(|index| self.document.elements.get(index))
+            .filter(|element| !element.is_deleted)
             .map(|element| element.id.as_str())
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    pub fn undo(&mut self) -> bool {
+        let Some(document) = self.history.undo(self.document.clone()) else {
+            return false;
+        };
+        self.document = document;
+        self.selected = None;
+        self.interaction = Interaction::None;
+        self.revision = self.revision.wrapping_add(1);
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(document) = self.history.redo(self.document.clone()) else {
+            return false;
+        };
+        self.document = document;
+        self.selected = None;
+        self.interaction = Interaction::None;
+        self.revision = self.revision.wrapping_add(1);
+        true
+    }
+
+    pub fn delete_selection(&mut self) -> bool {
+        let Some(index) = self.selected else {
+            return false;
+        };
+        if self
+            .document
+            .elements
+            .get(index)
+            .is_none_or(|element| element.is_deleted)
+        {
+            return false;
+        }
+        self.checkpoint();
+        let element = &mut self.document.elements[index];
+        element.is_deleted = true;
+        self.selected = None;
+        self.interaction = Interaction::None;
+        self.revision = self.revision.wrapping_add(1);
+        true
+    }
+
+    pub fn cancel_interaction(&mut self) {
+        self.selected = None;
+        self.interaction = Interaction::None;
+        self.set_active_tool_label("Selection");
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub fn set_zoom(&mut self, zoom: f32) {
+        if !zoom.is_finite() || zoom <= 0.0 {
+            return;
+        }
+        self.viewport.zoom = zoom.clamp(elephant_draw::MIN_ZOOM, elephant_draw::MAX_ZOOM);
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub(crate) fn checkpoint(&mut self) {
+        self.history.push(self.document.clone());
     }
 
     pub fn renderable_elements(&self) -> Vec<RenderableElement> {
@@ -118,9 +195,16 @@ impl DrawingCanvasState {
                         Interaction::MoveElement {
                             index,
                             offset: [world[0] - element.x, world[1] - element.y],
+                            checkpointed: false,
                         }
                     }
                     None => Interaction::None,
+                };
+            }
+            "eraser" => {
+                let changed = self.erase_world(world, false);
+                self.interaction = Interaction::Erase {
+                    checkpointed: changed,
                 };
             }
             _ => {
@@ -132,8 +216,20 @@ impl DrawingCanvasState {
     pub(crate) fn move_pointer(&mut self, point: [f32; 2]) {
         let interaction = self.interaction.clone();
         match interaction {
-            Interaction::MoveElement { index, offset } => {
+            Interaction::MoveElement {
+                index,
+                offset,
+                checkpointed,
+            } => {
                 let world = self.to_world(point);
+                if !checkpointed {
+                    self.checkpoint();
+                    self.interaction = Interaction::MoveElement {
+                        index,
+                        offset,
+                        checkpointed: true,
+                    };
+                }
                 if let Some(element) = self.document.elements.get_mut(index) {
                     element.x = world[0] - offset[0];
                     element.y = world[1] - offset[1];
@@ -150,22 +246,16 @@ impl DrawingCanvasState {
                 ];
                 self.revision = self.revision.wrapping_add(1);
             }
-            Interaction::None => {}
-        }
-    }
-
-    pub(crate) fn erase_at(&mut self, point: [f32; 2]) -> bool {
-        let world = self.to_world(point);
-        if let Some(index) = self.hit_test(world) {
-            if let Some(element) = self.document.elements.get_mut(index) {
-                if !element.is_deleted {
-                    element.is_deleted = true;
-                    self.revision = self.revision.wrapping_add(1);
-                    return true;
+            Interaction::Erase { checkpointed } => {
+                let changed = self.erase_world(self.to_world(point), checkpointed);
+                if changed && !checkpointed {
+                    self.interaction = Interaction::Erase {
+                        checkpointed: true,
+                    };
                 }
             }
+            Interaction::None => {}
         }
-        false
     }
 
     pub(crate) fn end_pointer(&mut self) {
@@ -180,6 +270,25 @@ impl DrawingCanvasState {
 
     pub(crate) fn to_world(&self, point: [f32; 2]) -> [f32; 2] {
         self.viewport.to_world(point)
+    }
+
+    fn erase_world(&mut self, world: [f32; 2], checkpointed: bool) -> bool {
+        let Some(index) = self.hit_test(world) else {
+            return false;
+        };
+        if !checkpointed {
+            self.checkpoint();
+        }
+        let element = &mut self.document.elements[index];
+        if element.is_deleted {
+            return false;
+        }
+        element.is_deleted = true;
+        if self.selected == Some(index) {
+            self.selected = None;
+        }
+        self.revision = self.revision.wrapping_add(1);
+        true
     }
 
     fn hit_test(&self, point: [f32; 2]) -> Option<usize> {
