@@ -5,6 +5,7 @@ fn element_factory_keeps_excalidraw_reconciliation_metadata() {
     let rectangle = create_element(DrawingTool::Rectangle, [12.0, 34.0], "rect-1");
     assert_eq!(rectangle.kind, "rectangle");
     assert_eq!((rectangle.x, rectangle.y), (12.0, 34.0));
+    assert_eq!(rectangle.stroke_color, "#1e1e1e");
     for key in [
         "roughness",
         "seed",
@@ -31,14 +32,57 @@ fn specialized_factory_fields_match_draw() {
             .and_then(|value| value.as_str()),
         Some("")
     );
+
     let image = create_element(DrawingTool::Image, [0.0, 0.0], "image-1");
+    assert_eq!(image.stroke_color, "transparent");
     assert_eq!(
         image.extra.get("status").and_then(|value| value.as_str()),
         Some("pending")
     );
     assert!(image.extra.contains_key("fileId"));
-    assert!(image.extra.contains_key("scale"));
-    assert!(image.extra.contains_key("crop"));
+    assert_eq!(image.extra.get("scale"), Some(&serde_json::json!([1, 1])));
+    assert_eq!(image.extra.get("crop"), Some(&serde_json::Value::Null));
+
+    let freedraw = create_element(DrawingTool::Freehand, [0.0, 0.0], "free-1");
+    assert_eq!(freedraw.extra.get("pressures"), Some(&serde_json::json!([])));
+    assert_eq!(
+        freedraw
+            .extra
+            .get("simulatePressure")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        freedraw.extra.get("strokeOptions"),
+        Some(&serde_json::json!({"variability": "variable", "streamline": 0.5}))
+    );
+
+    let line = create_element(DrawingTool::Line, [0.0, 0.0], "line-1");
+    assert_eq!(line.extra.get("polygon"), Some(&serde_json::json!(false)));
+    assert_eq!(line.extra.get("startBinding"), Some(&serde_json::Value::Null));
+    assert_eq!(line.extra.get("endBinding"), Some(&serde_json::Value::Null));
+
+    let arrow = create_element(DrawingTool::Arrow, [0.0, 0.0], "arrow-1");
+    assert_eq!(arrow.extra.get("elbowed"), Some(&serde_json::json!(false)));
+    assert_eq!(arrow.end_arrowhead.as_deref(), Some("arrow"));
+
+    let frame = create_element(DrawingTool::Frame, [0.0, 0.0], "frame-1");
+    assert_eq!(frame.stroke_color, "#bbb");
+    assert_eq!(frame.extra.get("name"), Some(&serde_json::Value::Null));
+    assert_eq!(frame.extra.get("roughness"), Some(&serde_json::json!(0)));
+}
+
+#[test]
+fn missing_fields_restore_with_the_same_defaults_as_draw() {
+    let raw = r#"{"type":"excalidraw","elements":[{"id":"r","type":"rectangle","x":0,"y":0,"width":10,"height":10}],"files":{}}"#;
+    let scene = DrawingScene::from_json(raw).expect("scene");
+    let element = &scene.elements[0];
+    assert_eq!(element.stroke_color, "#1e1e1e");
+    assert_eq!(element.background_color, "transparent");
+    assert_eq!(element.stroke_width, 2.0);
+    assert_eq!(element.stroke_style, "solid");
+    assert_eq!(element.fill_style, "solid");
+    assert_eq!(element.font_size, 20.0);
 }
 
 #[test]
