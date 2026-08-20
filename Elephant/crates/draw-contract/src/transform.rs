@@ -9,10 +9,9 @@ pub struct TransformOutcome {
 }
 
 impl DrawingScene {
-    /// Scale a selection around a world-space anchor. Frame children are part
-    /// of the transform when their frame is selected, matching native frame
-    /// movement semantics. Scale factors must stay positive; flip metadata is
-    /// intentionally handled separately by Excalidraw image/element scale.
+    /// Scale exactly the selected elements around a world-space anchor.
+    /// Excalidraw frame children are not implicitly resized when a frame alone
+    /// is resized; they remain independent scene elements clipped by the frame.
     pub fn scale_selection(
         &mut self,
         selection: &SelectionSet,
@@ -27,7 +26,7 @@ impl DrawingScene {
         {
             return TransformOutcome::default();
         }
-        let ids = expanded_transform_ids(self, selection);
+        let ids = selected_ids(selection);
         if ids.is_empty() {
             return TransformOutcome::default();
         }
@@ -46,6 +45,8 @@ impl DrawingScene {
         }
     }
 
+    /// Rotate selected non-frame elements around their common selection center.
+    /// Current Excalidraw frames and magic frames never rotate.
     pub fn rotate_selection(
         &mut self,
         selection: &SelectionSet,
@@ -54,14 +55,18 @@ impl DrawingScene {
         if selection.is_empty() || !angle_delta.is_finite() || angle_delta.abs() <= f32::EPSILON {
             return TransformOutcome::default();
         }
-        let ids = expanded_transform_ids(self, selection);
+        let ids = selected_ids(selection);
         let Some((x, y, width, height)) = bounds_for_ids(self, &ids) else {
             return TransformOutcome::default();
         };
         let center = [x + width / 2.0, y + height / 2.0];
         let mut changed = 0;
         for element in &mut self.elements {
-            if !ids.contains(&element.id) || element.is_deleted || element.is_locked() {
+            if !ids.contains(&element.id)
+                || element.is_deleted
+                || element.is_locked()
+                || matches!(element.kind.as_str(), "frame" | "magicframe")
+            {
                 continue;
             }
             let (ex, ey, ew, eh) = element.bounds();
@@ -80,29 +85,8 @@ impl DrawingScene {
     }
 }
 
-fn expanded_transform_ids(scene: &DrawingScene, selection: &SelectionSet) -> HashSet<String> {
-    let mut ids = selection.ids().map(str::to_owned).collect::<HashSet<_>>();
-    let selected_frames = scene
-        .elements
-        .iter()
-        .filter(|element| {
-            ids.contains(&element.id)
-                && !element.is_deleted
-                && matches!(element.kind.as_str(), "frame" | "magicframe")
-        })
-        .map(|element| element.id.clone())
-        .collect::<HashSet<_>>();
-    for element in &scene.elements {
-        if element
-            .extra
-            .get("frameId")
-            .and_then(Value::as_str)
-            .is_some_and(|frame_id| selected_frames.contains(frame_id))
-        {
-            ids.insert(element.id.clone());
-        }
-    }
-    ids
+fn selected_ids(selection: &SelectionSet) -> HashSet<String> {
+    selection.ids().map(str::to_owned).collect()
 }
 
 fn scale_element(element: &mut DrawingElement, anchor: [f32; 2], scale: [f32; 2]) {
