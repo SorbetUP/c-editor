@@ -19,6 +19,7 @@ on:
       - ".github/scripts/sync_freya_draw_links.py"
       - ".github/scripts/sync_freya_draw_crop.py"
       - ".github/scripts/sync_freya_draw_bindings.py"
+      - ".github/scripts/sync_freya_draw_more_tools.py"
       - ".github/scripts/sync_freya_rough.py"
       - ".github/workflows/draw-contract.yml"
   pull_request:
@@ -37,6 +38,7 @@ on:
       - ".github/scripts/sync_freya_draw_links.py"
       - ".github/scripts/sync_freya_draw_crop.py"
       - ".github/scripts/sync_freya_draw_bindings.py"
+      - ".github/scripts/sync_freya_draw_more_tools.py"
       - ".github/scripts/sync_freya_rough.py"
       - ".github/workflows/draw-contract.yml"
   workflow_dispatch:
@@ -83,6 +85,7 @@ jobs:
           python3 .github/scripts/sync_freya_draw_links.py
           python3 .github/scripts/sync_freya_draw_crop.py
           python3 .github/scripts/sync_freya_draw_bindings.py
+          python3 .github/scripts/sync_freya_draw_more_tools.py
           python3 .github/scripts/sync_freya_rough.py
           rustfmt --edition 2021 \
             Elephant/freya/src/app/drawing.rs \
