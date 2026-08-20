@@ -4,9 +4,15 @@ on:
   push:
     branches:
       - 'refactor/muya-rust-file-by-file'
+      - 'nsb/freya-native-migration'
   pull_request:
     paths:
       - 'Elephant/crates/muya-core/**'
+      - 'Elephant/crates/note-contract/**'
+      - 'Elephant/freya/src/editor.rs'
+      - 'Elephant/freya/src/app/editor_*.rs'
+      - 'Elephant/freya/tests/editor_*.rs'
+      - 'Elephant/freya/tests/muya_note_lifecycle_freya_testing.rs'
       - 'Elephant/backend/tauri/src/muya_engine/**'
       - 'Elephant/backend/tauri/src/markdown/mod.rs'
       - 'Elephant/backend/tauri/Cargo.toml'
@@ -16,23 +22,47 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: muya-rust-parity-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust-unit-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: '1.91.0'
+
+      - name: Install Freya Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             Elephant/crates/muya-core
+            Elephant/freya
             Elephant/backend/tauri
-      - name: Test standalone Muya core
-        run: cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml
-      - name: Test legacy parity staging modules
+
+      - name: Test standalone Muya core mirror
+        run: cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets
+
+      - name: Test Freya editor adapter parity
         run: |
-          cargo test --manifest-path Elephant/backend/tauri/Cargo.toml muya_engine::
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_toolbar_parity -- --test-threads=1
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_keyboard_freya_testing -- --test-threads=1
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_undo_redo_freya_testing -- --test-threads=1
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_rich_interactions_freya_testing -- --test-threads=1
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test muya_note_lifecycle_freya_testing -- --test-threads=1
+
+      - name: Test legacy parity staging modules
+        run: cargo test --manifest-path Elephant/backend/tauri/Cargo.toml muya_engine::
+
       - name: Check Tauri integration
         run: cargo check --manifest-path Elephant/backend/tauri/Cargo.toml --all-targets --no-default-features
