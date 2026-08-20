@@ -1,5 +1,6 @@
 mod arrow;
 mod binding;
+mod clipboard;
 mod delete;
 mod document;
 mod duplicate;
@@ -16,6 +17,7 @@ mod tool;
 
 pub use arrow::{Arrowhead, ArrowheadPrimitive};
 pub use binding::ArrowEndpoint;
+pub use clipboard::SceneFragment;
 pub use delete::DeleteSelectionOutcome;
 pub use document::{DrawingElement, DrawingScene, SceneError};
 pub use duplicate::DuplicateSelectionOutcome;
