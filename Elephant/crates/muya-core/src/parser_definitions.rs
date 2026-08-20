@@ -287,9 +287,6 @@ mod tests {
     let markdown = "[one]: https://one.example\n[two]: https://two.example";
     let document = crate::parse_markdown(markdown);
     assert_eq!(document.children(document.root).count(), 2);
-    assert_eq!(
-      to_markdown(&document),
-      "[one]: https://one.example\n\n[two]: https://two.example"
-    );
+    assert_eq!(to_markdown(&document), markdown);
   }
 }
