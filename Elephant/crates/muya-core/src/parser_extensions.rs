@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::model::{
-  BlockKind, Document, InlineKind, Node, NodeId, NodeKind, ReferenceStyle, SourceRange,
+  BlockKind, Document, InlineKind, InlineSyntax, Node, NodeId, NodeKind, ReferenceStyle, SourceRange,
 };
 use crate::syntax::inline::{emoji, extended};
 
@@ -16,10 +16,44 @@ enum PieceKind {
   Text(String),
   Wrapper {
     kind: InlineKind,
+    syntax: Option<InlineSyntax>,
     content: String,
     child_source: Option<(usize, usize)>,
     parse_content: bool,
   },
+}
+
+impl PieceKind {
+  fn wrapper(
+    kind: InlineKind,
+    content: String,
+    child_source: Option<(usize, usize)>,
+    parse_content: bool,
+  ) -> Self {
+    Self::Wrapper {
+      kind,
+      syntax: None,
+      content,
+      child_source,
+      parse_content,
+    }
+  }
+
+  fn wrapper_with_syntax(
+    kind: InlineKind,
+    syntax: InlineSyntax,
+    content: String,
+    child_source: Option<(usize, usize)>,
+    parse_content: bool,
+  ) -> Self {
+    Self::Wrapper {
+      kind,
+      syntax: Some(syntax),
+      content,
+      child_source,
+      parse_content,
+    }
+  }
 }
 
 #[derive(Debug)]
@@ -78,12 +112,16 @@ fn seed_atomic_payload_child(document: &mut Document, node_id: NodeId) {
     if !node.children.is_empty() {
       return None;
     }
-    match &node.kind {
-      NodeKind::Inline(InlineKind::Image { alt, .. })
-      | NodeKind::Inline(InlineKind::ReferenceImage { alt, .. }) => Some(alt.clone()),
-      NodeKind::Inline(InlineKind::BareAutoLink { text, .. }) => Some(text.clone()),
-      NodeKind::Inline(InlineKind::Escaped { value }) => Some(value.to_string()),
-      NodeKind::Inline(InlineKind::SoftBreak | InlineKind::HardBreak) => Some("\n".to_string()),
+    match (&node.kind, &node.inline_syntax) {
+      (NodeKind::Inline(InlineKind::Image { alt, .. }), _) => Some(alt.clone()),
+      (
+        NodeKind::Inline(InlineKind::Link { .. }),
+        Some(InlineSyntax::BareAutoLink { text }),
+      ) => Some(text.clone()),
+      (NodeKind::Inline(InlineKind::Escaped { value }), _) => Some(value.to_string()),
+      (NodeKind::Inline(InlineKind::SoftBreak | InlineKind::HardBreak), _) => {
+        Some("\n".to_string())
+      }
       _ => None,
     }
   });
@@ -102,40 +140,43 @@ fn seed_atomic_payload_child(document: &mut Document, node_id: NodeId) {
   ));
 }
 
-fn is_atomic_editable_container(document: &Document, node: NodeId) -> bool {
-  document.node(node).is_some_and(|node| {
-    matches!(
-      node.kind,
-      NodeKind::Inline(
-        InlineKind::Escaped { .. }
-          | InlineKind::Image { .. }
-          | InlineKind::ReferenceImage { .. }
-          | InlineKind::AutoLink { .. }
-          | InlineKind::BareAutoLink { .. }
-          | InlineKind::InlineHtml { .. }
-          | InlineKind::InlineMath { .. }
-          | InlineKind::Emoji { .. }
-          | InlineKind::FootnoteReference { .. }
-          | InlineKind::SoftBreak
-          | InlineKind::HardBreak
+fn is_atomic_editable_container(document: &Document, node_id: NodeId) -> bool {
+  document.node(node_id).is_some_and(|node| {
+    let bare_link = matches!(
+      (&node.kind, &node.inline_syntax),
+      (
+        NodeKind::Inline(InlineKind::Link { .. }),
+        Some(InlineSyntax::BareAutoLink { .. })
       )
-    )
+    );
+    bare_link
+      || matches!(
+        &node.kind,
+        NodeKind::Inline(
+          InlineKind::Escaped { .. }
+            | InlineKind::Image { .. }
+            | InlineKind::AutoLink { .. }
+            | InlineKind::InlineHtml { .. }
+            | InlineKind::InlineMath { .. }
+            | InlineKind::Emoji { .. }
+            | InlineKind::FootnoteReference { .. }
+            | InlineKind::SoftBreak
+            | InlineKind::HardBreak
+        )
+      )
   })
 }
 
 fn is_link_container(document: &Document, node: NodeId) -> bool {
   document.node(node).is_some_and(|node| {
-    matches!(
-      node.kind,
-      NodeKind::Inline(InlineKind::Link { .. } | InlineKind::ReferenceLink { .. })
-    )
+    matches!(&node.kind, NodeKind::Inline(InlineKind::Link { .. }))
   })
 }
 
 fn is_literal_container(document: &Document, node: NodeId) -> bool {
   document.node(node).is_some_and(|node| {
     matches!(
-      node.kind,
+      &node.kind,
       NodeKind::Block(
         BlockKind::CodeBlock { .. }
           | BlockKind::FrontMatter { .. }
@@ -150,7 +191,7 @@ fn is_literal_container(document: &Document, node: NodeId) -> bool {
 
 fn is_text(document: &Document, node: NodeId) -> bool {
   document.node(node).is_some_and(|node| {
-    matches!(node.kind, NodeKind::Inline(InlineKind::Text { .. }))
+    matches!(&node.kind, NodeKind::Inline(InlineKind::Text { .. }))
   })
 }
 
@@ -236,16 +277,15 @@ fn insert_piece(
     }
     PieceKind::Wrapper {
       kind,
+      syntax,
       content,
       child_source,
       parse_content,
     } => {
       let wrapper = document.next_available_id();
-      assert!(document.insert_detached_node(
-        parent,
-        index,
-        Node::new(wrapper, NodeKind::Inline(kind), range),
-      ));
+      let mut wrapper_node = Node::new(wrapper, NodeKind::Inline(kind), range);
+      wrapper_node.inline_syntax = syntax;
+      assert!(document.insert_detached_node(parent, index, wrapper_node));
       let child_start = source_start.and_then(|base| {
         let (start, _) = child_source?;
         Some(base + utf16_len(&source[..piece.start + start]))
@@ -297,74 +337,80 @@ fn parse_pieces(
         let label_start = 2;
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::ReferenceImage {
+          PieceKind::wrapper_with_syntax(
+            InlineKind::Image {
               source: definition.destination.clone(),
               title: definition.title.clone(),
               alt: parsed.label.to_string(),
+            },
+            InlineSyntax::Reference {
               reference: parsed.reference.to_string(),
               style: parsed.style,
             },
-            content: parsed.label.to_string(),
-            child_source: Some((label_start, label_start + parsed.label.len())),
-            parse_content: false,
-          },
+            parsed.label.to_string(),
+            Some((label_start, label_start + parsed.label.len())),
+            false,
+          ),
         )
       })
     } else if let Some(parsed) = extended::parse_autolink(remaining) {
       Some((
         parsed.consumed,
-        PieceKind::Wrapper {
-          kind: InlineKind::AutoLink {
+        PieceKind::wrapper(
+          InlineKind::AutoLink {
             destination: extended::autolink_destination(parsed.value),
           },
-          content: parsed.value.to_string(),
-          child_source: Some((1, parsed.consumed - 1)),
-          parse_content: false,
-        },
+          parsed.value.to_string(),
+          Some((1, parsed.consumed - 1)),
+          false,
+        ),
       ))
     } else if let Some(parsed) = extended::parse_footnote_reference(remaining) {
       Some((
         parsed.consumed,
-        PieceKind::Wrapper {
-          kind: InlineKind::FootnoteReference {
+        PieceKind::wrapper(
+          InlineKind::FootnoteReference {
             label: parsed.value.to_string(),
           },
-          content: parsed.value.to_string(),
-          child_source: Some((2, parsed.consumed - 1)),
-          parse_content: false,
-        },
+          parsed.value.to_string(),
+          Some((2, parsed.consumed - 1)),
+          false,
+        ),
       ))
     } else if let Some(parsed) = extended::parse_reference_link(remaining) {
       resolve_reference(definitions, parsed.reference).map(|definition| {
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::ReferenceLink {
+          PieceKind::wrapper_with_syntax(
+            InlineKind::Link {
               destination: definition.destination.clone(),
               title: definition.title.clone(),
+            },
+            InlineSyntax::Reference {
               reference: parsed.reference.to_string(),
               style: parsed.style,
             },
-            content: parsed.label.to_string(),
-            child_source: Some((1, 1 + parsed.label.len())),
-            parse_content: true,
-          },
+            parsed.label.to_string(),
+            Some((1, 1 + parsed.label.len())),
+            true,
+          ),
         )
       })
     } else if allow_bare_autolink && bare_autolink_boundary(source, cursor) {
       extended::parse_bare_autolink(remaining).map(|parsed| {
+        let text = parsed.text.to_string();
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::BareAutoLink {
+          PieceKind::wrapper_with_syntax(
+            InlineKind::Link {
               destination: parsed.destination,
-              text: parsed.text.to_string(),
+              title: None,
             },
-            content: parsed.text.to_string(),
-            child_source: Some((0, parsed.consumed)),
-            parse_content: false,
-          },
+            InlineSyntax::BareAutoLink { text: text.clone() },
+            text,
+            Some((0, parsed.consumed)),
+            false,
+          ),
         )
       })
     } else {
@@ -374,15 +420,15 @@ fn parse_pieces(
       emoji::parse(remaining).map(|parsed| {
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::Emoji {
+          PieceKind::wrapper(
+            InlineKind::Emoji {
               shortcode: parsed.shortcode,
               value: parsed.value.clone(),
             },
-            content: parsed.value,
-            child_source: None,
-            parse_content: false,
-          },
+            parsed.value,
+            None,
+            false,
+          ),
         )
       })
     })
@@ -390,14 +436,14 @@ fn parse_pieces(
       extended::parse_inline_math(remaining).map(|parsed| {
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::InlineMath {
+          PieceKind::wrapper(
+            InlineKind::InlineMath {
               source: parsed.value.to_string(),
             },
-            content: parsed.value.to_string(),
-            child_source: Some((1, parsed.consumed - 1)),
-            parse_content: false,
-          },
+            parsed.value.to_string(),
+            Some((1, parsed.consumed - 1)),
+            false,
+          ),
         )
       })
     })
@@ -405,14 +451,14 @@ fn parse_pieces(
       extended::parse_inline_html(remaining).map(|parsed| {
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::InlineHtml {
+          PieceKind::wrapper(
+            InlineKind::InlineHtml {
               raw: parsed.value.to_string(),
             },
-            content: parsed.value.to_string(),
-            child_source: Some((0, parsed.consumed)),
-            parse_content: false,
-          },
+            parsed.value.to_string(),
+            Some((0, parsed.consumed)),
+            false,
+          ),
         )
       })
     })
@@ -420,12 +466,12 @@ fn parse_pieces(
       extended::parse_superscript(remaining).map(|parsed| {
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::Superscript,
-            content: parsed.content.to_string(),
-            child_source: Some((1, parsed.consumed - 1)),
-            parse_content: true,
-          },
+          PieceKind::wrapper(
+            InlineKind::Superscript,
+            parsed.content.to_string(),
+            Some((1, parsed.consumed - 1)),
+            true,
+          ),
         )
       })
     })
@@ -433,12 +479,12 @@ fn parse_pieces(
       extended::parse_subscript(remaining).map(|parsed| {
         (
           parsed.consumed,
-          PieceKind::Wrapper {
-            kind: InlineKind::Subscript,
-            content: parsed.content.to_string(),
-            child_source: Some((1, parsed.consumed - 1)),
-            parse_content: true,
-          },
+          PieceKind::wrapper(
+            InlineKind::Subscript,
+            parsed.content.to_string(),
+            Some((1, parsed.consumed - 1)),
+            true,
+          ),
         )
       })
     });
@@ -606,13 +652,48 @@ mod tests {
     apply(&mut document);
 
     assert!(document.nodes.values().any(|node| matches!(
-      &node.kind,
-      NodeKind::Inline(InlineKind::ReferenceLink { destination, title, .. })
-        if destination == "https://example.com" && title.as_deref() == Some("Home")
+      (&node.kind, &node.inline_syntax),
+      (
+        NodeKind::Inline(InlineKind::Link { destination, title }),
+        Some(InlineSyntax::Reference { .. })
+      ) if destination == "https://example.com" && title.as_deref() == Some("Home")
     )));
     assert!(document.nodes.values().any(|node| matches!(
-      &node.kind,
-      NodeKind::Inline(InlineKind::ReferenceImage { source, .. }) if source == "image.png"
+      (&node.kind, &node.inline_syntax),
+      (
+        NodeKind::Inline(InlineKind::Image { source, .. }),
+        Some(InlineSyntax::Reference { .. })
+      ) if source == "image.png"
+    )));
+  }
+
+  #[test]
+  fn renderer_semantics_stay_on_existing_link_and_image_kinds() {
+    let markdown = "[shown][id] ![logo][img] https://example.com\n\n[id]: https://target.example\n\n[img]: image.png";
+    let mut document = crate::parser::parse_markdown(markdown);
+    crate::parser_blocks::apply(&mut document, markdown);
+    apply(&mut document);
+
+    let references = document
+      .nodes
+      .values()
+      .filter(|node| matches!(node.inline_syntax, Some(InlineSyntax::Reference { .. })))
+      .collect::<Vec<_>>();
+    assert_eq!(references.len(), 2);
+    assert!(references.iter().any(|node| matches!(
+      node.kind,
+      NodeKind::Inline(InlineKind::Link { .. })
+    )));
+    assert!(references.iter().any(|node| matches!(
+      node.kind,
+      NodeKind::Inline(InlineKind::Image { .. })
+    )));
+    assert!(document.nodes.values().any(|node| matches!(
+      (&node.kind, &node.inline_syntax),
+      (
+        NodeKind::Inline(InlineKind::Link { destination, .. }),
+        Some(InlineSyntax::BareAutoLink { .. })
+      ) if destination == "https://example.com"
     )));
   }
 
@@ -632,8 +713,11 @@ mod tests {
     let destinations = document
       .nodes
       .values()
-      .filter_map(|node| match &node.kind {
-        NodeKind::Inline(InlineKind::BareAutoLink { destination, .. }) => Some(destination.as_str()),
+      .filter_map(|node| match (&node.kind, &node.inline_syntax) {
+        (
+          NodeKind::Inline(InlineKind::Link { destination, .. }),
+          Some(InlineSyntax::BareAutoLink { .. }),
+        ) => Some(destination.as_str()),
         _ => None,
       })
       .collect::<Vec<_>>();
@@ -653,22 +737,28 @@ mod tests {
     apply(&mut document);
 
     for node in document.nodes.values().filter(|node| {
-      matches!(
-        node.kind,
-        NodeKind::Inline(
-          InlineKind::Escaped { .. }
-            | InlineKind::AutoLink { .. }
-            | InlineKind::BareAutoLink { .. }
-            | InlineKind::Emoji { .. }
-            | InlineKind::InlineHtml { .. }
-            | InlineKind::InlineMath { .. }
-            | InlineKind::FootnoteReference { .. }
-            | InlineKind::Image { .. }
-            | InlineKind::ReferenceImage { .. }
-            | InlineKind::SoftBreak
-            | InlineKind::HardBreak
+      let bare_link = matches!(
+        (&node.kind, &node.inline_syntax),
+        (
+          NodeKind::Inline(InlineKind::Link { .. }),
+          Some(InlineSyntax::BareAutoLink { .. })
         )
-      )
+      );
+      bare_link
+        || matches!(
+          &node.kind,
+          NodeKind::Inline(
+            InlineKind::Escaped { .. }
+              | InlineKind::AutoLink { .. }
+              | InlineKind::Emoji { .. }
+              | InlineKind::InlineHtml { .. }
+              | InlineKind::InlineMath { .. }
+              | InlineKind::FootnoteReference { .. }
+              | InlineKind::Image { .. }
+              | InlineKind::SoftBreak
+              | InlineKind::HardBreak
+          )
+        )
     }) {
       assert_eq!(node.children.len(), 1, "atomic node {:?} must be editable", node.kind);
       assert!(matches!(
@@ -692,14 +782,19 @@ mod tests {
     let mut document = crate::parser::parse_markdown(markdown);
     apply(&mut document);
     assert_eq!(to_markdown(&document), markdown);
-    assert!(!document.nodes.values().any(|node| matches!(
-      node.kind,
-      NodeKind::Inline(
-        InlineKind::InlineMath { .. }
-          | InlineKind::Emoji { .. }
-          | InlineKind::InlineHtml { .. }
-          | InlineKind::BareAutoLink { .. }
+    assert!(!document.nodes.values().any(|node| {
+      matches!(
+        &node.kind,
+        NodeKind::Inline(
+          InlineKind::InlineMath { .. } | InlineKind::Emoji { .. } | InlineKind::InlineHtml { .. }
+        )
+      ) || matches!(
+        (&node.kind, &node.inline_syntax),
+        (
+          NodeKind::Inline(InlineKind::Link { .. }),
+          Some(InlineSyntax::BareAutoLink { .. })
+        )
       )
-    )));
+    }));
   }
 }
