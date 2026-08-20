@@ -11,7 +11,7 @@ path = "src/lib.rs"
 
 [dependencies]
 bytes = "1"
-elephant-native-core = { path = "../backend/native-core" }
+elephant-native-core = { package = "elephantnote-native-core", path = "../backend/native-core" }
 elephantnote-knowledge-core = { path = "../backend/knowledge-core" }
 elephant-draw = { path = "../vendor/Draw" }
 elephant-note = { path = "../vendor/Note" }
