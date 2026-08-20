@@ -1,11 +1,7 @@
 use crate::{DrawingElement, DrawingTool};
 use serde_json::{json, Map, Value};
 
-pub fn create_element(
-    tool: DrawingTool,
-    start: [f32; 2],
-    id: impl Into<String>,
-) -> DrawingElement {
+pub fn create_element(tool: DrawingTool, start: [f32; 2], id: impl Into<String>) -> DrawingElement {
     let mut extra = Map::new();
     extra.insert("roundness".to_owned(), Value::Null);
     extra.insert("roughness".to_owned(), json!(1));
