@@ -101,8 +101,7 @@ fn scale_element(element: &mut DrawingElement, anchor: [f32; 2], scale: [f32; 2]
     element.width *= scale[0];
     element.height *= scale[1];
     if element.kind == "text" {
-        let uniform = ((scale[0] + scale[1]) / 2.0).max(0.01);
-        element.font_size = (element.font_size * uniform).max(1.0);
+        element.font_size = (element.font_size * scale[0]).max(1.0);
     }
 }
 
