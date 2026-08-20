@@ -33,11 +33,12 @@ enum DrawingTool {
     Pencil,
     Text,
     Image,
+    Frame,
     Eraser,
 }
 
 impl DrawingTool {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::Hand,
         Self::Select,
         Self::Rectangle,
@@ -48,6 +49,7 @@ impl DrawingTool {
         Self::Pencil,
         Self::Text,
         Self::Image,
+        Self::Frame,
         Self::Eraser,
     ];
 
@@ -63,6 +65,7 @@ impl DrawingTool {
             Self::Pencil => "Freedraw",
             Self::Text => "Text",
             Self::Image => "Image",
+            Self::Frame => "Frame",
             Self::Eraser => "Eraser",
         }
     }
@@ -79,7 +82,26 @@ impl DrawingTool {
             Self::Pencil => "7",
             Self::Text => "8",
             Self::Image => "9",
+            Self::Frame => "F",
             Self::Eraser => "0",
+        }
+    }
+
+    fn matches_shortcut(self, value: &str) -> bool {
+        let value = value.to_ascii_lowercase();
+        match self {
+            Self::Select => matches!(value.as_str(), "v" | "1"),
+            Self::Hand => value == "h",
+            Self::Rectangle => matches!(value.as_str(), "r" | "2"),
+            Self::Diamond => matches!(value.as_str(), "d" | "3"),
+            Self::Ellipse => matches!(value.as_str(), "o" | "4"),
+            Self::Arrow => matches!(value.as_str(), "a" | "5"),
+            Self::Line => matches!(value.as_str(), "l" | "6"),
+            Self::Pencil => matches!(value.as_str(), "p" | "x" | "7"),
+            Self::Text => matches!(value.as_str(), "t" | "8"),
+            Self::Image => value == "9",
+            Self::Frame => value == "f",
+            Self::Eraser => matches!(value.as_str(), "e" | "0"),
         }
     }
 
@@ -95,6 +117,7 @@ impl DrawingTool {
             Self::Pencil => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 20 4.5-1L19 8.5a2.12 2.12 0 0 0-3-3L5.5 16Z"/><path d="m14.5 6.5 3 3"/></svg>"#,
             Self::Text => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M8 19h8"/></svg>"#,
             Self::Image => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>"#,
+            Self::Frame => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/></svg>"#,
             Self::Eraser => br#"<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21 10-10"/><path d="m5 17 8-8 5 5-8 8H5a2 2 0 0 1 0-4Z"/><path d="m16 8 2-2a2 2 0 0 1 3 3l-2 2"/></svg>"#,
         }
     }
@@ -250,7 +273,11 @@ fn icon_button(
         .height(Size::px(size))
         .center()
         .background(background)
-        .with_corner_radius(if matches!(alt, "Close drawing" | "Save drawing") { 20.0 } else { 9.0 })
+        .with_corner_radius(if matches!(alt, "Close drawing" | "Save drawing") {
+            20.0
+        } else {
+            9.0
+        })
         .a11y_alt(alt)
         .on_mouse_up(move |event| action(event))
         .child(
@@ -279,7 +306,12 @@ fn action_button(
         .with_corner_radius(7.0)
         .a11y_alt(alt.into())
         .on_mouse_up(move |event| action(event))
-        .child(label().font_size(12.0).color(Color::from_rgb(235, 235, 240)).text(caption.into()))
+        .child(
+            label()
+                .font_size(12.0)
+                .color(Color::from_rgb(235, 235, 240))
+                .text(caption.into()),
+        )
         .into_element()
 }
 
@@ -290,12 +322,20 @@ fn tool_button(
     mut canvas: State<DrawingCanvasState>,
 ) -> Element {
     let active = tool == active;
-    let color = if active { Color::WHITE } else { Color::from_rgb(215, 215, 220) };
+    let color = if active {
+        Color::WHITE
+    } else {
+        Color::from_rgb(215, 215, 220)
+    };
     rect()
         .width(Size::px(38.0))
         .height(Size::px(38.0))
         .center()
-        .background(if active { theme::color(theme::PRIMARY) } else { Color::TRANSPARENT })
+        .background(if active {
+            theme::color(theme::PRIMARY)
+        } else {
+            Color::TRANSPARENT
+        })
         .with_corner_radius(7.0)
         .a11y_alt(format!("{} tool ({})", tool.label(), tool.shortcut()))
         .on_mouse_up(move |_| {
@@ -374,51 +414,115 @@ fn properties_panel(canvas: State<DrawingCanvasState>) -> Element {
         .a11y_alt("Excalidraw properties")
         .child(label().font_size(15.0).color(text).text("Stroke"))
         .child(
-            rect().horizontal().spacing(8.0)
-                .child(swatch(Color::from_rgb(224, 224, 224), "Stroke white", move |_| { stroke_white.write().set_selected_stroke("#e0e0e0"); }))
-                .child(swatch(Color::from_rgb(255, 111, 117), "Stroke red", move |_| { stroke_red.write().set_selected_stroke("#ff6f75"); }))
-                .child(swatch(Color::from_rgb(48, 155, 73), "Stroke green", move |_| { stroke_green.write().set_selected_stroke("#309b49"); }))
-                .child(swatch(Color::from_rgb(78, 145, 216), "Stroke blue", move |_| { stroke_blue.write().set_selected_stroke("#4e91d8"); }))
-                .child(swatch(Color::from_rgb(184, 101, 0), "Stroke orange", move |_| { stroke_orange.write().set_selected_stroke("#b86500"); })),
+            rect()
+                .horizontal()
+                .spacing(8.0)
+                .child(swatch(
+                    Color::from_rgb(224, 224, 224),
+                    "Stroke white",
+                    move |_| {
+                        stroke_white.write().set_selected_stroke("#e0e0e0");
+                    },
+                ))
+                .child(swatch(Color::from_rgb(255, 111, 117), "Stroke red", move |_| {
+                    stroke_red.write().set_selected_stroke("#ff6f75");
+                }))
+                .child(swatch(Color::from_rgb(48, 155, 73), "Stroke green", move |_| {
+                    stroke_green.write().set_selected_stroke("#309b49");
+                }))
+                .child(swatch(Color::from_rgb(78, 145, 216), "Stroke blue", move |_| {
+                    stroke_blue.write().set_selected_stroke("#4e91d8");
+                }))
+                .child(swatch(Color::from_rgb(184, 101, 0), "Stroke orange", move |_| {
+                    stroke_orange.write().set_selected_stroke("#b86500");
+                })),
         )
         .child(label().font_size(15.0).color(text).text("Background"))
         .child(
-            rect().horizontal().spacing(8.0)
-                .child(swatch(Color::TRANSPARENT, "Transparent background", move |_| { bg_none.write().set_selected_background("transparent"); }))
-                .child(swatch(Color::from_rgb(105, 50, 50), "Red background", move |_| { bg_red.write().set_selected_background("#693232"); }))
-                .child(swatch(Color::from_rgb(0, 88, 24), "Green background", move |_| { bg_green.write().set_selected_background("#005818"); }))
-                .child(swatch(Color::from_rgb(18, 75, 105), "Blue background", move |_| { bg_blue.write().set_selected_background("#124b69"); }))
-                .child(swatch(Color::from_rgb(68, 50, 0), "Orange background", move |_| { bg_orange.write().set_selected_background("#443200"); })),
+            rect()
+                .horizontal()
+                .spacing(8.0)
+                .child(swatch(Color::TRANSPARENT, "Transparent background", move |_| {
+                    bg_none.write().set_selected_background("transparent");
+                }))
+                .child(swatch(Color::from_rgb(105, 50, 50), "Red background", move |_| {
+                    bg_red.write().set_selected_background("#693232");
+                }))
+                .child(swatch(Color::from_rgb(0, 88, 24), "Green background", move |_| {
+                    bg_green.write().set_selected_background("#005818");
+                }))
+                .child(swatch(Color::from_rgb(18, 75, 105), "Blue background", move |_| {
+                    bg_blue.write().set_selected_background("#124b69");
+                }))
+                .child(swatch(Color::from_rgb(68, 50, 0), "Orange background", move |_| {
+                    bg_orange.write().set_selected_background("#443200");
+                })),
         )
         .child(label().font_size(15.0).color(text).text("Stroke width"))
         .child(
-            rect().horizontal().spacing(8.0)
-                .child(action_button("1", "Thin stroke", 42.0, move |_| { width_1.write().set_selected_stroke_width(1.0); }))
-                .child(action_button("2", "Medium stroke", 42.0, move |_| { width_2.write().set_selected_stroke_width(2.0); }))
-                .child(action_button("4", "Wide stroke", 42.0, move |_| { width_4.write().set_selected_stroke_width(4.0); })),
+            rect()
+                .horizontal()
+                .spacing(8.0)
+                .child(action_button("1", "Thin stroke", 42.0, move |_| {
+                    width_1.write().set_selected_stroke_width(1.0);
+                }))
+                .child(action_button("2", "Medium stroke", 42.0, move |_| {
+                    width_2.write().set_selected_stroke_width(2.0);
+                }))
+                .child(action_button("4", "Wide stroke", 42.0, move |_| {
+                    width_4.write().set_selected_stroke_width(4.0);
+                })),
         )
         .child(label().font_size(15.0).color(text).text("Stroke style"))
         .child(
-            rect().horizontal().spacing(8.0)
-                .child(action_button("—", "Solid stroke", 42.0, move |_| { style_solid.write().set_selected_stroke_style("solid"); }))
-                .child(action_button("╌", "Dashed stroke", 42.0, move |_| { style_dash.write().set_selected_stroke_style("dashed"); }))
-                .child(action_button("┈", "Dotted stroke", 42.0, move |_| { style_dot.write().set_selected_stroke_style("dotted"); })),
+            rect()
+                .horizontal()
+                .spacing(8.0)
+                .child(action_button("—", "Solid stroke", 42.0, move |_| {
+                    style_solid.write().set_selected_stroke_style("solid");
+                }))
+                .child(action_button("╌", "Dashed stroke", 42.0, move |_| {
+                    style_dash.write().set_selected_stroke_style("dashed");
+                }))
+                .child(action_button("┈", "Dotted stroke", 42.0, move |_| {
+                    style_dot.write().set_selected_stroke_style("dotted");
+                })),
         )
         .child(label().font_size(15.0).color(text).text("Opacity"))
         .child(
-            rect().horizontal().spacing(8.0)
-                .child(action_button("25", "Opacity 25 percent", 48.0, move |_| { opacity_25.write().set_selected_opacity(25.0); }))
-                .child(action_button("50", "Opacity 50 percent", 48.0, move |_| { opacity_50.write().set_selected_opacity(50.0); }))
-                .child(action_button("75", "Opacity 75 percent", 48.0, move |_| { opacity_75.write().set_selected_opacity(75.0); }))
-                .child(action_button("100", "Opacity 100 percent", 48.0, move |_| { opacity_100.write().set_selected_opacity(100.0); })),
+            rect()
+                .horizontal()
+                .spacing(8.0)
+                .child(action_button("25", "Opacity 25 percent", 48.0, move |_| {
+                    opacity_25.write().set_selected_opacity(25.0);
+                }))
+                .child(action_button("50", "Opacity 50 percent", 48.0, move |_| {
+                    opacity_50.write().set_selected_opacity(50.0);
+                }))
+                .child(action_button("75", "Opacity 75 percent", 48.0, move |_| {
+                    opacity_75.write().set_selected_opacity(75.0);
+                }))
+                .child(action_button("100", "Opacity 100 percent", 48.0, move |_| {
+                    opacity_100.write().set_selected_opacity(100.0);
+                })),
         )
         .child(label().font_size(15.0).color(text).text("Layers"))
         .child(
-            rect().horizontal().spacing(8.0)
-                .child(action_button("↗", "Bring to front", 48.0, move |_| { front.write().bring_selection_to_front(); }))
-                .child(action_button("↑", "Bring forward", 48.0, move |_| { forward.write().bring_selection_forward(); }))
-                .child(action_button("↓", "Send backward", 48.0, move |_| { backward.write().send_selection_backward(); }))
-                .child(action_button("↙", "Send to back", 48.0, move |_| { back.write().send_selection_to_back(); })),
+            rect()
+                .horizontal()
+                .spacing(8.0)
+                .child(action_button("↗", "Bring to front", 48.0, move |_| {
+                    front.write().bring_selection_to_front();
+                }))
+                .child(action_button("↑", "Bring forward", 48.0, move |_| {
+                    forward.write().bring_selection_forward();
+                }))
+                .child(action_button("↓", "Send backward", 48.0, move |_| {
+                    backward.write().send_selection_backward();
+                }))
+                .child(action_button("↙", "Send to back", 48.0, move |_| {
+                    back.write().send_selection_to_back();
+                })),
         )
         .into_element()
 }
@@ -457,7 +561,9 @@ fn unlock_all(canvas: State<DrawingCanvasState>) {
 fn reset_canvas(canvas: State<DrawingCanvasState>) {
     let mut canvas = canvas;
     let mut state = canvas.write();
-    if state.document.elements.is_empty() && state.document.files.as_object().is_none_or(Map::is_empty) {
+    if state.document.elements.is_empty()
+        && state.document.files.as_object().is_none_or(Map::is_empty)
+    {
         return;
     }
     state.checkpoint();
@@ -477,9 +583,26 @@ fn menu_panel(mut open: State<bool>, canvas: State<DrawingCanvasState>) -> Eleme
         .layer(Layer::OverlayLevel(50))
         .with_corner_radius(9.0)
         .a11y_alt("Excalidraw menu")
-        .child(action_button("Reset canvas", "Reset drawing canvas", 220.0, move |_| reset_canvas(reset)))
-        .child(action_button("Unlock all", "Unlock all drawing elements", 220.0, move |_| unlock_all(unlock)))
-        .child(icon_button(X_ICON, "Close Excalidraw menu", 30.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, move |_| open.set(false)))
+        .child(action_button(
+            "Reset canvas",
+            "Reset drawing canvas",
+            220.0,
+            move |_| reset_canvas(reset),
+        ))
+        .child(action_button(
+            "Unlock all",
+            "Unlock all drawing elements",
+            220.0,
+            move |_| unlock_all(unlock),
+        ))
+        .child(icon_button(
+            X_ICON,
+            "Close Excalidraw menu",
+            30.0,
+            Color::from_rgb(235, 235, 240),
+            Color::TRANSPARENT,
+            move |_| open.set(false),
+        ))
         .into_element()
 }
 
@@ -491,9 +614,26 @@ fn library_panel(mut open: State<bool>) -> Element {
         .background(Color::from_rgb(35, 35, 42))
         .layer(Layer::OverlayLevel(50))
         .a11y_alt("Excalidraw Library")
-        .child(label().font_size(22.0).color(Color::from_rgb(170, 160, 255)).text("Library"))
-        .child(label().font_size(14.0).color(Color::from_rgb(190, 190, 198)).text("No library items in this vault."))
-        .child(icon_button(X_ICON, "Close library", 34.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, move |_| open.set(false)))
+        .child(
+            label()
+                .font_size(22.0)
+                .color(Color::from_rgb(170, 160, 255))
+                .text("Library"),
+        )
+        .child(
+            label()
+                .font_size(14.0)
+                .color(Color::from_rgb(190, 190, 198))
+                .text("No library items in this vault."),
+        )
+        .child(icon_button(
+            X_ICON,
+            "Close library",
+            34.0,
+            Color::from_rgb(235, 235, 240),
+            Color::TRANSPARENT,
+            move |_| open.set(false),
+        ))
         .into_element()
 }
 
@@ -512,9 +652,15 @@ fn zoom_controls(canvas: State<DrawingCanvasState>) -> Element {
         .background(Color::from_rgb(35, 35, 40))
         .with_corner_radius(9.0)
         .a11y_alt("Drawing zoom")
-        .child(action_button("−", "Zoom out", 34.0, move |_| out.write().zoom_out()))
-        .child(action_button(format!("{zoom}%"), "Reset zoom", 58.0, move |_| reset.write().reset_zoom()))
-        .child(action_button("+", "Zoom in", 34.0, move |_| input.write().zoom_in()))
+        .child(action_button("−", "Zoom out", 34.0, move |_| {
+            out.write().zoom_out()
+        }))
+        .child(action_button(format!("{zoom}%"), "Reset zoom", 58.0, move |_| {
+            reset.write().reset_zoom()
+        }))
+        .child(action_button("+", "Zoom in", 34.0, move |_| {
+            input.write().zoom_in()
+        }))
         .into_element()
 }
 
@@ -531,8 +677,12 @@ fn history_controls(canvas: State<DrawingCanvasState>) -> Element {
         .background(Color::from_rgb(35, 35, 40))
         .with_corner_radius(9.0)
         .a11y_alt("Drawing history")
-        .child(action_button("↶", "Undo drawing", 38.0, move |_| { undo.write().undo(); }))
-        .child(action_button("↷", "Redo drawing", 38.0, move |_| { redo.write().redo(); }))
+        .child(action_button("↶", "Undo drawing", 38.0, move |_| {
+            undo.write().undo();
+        }))
+        .child(action_button("↷", "Redo drawing", 38.0, move |_| {
+            redo.write().redo();
+        }))
         .into_element()
 }
 
@@ -578,7 +728,11 @@ impl Component for DrawingView {
                         return;
                     }
                     if matches!(&event.key, Key::Character(value) if value.eq_ignore_ascii_case("z")) {
-                        keyboard_canvas.write().undo();
+                        if event.modifiers.contains(Modifiers::SHIFT) {
+                            keyboard_canvas.write().redo();
+                        } else {
+                            keyboard_canvas.write().undo();
+                        }
                         event.stop_propagation();
                         return;
                     }
@@ -590,17 +744,18 @@ impl Component for DrawingView {
                 }
                 match &event.key {
                     Key::Named(NamedKey::Escape) => {
-                        keyboard_error.set(close(keyboard_state, keyboard_canvas).err());
+                        keyboard_canvas.write().cancel_interaction();
+                        keyboard_tool.set(DrawingTool::Select);
                         event.stop_propagation();
                     }
                     Key::Named(NamedKey::Backspace) | Key::Named(NamedKey::Delete) => {
                         keyboard_canvas.write().delete_selection();
                         event.stop_propagation();
                     }
-                    Key::Character(value) => {
+                    Key::Character(value) if !command => {
                         if let Some(tool) = DrawingTool::ALL
                             .into_iter()
-                            .find(|tool| tool.shortcut().eq_ignore_ascii_case(value))
+                            .find(|tool| tool.matches_shortcut(value))
                         {
                             keyboard_tool.set(tool);
                             keyboard_canvas.write().set_active_tool_label(tool.label());
@@ -610,7 +765,10 @@ impl Component for DrawingView {
                     _ => {}
                 }
             })
-            .child(canvas::drawing_canvas_with_state_and_palette(canvas_state, false))
+            .child(canvas::drawing_canvas_with_state_and_palette(
+                canvas_state,
+                false,
+            ))
             .child(
                 rect()
                     .position(Position::new_absolute().left(0.0).right(0.0).top(16.0))
@@ -628,31 +786,85 @@ impl Component for DrawingView {
                             .background(Color::from_rgb(35, 35, 40))
                             .with_corner_radius(10.0)
                             .a11y_alt("Drawing tools")
-                            .child(rect().width(Size::px(1.0)).height(Size::px(1.0)).a11y_alt(format!("Drawing toolbar active tool: {}", active_tool.read().label())))
+                            .child(
+                                rect()
+                                    .width(Size::px(1.0))
+                                    .height(Size::px(1.0))
+                                    .a11y_alt(format!(
+                                        "Drawing toolbar active tool: {}",
+                                        active_tool.read().label()
+                                    )),
+                            )
                             .child({
                                 let mut lock_canvas = canvas_state;
-                                icon_button(LOCK_ICON, "Lock selected element or unlock all", 38.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, move |_| {
-                                    if lock_canvas.read().selected_element_id().is_some() {
-                                        lock_canvas.write().set_selection_locked(true);
-                                    } else {
-                                        unlock_all(lock_canvas);
-                                    }
-                                })
+                                icon_button(
+                                    LOCK_ICON,
+                                    "Lock selected element or unlock all",
+                                    38.0,
+                                    Color::from_rgb(235, 235, 240),
+                                    Color::TRANSPARENT,
+                                    move |_| {
+                                        if !lock_canvas.read().selected_element_ids().is_empty() {
+                                            lock_canvas.write().set_selection_locked(true);
+                                        } else {
+                                            unlock_all(lock_canvas);
+                                        }
+                                    },
+                                )
                             })
-                            .child(rect().width(Size::px(1.0)).height(Size::px(30.0)).background(Color::from_rgb(75, 75, 82)))
-                            .children(DrawingTool::ALL.into_iter().map(|tool| tool_button(tool, *active_tool.read(), active_tool, canvas_state)).collect::<Vec<_>>())
-                            .child(rect().width(Size::px(1.0)).height(Size::px(30.0)).background(Color::from_rgb(75, 75, 82)))
-                            .child(icon_button(SHAPES_ICON, "More drawing tools", 38.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, |_| {})),
+                            .child(
+                                rect()
+                                    .width(Size::px(1.0))
+                                    .height(Size::px(30.0))
+                                    .background(Color::from_rgb(75, 75, 82)),
+                            )
+                            .children(
+                                DrawingTool::ALL
+                                    .into_iter()
+                                    .map(|tool| {
+                                        tool_button(
+                                            tool,
+                                            *active_tool.read(),
+                                            active_tool,
+                                            canvas_state,
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                            .child(
+                                rect()
+                                    .width(Size::px(1.0))
+                                    .height(Size::px(30.0))
+                                    .background(Color::from_rgb(75, 75, 82)),
+                            )
+                            .child(icon_button(
+                                SHAPES_ICON,
+                                "More drawing tools",
+                                38.0,
+                                Color::from_rgb(235, 235, 240),
+                                Color::TRANSPARENT,
+                                |_| {},
+                            )),
                     ),
             )
-            .maybe_child(canvas_state.read().selected_element_id().is_some().then(|| properties_panel(canvas_state)))
+            .maybe_child(
+                (!canvas_state.read().selected_element_ids().is_empty())
+                    .then(|| properties_panel(canvas_state)),
+            )
             .child(
-                rect().position(Position::new_absolute().left(16.0).top(16.0)).child(
-                    icon_button(MENU_ICON, "Open Excalidraw menu", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(35, 35, 40), {
-                        let mut menu = menu_open;
-                        move |_| menu.set(!*menu.read())
-                    }),
-                ),
+                rect()
+                    .position(Position::new_absolute().left(16.0).top(16.0))
+                    .child(icon_button(
+                        MENU_ICON,
+                        "Open Excalidraw menu",
+                        40.0,
+                        Color::from_rgb(235, 235, 240),
+                        Color::from_rgb(35, 35, 40),
+                        {
+                            let mut menu = menu_open;
+                            move |_| menu.set(!*menu.read())
+                        },
+                    )),
             )
             .child(
                 rect()
@@ -663,11 +875,25 @@ impl Component for DrawingView {
                     .spacing(8.0)
                     .child({
                         let mut error = toolbar_error;
-                        icon_button(X_ICON, "Close drawing", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(65, 65, 70), move |_| error.set(close(state, canvas_state).err()))
+                        icon_button(
+                            X_ICON,
+                            "Close drawing",
+                            40.0,
+                            Color::from_rgb(235, 235, 240),
+                            Color::from_rgb(65, 65, 70),
+                            move |_| error.set(close(state, canvas_state).err()),
+                        )
                     })
                     .child({
                         let mut error = toolbar_error;
-                        icon_button(CHECK_ICON, "Save drawing", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(65, 65, 70), move |_| error.set(save(state, canvas_state).err()))
+                        icon_button(
+                            CHECK_ICON,
+                            "Save drawing",
+                            40.0,
+                            Color::from_rgb(235, 235, 240),
+                            Color::from_rgb(65, 65, 70),
+                            move |_| error.set(save(state, canvas_state).err()),
+                        )
                     })
                     .child(
                         rect()
@@ -681,8 +907,16 @@ impl Component for DrawingView {
                                 let mut library = library_open;
                                 move |_| library.set(!*library.read())
                             })
-                            .child(svg_icon(Icon::BookOpen, Color::from_rgb(235, 235, 240), 19.0))
-                            .child(label().color(Color::from_rgb(235, 235, 240)).text("Library")),
+                            .child(svg_icon(
+                                Icon::BookOpen,
+                                Color::from_rgb(235, 235, 240),
+                                19.0,
+                            ))
+                            .child(
+                                label()
+                                    .color(Color::from_rgb(235, 235, 240))
+                                    .text("Library"),
+                            ),
                     ),
             )
             .child(
@@ -700,9 +934,16 @@ impl Component for DrawingView {
             .child(zoom_controls(canvas_state))
             .child(history_controls(canvas_state))
             .child(
-                rect().position(Position::new_absolute().right(16.0).bottom(16.0)).child(
-                    icon_button(HELP_ICON, "Open drawing help", 40.0, Color::from_rgb(235, 235, 240), Color::from_rgb(35, 35, 40), |_| {}),
-                ),
+                rect()
+                    .position(Position::new_absolute().right(16.0).bottom(16.0))
+                    .child(icon_button(
+                        HELP_ICON,
+                        "Open drawing help",
+                        40.0,
+                        Color::from_rgb(235, 235, 240),
+                        Color::from_rgb(35, 35, 40),
+                        |_| {},
+                    )),
             )
             .maybe_child((*menu_open.read()).then(|| menu_panel(menu_open, canvas_state)))
             .maybe_child((*library_open.read()).then(|| library_panel(library_open)))
