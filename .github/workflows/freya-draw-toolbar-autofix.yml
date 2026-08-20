@@ -30,6 +30,25 @@ jobs:
       - name: Fast-forward to current branch head
         run: git pull --ff-only origin nsb/freya-native-migration
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+
+      - name: Install project dependencies
+        uses: ./.github/actions/setup
+
+      - name: Install Freya native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Elephant/freya -> target
+
       - name: Expose Frame in the real Elephant Draw toolbar
         shell: bash
         run: |
@@ -98,7 +117,7 @@ mod drawing_toolbar_tests {
           PY
 
       - name: Format touched Rust
-        run: cargo fmt --manifest-path Elephant/freya/Cargo.toml -- Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_scene.rs
+        run: rustfmt --edition 2021 Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_scene.rs
 
       - name: Check native Freya Draw
         run: cargo check --manifest-path Elephant/freya/Cargo.toml
