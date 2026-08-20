@@ -11,6 +11,8 @@ pub mod features;
 pub mod history;
 pub mod model;
 pub mod parser;
+mod parser_blocks;
+mod parser_extensions;
 pub mod protocol;
 pub mod selection;
 pub mod serializer;
@@ -25,7 +27,6 @@ pub use edit::{
 pub use features::{ListCommand, TableCommand, TableNavigationCommand};
 pub use history::{History, HistoryStep};
 pub use model::{DetachedSubtree, Document, Node, NodeId, NodeKind, SourceRange};
-pub use parser::parse_markdown;
 pub use protocol::{
   EditorRequest, EditorResponse, ProtocolCommand, ProtocolDocument, ProtocolError,
   ProtocolErrorCode, ProtocolSnapshot, ProtocolUpdate, EDITOR_PROTOCOL_VERSION,
@@ -34,3 +35,10 @@ pub use selection::{Selection, SelectionPoint};
 pub use serializer::to_markdown;
 pub use session::{EditorSession, SessionCommand, SessionSnapshot, SessionUpdate};
 pub use view::ViewPatch;
+
+pub fn parse_markdown(markdown: &str) -> Document {
+  let mut document = parser::parse_markdown(markdown);
+  parser_blocks::apply(&mut document, markdown);
+  parser_extensions::apply(&mut document);
+  document
+}
