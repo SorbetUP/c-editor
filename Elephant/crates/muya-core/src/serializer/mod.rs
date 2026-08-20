@@ -1,6 +1,6 @@
 use crate::model::{
-  Alignment, BlockKind, Document, InlineKind, InlineMarkKind, ListKind, MarkFragmentEdge, Node,
-  NodeKind, ReferenceStyle,
+  Alignment, BlockKind, Document, InlineKind, InlineMarkKind, InlineSyntax, ListKind,
+  MarkFragmentEdge, Node, NodeKind, ReferenceStyle,
 };
 
 pub fn to_markdown(document: &Document) -> String {
@@ -371,48 +371,43 @@ fn serialize_inline(document: &Document, node: &Node) -> String {
       let delimiter = if code.contains('`') { "``" } else { "`" };
       format!("{delimiter}{code}{delimiter}")
     }
-    NodeKind::Inline(InlineKind::Link { destination, title }) => {
-      format!(
+    NodeKind::Inline(InlineKind::Link { destination, title }) => match &node.inline_syntax {
+      Some(InlineSyntax::Reference { reference, style }) => {
+        let label = serialize_inlines(document, node);
+        let reference = if matches!(style, ReferenceStyle::Full) {
+          reference.as_str()
+        } else {
+          label.as_str()
+        };
+        serialize_reference(&label, reference, *style, false)
+      }
+      Some(InlineSyntax::BareAutoLink { text }) => editable_payload(document, node, text),
+      None => format!(
         "[{}]({}{})",
         serialize_inlines(document, node),
         destination,
         serialize_title(title)
-      )
-    }
-    NodeKind::Inline(InlineKind::Image { source, title, alt }) => {
-      let alt = editable_payload(document, node, alt);
-      format!("![{alt}]({source}{})", serialize_title(title))
-    }
-    NodeKind::Inline(InlineKind::ReferenceLink {
-      reference, style, ..
-    }) => {
-      let label = serialize_inlines(document, node);
-      let reference = if matches!(style, ReferenceStyle::Full) {
-        reference.as_str()
-      } else {
-        label.as_str()
-      };
-      serialize_reference(&label, reference, *style, false)
-    }
-    NodeKind::Inline(InlineKind::ReferenceImage {
-      alt,
-      reference,
-      style,
-      ..
-    }) => {
-      let label = editable_payload(document, node, alt);
-      let reference = if matches!(style, ReferenceStyle::Full) {
-        reference.as_str()
-      } else {
-        label.as_str()
-      };
-      serialize_reference(&label, reference, *style, true)
-    }
+      ),
+    },
+    NodeKind::Inline(InlineKind::Image { source, title, alt }) => match &node.inline_syntax {
+      Some(InlineSyntax::Reference { reference, style }) => {
+        let label = editable_payload(document, node, alt);
+        let reference = if matches!(style, ReferenceStyle::Full) {
+          reference.as_str()
+        } else {
+          label.as_str()
+        };
+        serialize_reference(&label, reference, *style, true)
+      }
+      Some(InlineSyntax::BareAutoLink { .. }) | None => {
+        let alt = editable_payload(document, node, alt);
+        format!("![{alt}]({source}{})", serialize_title(title))
+      }
+    },
     NodeKind::Inline(InlineKind::AutoLink { destination }) => {
       let destination = editable_payload(document, node, destination);
       format!("<{destination}>")
     }
-    NodeKind::Inline(InlineKind::BareAutoLink { text, .. }) => editable_payload(document, node, text),
     NodeKind::Inline(InlineKind::InlineHtml { raw }) => editable_payload(document, node, raw),
     NodeKind::Inline(InlineKind::InlineMath { source }) => {
       let source = editable_payload(document, node, source);
