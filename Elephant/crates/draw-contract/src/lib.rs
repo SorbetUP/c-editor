@@ -12,6 +12,7 @@ mod geometry;
 mod history;
 mod library;
 mod normalize;
+mod rough;
 mod scene_ops;
 mod search;
 mod selection;
@@ -35,6 +36,7 @@ pub use fractional_index::{
 pub use geometry::{distance_to_segment, rgba, rotate_point, Viewport, MAX_ZOOM, MIN_ZOOM};
 pub use history::HistoryState;
 pub use library::{LibraryFile, LibraryItem, LibraryItemStatus};
+pub use rough::{rough_shape_paths, RoughPath};
 pub use search::{SceneSearchMatch, SearchField};
 pub use selection::{SelectionMode, SelectionSet};
 pub use snap::{SnapAxis, SnapGuide, SnapResult};
