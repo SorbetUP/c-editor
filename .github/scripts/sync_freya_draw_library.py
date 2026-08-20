@@ -11,35 +11,51 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def replace_function(text: str, name: str, replacement: str) -> str:
+    signature = f"fn {name}("
+    start = text.find(signature)
+    if start < 0:
+        raise SystemExit(f"{name}: function not found")
+    brace = text.find("{", start)
+    if brace < 0:
+        raise SystemExit(f"{name}: opening brace not found")
+    depth = 0
+    end = None
+    for index in range(brace, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise SystemExit(f"{name}: closing brace not found")
+    return text[:start] + replacement.rstrip() + text[end:]
+
+
 path = Path("Elephant/freya/src/app/drawing.rs")
 text = path.read_text()
-text = replace_once(
-    text,
-    '#[path = "drawing_storage.rs"]\nmod storage;\n',
-    '#[path = "drawing_storage.rs"]\nmod storage;\n#[path = "drawing_library.rs"]\nmod drawing_library;\n',
-    "drawing library module",
-)
-text = replace_once(
-    text,
-    'use serde_json::{json, Map, Value};\n',
-    'use serde_json::{json, Map, Value};\nuse std::{path::PathBuf, time::{SystemTime, UNIX_EPOCH}};\n',
-    "drawing library imports",
-)
 
-old_panel = '''fn library_panel(mut open: State<bool>) -> Element {
-    rect()
-        .position(Position::new_absolute().right(0.0).top(0.0).bottom(0.0))
-        .width(Size::px(320.0))
-        .padding(Gaps::new_all(18.0))
-        .background(Color::from_rgb(35, 35, 42))
-        .layer(Layer::OverlayLevel(50))
-        .a11y_alt("Excalidraw Library")
-        .child(label().font_size(22.0).color(Color::from_rgb(170, 160, 255)).text("Library"))
-        .child(label().font_size(14.0).color(Color::from_rgb(190, 190, 198)).text("No library items in this vault."))
-        .child(icon_button(X_ICON, "Close library", 34.0, Color::from_rgb(235, 235, 240), Color::TRANSPARENT, move |_| open.set(false)))
-        .into_element()
-}
-'''
+if '#[path = "drawing_library.rs"]\nmod drawing_library;' not in text:
+    text = replace_once(
+        text,
+        '#[path = "drawing_storage.rs"]\nmod storage;\n',
+        '#[path = "drawing_storage.rs"]\nmod storage;\n#[path = "drawing_library.rs"]\nmod drawing_library;\n',
+        "drawing library module",
+    )
+
+std_import = 'use std::{path::PathBuf, time::{SystemTime, UNIX_EPOCH}};'
+if std_import not in text:
+    serde_line_start = text.find("use serde_json::")
+    if serde_line_start < 0:
+        raise SystemExit("drawing library imports: serde_json import not found")
+    serde_line_end = text.find("\n", serde_line_start)
+    if serde_line_end < 0:
+        raise SystemExit("drawing library imports: malformed serde_json import")
+    text = text[: serde_line_end + 1] + std_import + "\n" + text[serde_line_end + 1 :]
+
 new_panel = '''fn library_panel(
     mut open: State<bool>,
     canvas: State<DrawingCanvasState>,
@@ -158,13 +174,14 @@ new_panel = '''fn library_panel(
             move |_| open.set(false),
         ))
         .into_element()
-}
-'''
-text = replace_once(text, old_panel, new_panel, "real library panel")
+}'''
+if "library: State<elephant_draw::LibraryFile>" not in text:
+    text = replace_function(text, "library_panel", new_panel)
 
-state_anchor = '''        let toolbar_error = use_state(|| Option::<String>::None);
+if "let library_root = state" not in text:
+    state_anchor = '''        let toolbar_error = use_state(|| Option::<String>::None);
         let active_tool = use_state(|| DrawingTool::Select);'''
-state_new = '''        let toolbar_error = use_state(|| Option::<String>::None);
+    state_new = '''        let toolbar_error = use_state(|| Option::<String>::None);
         let library_root = state
             .read()
             .vault
@@ -178,11 +195,13 @@ state_new = '''        let toolbar_error = use_state(|| Option::<String>::None);
                 .unwrap_or_else(|| elephant_draw::LibraryFile::empty("elephant"))
         });
         let active_tool = use_state(|| DrawingTool::Select);'''
-text = replace_once(text, state_anchor, state_new, "library view state")
-text = replace_once(
-    text,
-    '            .maybe_child((*library_open.read()).then(|| library_panel(library_open)))\n',
-    '''            .maybe_child((*library_open.read()).then(|| {
+    text = replace_once(text, state_anchor, state_new, "library view state")
+
+if "library_state,\n                    library_root.clone()" not in text:
+    text = replace_once(
+        text,
+        '            .maybe_child((*library_open.read()).then(|| library_panel(library_open)))\n',
+        '''            .maybe_child((*library_open.read()).then(|| {
                 library_panel(
                     library_open,
                     canvas_state,
@@ -192,6 +211,7 @@ text = replace_once(
                 )
             }))
 ''',
-    "library panel invocation",
-)
+        "library panel invocation",
+    )
+
 path.write_text(text)
