@@ -126,13 +126,8 @@ fn map_graph(root: &Path, store: &KnowledgeStore, graph: KnowledgeGraph) -> Grap
         .unwrap_or(0);
 
     GraphSnapshot {
-        // The historical graph payload has no generatedAt field. Keep this
-        // field empty instead of manufacturing a timestamp in the adapter.
         generated_at: String::new(),
         vault_root: root.to_string_lossy().replace('\\', "/"),
-        // This is the historical Rust service itself, not the search
-        // inspection or Atomic JS service. Keep the provenance observable in
-        // the contract so callers cannot mistake the adapter for a fallback.
         source: GraphDataSource::KnowledgeCore,
         nodes,
         edges: edges.clone(),
@@ -197,5 +192,57 @@ fn map_cluster(cluster: elephantnote_knowledge_core::KnowledgeGraphCluster) -> G
         edge_count: 0,
         key_terms: Vec::new(),
         kind,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+
+    #[test]
+    fn physical_205_note_vault_has_no_silent_200_node_ceiling() {
+        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("elephant-freya-graph-205-{stamp}"));
+        fs::create_dir_all(&root).unwrap();
+        for index in 0..205usize {
+            let previous = index.saturating_sub(1);
+            let next = (index + 1).min(204);
+            fs::write(
+                root.join(format!("Note-{index:03}.md")),
+                format!(
+                    "# Note {index:03}\n\n#graph-test\n\n[[Note-{previous:03}]] [[Note-{next:03}]]\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let execution = refresh_root(&root, false).expect("build real 205-note graph");
+        assert!(
+            execution.snapshot.nodes.len() >= 205,
+            "graph must retain every physical note, got {} nodes",
+            execution.snapshot.nodes.len()
+        );
+        for expected in [0usize, 199, 200, 204] {
+            let path = format!("Note-{expected:03}.md");
+            assert!(
+                execution
+                    .snapshot
+                    .nodes
+                    .iter()
+                    .any(|node| node.relative_path == path),
+                "graph must retain {path}"
+            );
+        }
+        assert!(
+            execution
+                .snapshot
+                .edges
+                .iter()
+                .any(|edge| edge.reason.contains("Note-204") || edge.reason.contains("Note-203"))
+                || !execution.snapshot.edges.is_empty(),
+            "graph should expose real relationships for the fixture"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

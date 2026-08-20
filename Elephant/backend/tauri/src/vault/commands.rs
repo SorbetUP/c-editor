@@ -1,5 +1,4 @@
 use serde_json::{json, Value};
-use std::io::Read;
 use tauri::AppHandle;
 
 use super::config::{get_active_vault, read_config, remove_vault, set_active_vault, set_vault_enabled, set_vault_icon, set_vault_name, upsert_vault, write_config};
@@ -11,10 +10,6 @@ use crate::vault_layout;
 type R<T> = Result<T, String>;
 const SEARCH_RESULT_LIMIT: usize = 50;
 const SEARCH_RESULT_LIMIT_MAX: usize = 200;
-const SEARCH_FILE_READ_LIMIT: usize = 256 * 1024;
-const SEARCH_FILE_READ_LIMIT_MIN: usize = 4 * 1024;
-const SEARCH_FILE_READ_LIMIT_MAX: usize = 1024 * 1024;
-const SEARCH_EXCERPT_LIMIT: usize = 600;
 const DIRECTORY_LIST_LIMIT_MAX: usize = 500;
 
 fn payload(app: &AppHandle, vault: Option<super::types::VaultDescriptor>) -> R<Value> {
@@ -173,14 +168,34 @@ pub fn tauri_sources_list(app: AppHandle) -> R<Vec<Value>> {
   Ok(read_json_or(vault_layout::config_file(&vault.path, vault_layout::SOURCES_FILE), json!({ "sources": [] })).get("sources").and_then(Value::as_array).cloned().unwrap_or_default())
 }
 
+fn ensure_search_index(vault: &super::types::VaultDescriptor) -> R<crate::fts::FtsIndex> {
+  let root = std::path::PathBuf::from(&vault.path);
+  let index = crate::fts::FtsIndex::open(&root)
+    .map_err(|error| format!("Unable to open search index: {error}"))?;
+  let count = index
+    .count(&vault.id)
+    .map_err(|error| format!("Unable to inspect search index: {error}"))?;
+  if count == 0 {
+    let refresh = index
+      .rebuild_from_files(&vault.id, &root)
+      .map_err(|error| format!("Unable to rebuild search index: {error}"))?;
+    if !refresh.failed.is_empty() && refresh.indexed == 0 && refresh.unchanged == 0 {
+      return Err(format!(
+        "Search index rebuild failed for {} path(s)",
+        refresh.failed.len()
+      ));
+    }
+  }
+  Ok(index)
+}
+
 #[tauri::command]
 pub fn tauri_search_query(app: AppHandle, params: Option<Value>) -> R<Vec<Value>> {
   let vault = get_active_vault(&app)?;
   let params_ref = params.as_ref();
   let query = params_ref
     .and_then(|p| p.get("query").or_else(|| p.get("q")).and_then(Value::as_str).map(str::to_string))
-    .unwrap_or_default()
-    .to_lowercase();
+    .unwrap_or_default();
   if query.trim().is_empty() {
     return Ok(Vec::new());
   }
@@ -189,108 +204,55 @@ pub fn tauri_search_query(app: AppHandle, params: Option<Value>) -> R<Vec<Value>
     .and_then(|p| p.get("limit").or_else(|| p.get("maxResults")).and_then(Value::as_u64))
     .map(|value| value.clamp(1, SEARCH_RESULT_LIMIT_MAX as u64) as usize)
     .unwrap_or(SEARCH_RESULT_LIMIT);
-  let max_file_bytes = params_ref
-    .and_then(|p| p.get("maxBytesPerFile").and_then(Value::as_u64))
-    .map(|value| value.clamp(SEARCH_FILE_READ_LIMIT_MIN as u64, SEARCH_FILE_READ_LIMIT_MAX as u64) as usize)
-    .unwrap_or(SEARCH_FILE_READ_LIMIT);
 
-  let root = std::path::PathBuf::from(&vault.path);
-  if let Ok(index) = crate::fts::FtsIndex::open(&root) {
-    let hits = index.search(&query, limit).unwrap_or_default();
-    if !hits.is_empty() {
-      return Ok(hits
-        .into_iter()
-        .map(|hit| json!({
-          "path": hit.path,
-          "fullPath": hit.full_path,
-          "title": hit.title,
-          "excerpt": hit.excerpt,
-          "tags": hit.tags,
-          "score": hit.score,
-        }))
-        .collect());
-    }
-  }
-
-  let mut results = Vec::with_capacity(limit.min(SEARCH_RESULT_LIMIT));
-  scan_notes(&root, &root, &mut results, &query, limit, max_file_bytes)?;
-  Ok(results)
-}
-
-fn read_text_prefix(path: &std::path::Path, max_bytes: usize) -> R<String> {
-  let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-  let mut limited = file.take(max_bytes as u64);
-  let mut buffer = Vec::with_capacity(max_bytes.min(8 * 1024));
-  limited.read_to_end(&mut buffer).map_err(|e| e.to_string())?;
-  Ok(String::from_utf8_lossy(&buffer).to_string())
-}
-
-fn search_excerpt(markdown: &str) -> String {
-  let excerpt = markdown
-    .lines()
-    .filter(|line| !line.trim().is_empty())
-    .take(3)
-    .collect::<Vec<_>>()
-    .join(" ");
-  if excerpt.chars().count() <= SEARCH_EXCERPT_LIMIT {
-    excerpt
-  } else {
-    format!("{}…", excerpt.chars().take(SEARCH_EXCERPT_LIMIT).collect::<String>())
-  }
-}
-
-fn scan_notes(root: &std::path::Path, current: &std::path::Path, out: &mut Vec<Value>, query: &str, limit: usize, max_file_bytes: usize) -> R<()> {
-  if out.len() >= limit {
-    return Ok(());
-  }
-
-  for item in std::fs::read_dir(current).map_err(|e| e.to_string())? {
-    if out.len() >= limit {
-      break;
-    }
-
-    let item = item.map_err(|e| e.to_string())?;
-    let name = item.file_name().to_string_lossy().to_string();
-    if entries::is_ignored_entry(&name) {
-      continue;
-    }
-
-    let path = item.path();
-    let metadata = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
-    if metadata.file_type().is_symlink() {
-      continue;
-    }
-
-    if metadata.is_dir() {
-      scan_notes(root, &path, out, query, limit, max_file_bytes)?;
-    } else if metadata.is_file() && name.to_ascii_lowercase().ends_with(".md") {
-      let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-      let path_matches = relative.to_lowercase().contains(query) || name.to_lowercase().contains(query);
-      let preview = read_text_prefix(&path, max_file_bytes).unwrap_or_default();
-      let content_matches = path_matches || preview.to_lowercase().contains(query);
-      if content_matches {
-        out.push(json!({
-          "path": relative,
-          "fullPath": path.to_string_lossy(),
-          "title": name.trim_end_matches(".md"),
-          "excerpt": search_excerpt(&preview),
-          "tags": [],
-          "score": if path_matches { 2 } else { 1 }
-        }));
-      }
-    }
-  }
-  Ok(())
+  let index = ensure_search_index(&vault)?;
+  let hits = index
+    .search(&query, limit)
+    .map_err(|error| format!("Unable to query search index: {error}"))?;
+  Ok(hits
+    .into_iter()
+    .map(|hit| json!({
+      "path": hit.path,
+      "fullPath": hit.full_path,
+      "title": hit.title,
+      "excerpt": hit.excerpt,
+      "tags": hit.tags,
+      "score": hit.score,
+    }))
+    .collect())
 }
 
 #[tauri::command]
 pub fn tauri_search_status(app: AppHandle) -> R<Value> {
-  Ok(json!({ "enabled": true, "runtime": "tauri-rust", "activeVault": active_vault(&read_config(&app)?) }))
+  let config = read_config(&app)?;
+  let active = active_vault(&config);
+  let Some(vault) = active.as_ref() else {
+    return Ok(json!({
+      "enabled": true,
+      "runtime": "tauri-rust-fts",
+      "activeVault": null,
+      "indexedDocuments": 0
+    }));
+  };
+  let root = std::path::PathBuf::from(&vault.path);
+  let index = crate::fts::FtsIndex::open(&root)
+    .map_err(|error| format!("Unable to open search index: {error}"))?;
+  let count = index
+    .count(&vault.id)
+    .map_err(|error| format!("Unable to inspect search index: {error}"))?;
+  Ok(json!({
+    "enabled": true,
+    "runtime": "tauri-rust-fts",
+    "activeVault": vault,
+    "indexedDocuments": count.max(0),
+    "indexPath": crate::vault_layout::hidden_dir(&root, crate::vault_layout::INDEX_DIR).join("notes.sqlite").to_string_lossy()
+  }))
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::vault::types::VaultDescriptor;
 
   fn temp_dir(name: &str) -> std::path::PathBuf {
     let stamp = std::time::SystemTime::now()
@@ -300,31 +262,40 @@ mod tests {
     std::env::temp_dir().join(format!("elephant-{name}-{stamp}"))
   }
 
+  fn fixture_vault(root: &std::path::Path) -> VaultDescriptor {
+    VaultDescriptor {
+      id: "search-test".into(),
+      name: "Search Test".into(),
+      path: root.to_string_lossy().replace('\\', "/"),
+      icon: String::new(),
+      last_opened_at: "0".into(),
+      enabled: true,
+    }
+  }
+
   #[test]
-  fn search_scan_respects_result_limit() {
-    let root = temp_dir("search-limit");
+  fn search_index_returns_empty_without_falling_back_to_filesystem_scan() {
+    let root = temp_dir("search-empty");
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(root.join("a.md"), "needle one").unwrap();
-    std::fs::write(root.join("b.md"), "needle two").unwrap();
-
-    let mut out = Vec::new();
-    scan_notes(&root, &root, &mut out, "needle", 1, 1024).unwrap();
-    assert_eq!(out.len(), 1);
-
+    let vault = fixture_vault(&root);
+    let index = ensure_search_index(&vault).unwrap();
+    assert_eq!(index.search("absent-term", 10).unwrap().len(), 0);
+    assert_eq!(index.count(&vault.id).unwrap(), 1);
     let _ = std::fs::remove_dir_all(&root);
   }
 
   #[test]
-  fn search_scan_ignores_hidden_directories() {
+  fn initial_search_index_build_ignores_hidden_directories() {
     let root = temp_dir("search-hidden");
     let hidden = root.join(".git");
     std::fs::create_dir_all(&hidden).unwrap();
     std::fs::write(hidden.join("secret.md"), "needle").unwrap();
-
-    let mut out = Vec::new();
-    scan_notes(&root, &root, &mut out, "needle", 10, 1024).unwrap();
-    assert!(out.is_empty());
-
+    std::fs::write(root.join("visible.md"), "visible").unwrap();
+    let vault = fixture_vault(&root);
+    let index = ensure_search_index(&vault).unwrap();
+    assert_eq!(index.count(&vault.id).unwrap(), 1);
+    assert!(index.search("needle", 10).unwrap().is_empty());
     let _ = std::fs::remove_dir_all(&root);
   }
 }

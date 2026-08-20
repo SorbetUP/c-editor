@@ -1,15 +1,17 @@
 //! Functional adapter for the official code-execution addon service.
 //!
-//! The editor view only supplies a language and source text.  Process
+//! The editor view only supplies a language and source text. Process
 //! discovery, the versioned service protocol, bounded execution and result
 //! normalization stay here so the renderer never becomes an interpreter.
 
+use crate::resource_locator;
 use serde_json::{json, Value};
 use std::{
-    env, fs,
+    fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdin, Command, Stdio},
+    sync::mpsc::{self, Receiver, RecvTimeoutError},
     thread,
     time::{Duration, Instant},
 };
@@ -20,6 +22,7 @@ const OUTPUT_LINE_LIMIT: u64 = 200;
 const TIMEOUT_MS: u64 = 15_000;
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_WAIT: Duration = Duration::from_secs(125);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct CodeExecutionState {
@@ -40,8 +43,9 @@ pub(super) struct CodeExecutionResult {
 struct ServiceClient {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    responses: Receiver<Result<String, String>>,
     next_id: u64,
+    healthy: bool,
 }
 
 impl ServiceClient {
@@ -71,6 +75,35 @@ impl ServiceClient {
             .stdout
             .take()
             .ok_or_else(|| "Code execution stdout is unavailable".to_owned())?;
+        let (sender, responses) = mpsc::channel();
+        thread::Builder::new()
+            .name("elephant-code-execution-stdout".to_owned())
+            .spawn(move || {
+                let mut stdout = BufReader::new(stdout);
+                loop {
+                    let mut line = String::new();
+                    match stdout.read_line(&mut line) {
+                        Ok(0) => {
+                            let _ = sender.send(Err(
+                                "Code execution service closed its stdout".to_owned(),
+                            ));
+                            break;
+                        }
+                        Ok(_) => {
+                            if sender.send(Ok(line)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            let _ = sender.send(Err(format!(
+                                "Read code execution response: {error}"
+                            )));
+                            break;
+                        }
+                    }
+                }
+            })
+            .map_err(|error| format!("Start code execution response reader: {error}"))?;
         eprintln!(
             "[freya][code-execution] action=service-start executable={} vault={}",
             executable.display(),
@@ -79,43 +112,68 @@ impl ServiceClient {
         Ok(Self {
             child,
             stdin,
-            stdout: BufReader::new(stdout),
+            responses,
             next_id: 0,
+            healthy: true,
         })
     }
 
     fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        if !self.healthy {
+            return Err("Code execution service is unhealthy".to_owned());
+        }
         self.next_id = self.next_id.saturating_add(1);
+        let request_id = self.next_id;
         let request = json!({
             "protocol": PROTOCOL,
-            "id": self.next_id,
+            "id": request_id,
             "addonId": ADDON_ID,
             "method": method,
             "params": params,
         });
-        writeln!(self.stdin, "{request}")
-            .and_then(|_| self.stdin.flush())
-            .map_err(|error| format!("Write code execution request {method}: {error}"))?;
-        let mut line = String::new();
-        if self
-            .stdout
-            .read_line(&mut line)
-            .map_err(|error| format!("Read code execution response {method}: {error}"))?
-            == 0
-        {
-            let status = self
-                .child
-                .try_wait()
-                .ok()
-                .flatten()
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "unknown exit".to_owned());
+        if let Err(error) = writeln!(self.stdin, "{request}").and_then(|_| self.stdin.flush()) {
+            self.terminate();
+            return Err(format!("Write code execution request {method}: {error}"));
+        }
+        let line = match self.responses.recv_timeout(REQUEST_TIMEOUT) {
+            Ok(Ok(line)) => line,
+            Ok(Err(error)) => {
+                self.terminate();
+                return Err(format!("Code execution request {method}: {error}"));
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                self.terminate();
+                return Err(format!(
+                    "Code execution request {method} timed out after {}s",
+                    REQUEST_TIMEOUT.as_secs()
+                ));
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                self.terminate();
+                return Err(format!(
+                    "Code execution response reader disconnected during {method}"
+                ));
+            }
+        };
+        let envelope: Value = match serde_json::from_str(line.trim()) {
+            Ok(value) => value,
+            Err(error) => {
+                self.terminate();
+                return Err(format!("Parse code execution response {method}: {error}"));
+            }
+        };
+        if envelope.get("protocol").and_then(Value::as_str) != Some(PROTOCOL) {
+            self.terminate();
             return Err(format!(
-                "Code execution service exited before responding ({status})"
+                "Code execution response {method} used an unexpected protocol"
             ));
         }
-        let envelope: Value = serde_json::from_str(line.trim())
-            .map_err(|error| format!("Parse code execution response {method}: {error}"))?;
+        if envelope.get("id").and_then(Value::as_u64) != Some(request_id) {
+            self.terminate();
+            return Err(format!(
+                "Code execution response {method} did not match request {request_id}"
+            ));
+        }
         if envelope.get("ok").and_then(Value::as_bool) != Some(true) {
             return Err(envelope
                 .pointer("/error/message")
@@ -125,13 +183,21 @@ impl ServiceClient {
         }
         Ok(envelope.get("result").cloned().unwrap_or(Value::Null))
     }
+
+    fn terminate(&mut self) {
+        if !self.healthy {
+            return;
+        }
+        self.healthy = false;
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        eprintln!("[freya][code-execution] action=service-terminate");
+    }
 }
 
 impl Drop for ServiceClient {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        eprintln!("[freya][code-execution] action=service-stop");
+        self.terminate();
     }
 }
 
@@ -244,49 +310,20 @@ fn interpreter(language: &str) -> Interpreter {
 }
 
 fn service_executable() -> Result<PathBuf, String> {
-    if let Some(path) = env::var_os("ELEPHANT_CODE_EXECUTION_SERVICE") {
-        let path = PathBuf::from(path);
-        return path.is_file().then_some(path.clone()).ok_or_else(|| {
-            format!(
-                "ELEPHANT_CODE_EXECUTION_SERVICE is not a file: {}",
-                path.display()
-            )
-        });
-    }
-    let platform = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        "macos-aarch64"
-    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        "macos-x86_64"
-    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        "linux-x86_64"
-    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        "windows-x86_64"
-    } else {
-        return Err("No packaged Code execution service is available for this platform".to_owned());
-    };
-    let file = if cfg!(target_os = "windows") {
-        "elephant-code-execution.exe"
-    } else {
-        "elephant-code-execution"
-    };
-    [
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../addons/official/code-execution/native")
-            .join(platform)
-            .join(file),
-        PathBuf::from("resources/official-addons/official/code-execution/native")
-            .join(platform)
-            .join(file),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
-    .ok_or_else(|| "Packaged Elephant Code execution service executable was not found".to_owned())
+    resource_locator::native_service(
+        "ELEPHANT_CODE_EXECUTION_SERVICE",
+        "code-execution",
+        "elephant-code-execution",
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        env,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn language_aliases_use_the_official_interpreter_contract() {

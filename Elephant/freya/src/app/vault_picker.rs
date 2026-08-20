@@ -1,8 +1,9 @@
-//! Native vault selection and app-level startup persistence for the Freya shell.
+//! Native vault selection for the Freya development shell.
 //!
-//! The chooser remains the operating-system picker. Elephant only persists a
-//! successfully opened path as a startup hint; the vault adapter still owns
-//! canonicalization and validation when the shell opens it.
+//! Vault identity and startup selection now live exclusively in the shared
+//! `tauri-vaults.json` registry. `freya-startup.json` is retained only as a
+//! one-shot legacy migration source so existing development profiles are not
+//! stranded.
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -60,8 +61,24 @@ pub(super) fn pick_vault() -> Result<Option<PathBuf>, String> {
     ))
 }
 
+/// Consume the pre-registry Freya startup hint once.
+///
+/// `ShellState::load` immediately registers a returned vault in the canonical
+/// `tauri-vaults.json`, so leaving this file behind would recreate two sources
+/// of truth. Malformed legacy data remains visible as an error instead of being
+/// silently discarded.
 pub(super) fn remembered_vault() -> Result<Option<PathBuf>, String> {
-    read_remembered_vault_from(&startup_state_path()?)
+    let path = startup_state_path()?;
+    let remembered = read_remembered_vault_from(&path)?;
+    if path.exists() {
+        fs::remove_file(&path)
+            .map_err(|error| format!("remove migrated startup state {}: {error}", path.display()))?;
+        eprintln!(
+            "[freya][vault-picker] legacy-startup-migrated path={}",
+            path.display()
+        );
+    }
+    Ok(remembered)
 }
 
 fn read_remembered_vault_from(path: &Path) -> Result<Option<PathBuf>, String> {
@@ -85,45 +102,11 @@ fn read_remembered_vault_from(path: &Path) -> Result<Option<PathBuf>, String> {
     Ok(Some(state.last_vault))
 }
 
-/// Persist only after `VaultAdapter::open` has succeeded.
-pub(super) fn remember_vault(root: &Path) -> Result<(), String> {
-    remember_vault_at(&startup_state_path()?, root)
-}
-
-fn remember_vault_at(path: &Path, root: &Path) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("startup state path has no parent: {}", path.display()))?;
-    fs::create_dir_all(parent).map_err(|error| {
-        format!(
-            "create startup state directory {}: {error}",
-            parent.display()
-        )
-    })?;
-
-    let state = StartupState {
-        version: 1,
-        last_vault: root.to_path_buf(),
-    };
-    let encoded = serde_json::to_vec_pretty(&state)
-        .map_err(|error| format!("encode startup state: {error}"))?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, encoded)
-        .map_err(|error| format!("write startup state {}: {error}", temporary.display()))?;
-
-    #[cfg(target_os = "windows")]
-    if path.exists() {
-        fs::remove_file(path)
-            .map_err(|error| format!("replace startup state {}: {error}", path.display()))?;
-    }
-    fs::rename(&temporary, path)
-        .map_err(|error| format!("install startup state {}: {error}", path.display()))?;
-    eprintln!(
-        "[freya][vault-picker] remember-complete path={} vault={}",
-        path.display(),
-        root.display()
-    );
-    Ok(())
+/// Compatibility hook for older callers. The canonical registry has already
+/// been persisted before this is called, so the correct action is to ensure
+/// the legacy hint no longer exists rather than write another copy.
+pub(super) fn remember_vault(_root: &Path) -> Result<(), String> {
+    forget_vault()
 }
 
 #[allow(dead_code)]
@@ -152,7 +135,7 @@ fn platform_config_dir() -> Result<PathBuf, String> {
 #[cfg(target_os = "windows")]
 fn platform_config_dir() -> Result<PathBuf, String> {
     let app_data = env::var_os("APPDATA")
-        .ok_or_else(|| "APPDATA is not set; cannot persist the selected vault".to_string())?;
+        .ok_or_else(|| "APPDATA is not set; cannot migrate the selected vault".to_string())?;
     Ok(PathBuf::from(app_data).join("Elephant"))
 }
 
@@ -162,7 +145,7 @@ fn platform_config_dir() -> Result<PathBuf, String> {
         return Ok(PathBuf::from(config).join("elephant"));
     }
     let home = env::var_os("HOME").ok_or_else(|| {
-        "Neither XDG_CONFIG_HOME nor HOME is set; cannot persist the selected vault".to_string()
+        "Neither XDG_CONFIG_HOME nor HOME is set; cannot migrate legacy Freya state".to_string()
     })?;
     Ok(PathBuf::from(home).join(".config").join("elephant"))
 }
@@ -183,21 +166,21 @@ mod tests {
         ))
     }
 
-    #[test]
-    fn startup_state_round_trips_paths_with_spaces() {
-        let state = StartupState {
-            version: 1,
-            last_vault: PathBuf::from("Elephant Vault").join("Test"),
-        };
-        let encoded = serde_json::to_string(&state).expect("serialize startup state");
-        let decoded: StartupState =
-            serde_json::from_str(&encoded).expect("deserialize startup state");
-        assert_eq!(decoded.version, 1);
-        assert_eq!(decoded.last_vault, state.last_vault);
+    fn write_legacy(path: &Path, vault: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            path,
+            serde_json::to_vec_pretty(&StartupState {
+                version: 1,
+                last_vault: vault.to_path_buf(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
-    fn startup_state_round_trips_unicode_paths_semantically() {
+    fn legacy_state_round_trips_unicode_paths_semantically() {
         let state = StartupState {
             version: 1,
             last_vault: PathBuf::from("Café Notes").join("Überblick").join("東京"),
@@ -210,90 +193,37 @@ mod tests {
     }
 
     #[test]
-    fn successful_selection_hint_is_reloaded_from_real_state_file() {
-        let root = test_root("round-trip");
+    fn legacy_hint_can_be_read_for_one_shot_migration() {
+        let root = test_root("legacy");
         let vault = root.join("Vault With Spaces");
         let state_file = root.join("config").join(STATE_FILE);
-        fs::create_dir_all(&vault).expect("create vault fixture");
-
-        remember_vault_at(&state_file, &vault).expect("persist startup hint");
-        let restored = read_remembered_vault_from(&state_file).expect("reload startup hint");
-        assert_eq!(restored.as_deref(), Some(vault.as_path()));
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn repeated_selection_replaces_the_hint_with_the_latest_valid_vault() {
-        let root = test_root("replace");
-        let first = root.join("First Vault");
-        let second = root.join("Second Vault");
-        let state_file = root.join("config").join(STATE_FILE);
-        fs::create_dir_all(&first).expect("create first vault");
-        fs::create_dir_all(&second).expect("create second vault");
-
-        remember_vault_at(&state_file, &first).expect("persist first startup hint");
-        remember_vault_at(&state_file, &second).expect("replace startup hint");
-
+        fs::create_dir_all(&vault).unwrap();
+        write_legacy(&state_file, &vault);
         assert_eq!(
-            read_remembered_vault_from(&state_file).expect("reload replaced hint"),
-            Some(second)
+            read_remembered_vault_from(&state_file).unwrap().as_deref(),
+            Some(vault.as_path())
         );
-        assert!(
-            !state_file.with_extension("json.tmp").exists(),
-            "successful replacement must not leave a temporary file"
-        );
-
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn stale_selection_hint_returns_to_picker_instead_of_failing_startup() {
+    fn stale_legacy_hint_does_not_become_an_active_vault() {
         let root = test_root("stale");
         let state_file = root.join("config").join(STATE_FILE);
         let missing_vault = root.join("Missing Vault");
-        fs::create_dir_all(state_file.parent().expect("config parent")).expect("create config");
-        remember_vault_at(&state_file, &missing_vault).expect("persist stale hint");
-
-        assert_eq!(
-            read_remembered_vault_from(&state_file).expect("read stale hint"),
-            None
-        );
-
+        write_legacy(&state_file, &missing_vault);
+        assert_eq!(read_remembered_vault_from(&state_file).unwrap(), None);
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn unsupported_startup_state_version_is_ignored_safely() {
-        let root = test_root("future-version");
-        let vault = root.join("Vault");
-        let state_file = root.join("config").join(STATE_FILE);
-        fs::create_dir_all(&vault).expect("create vault");
-        fs::create_dir_all(state_file.parent().expect("config parent")).expect("create config");
-        fs::write(
-            &state_file,
-            serde_json::json!({"version": 99, "lastVault": vault}).to_string(),
-        )
-        .expect("write future state");
-
-        assert_eq!(
-            read_remembered_vault_from(&state_file).expect("future versions are ignored"),
-            None
-        );
-
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn malformed_startup_state_reports_a_parse_error() {
+    fn malformed_legacy_state_reports_a_parse_error() {
         let root = test_root("malformed");
         let state_file = root.join("config").join(STATE_FILE);
-        fs::create_dir_all(state_file.parent().expect("config parent")).expect("create config");
-        fs::write(&state_file, "{broken").expect("write malformed state");
-
+        fs::create_dir_all(state_file.parent().unwrap()).unwrap();
+        fs::write(&state_file, "{broken").unwrap();
         let error = read_remembered_vault_from(&state_file).expect_err("malformed state must fail");
         assert!(error.contains("parse startup state"));
-
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -1,11 +1,14 @@
 //! Native Freya surface for the package-owned Iroh Sync service.
 
-use freya::prelude::*;
+use freya::{prelude::*, sdk::use_timeout};
 use serde_json::{json, Value};
+use std::time::Duration;
 
 use crate::theme;
 
 use super::ShellState;
+
+const SYNC_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(PartialEq)]
 struct SyncWorkspace {
@@ -15,6 +18,17 @@ struct SyncWorkspace {
 
 impl Component for SyncWorkspace {
     fn render(&self) -> impl IntoElement {
+        let poll_timeout = use_timeout(|| SYNC_POLL_INTERVAL);
+        let mut poll_timeout_for_effect = poll_timeout;
+        let mut poll_shell = self.shell;
+        use_side_effect(move || {
+            if !poll_timeout_for_effect.elapsed() {
+                return;
+            }
+            poll_timeout_for_effect.reset();
+            poll_sync(&mut poll_shell);
+        });
+
         let snapshot = self.shell.read().clone();
         let invite_input = use_state(String::new);
         let refresh = action_button(
@@ -23,6 +37,7 @@ impl Component for SyncWorkspace {
             self.shell,
             "sync.status",
             json!({}),
+            snapshot.sync.busy,
         );
         let scan = action_button(
             "Scan the active vault for Sync",
@@ -30,6 +45,7 @@ impl Component for SyncWorkspace {
             self.shell,
             "sync.scan",
             json!({}),
+            snapshot.sync.busy,
         );
         let create = action_button(
             "Create a Sync invitation",
@@ -37,15 +53,20 @@ impl Component for SyncWorkspace {
             self.shell,
             "sync.create-invite",
             json!({}),
+            snapshot.sync.busy,
         );
         let mut accept_shell = self.shell;
         let accept_input = invite_input;
+        let accept_busy = snapshot.sync.busy;
         let accept = rect()
             .width(Size::fill())
             .padding(Gaps::new(8., 12., 8., 12.))
             .with_corner_radius(8.)
             .a11y_alt("Pair this device with Sync invitation")
             .on_press(move |_| {
+                if accept_busy {
+                    return;
+                }
                 let value = accept_input.read().trim().to_owned();
                 if value.is_empty() {
                     accept_shell.write().sync.error =
@@ -69,7 +90,17 @@ impl Component for SyncWorkspace {
             self.shell,
             "sync.run",
             json!({}),
+            snapshot.sync.busy,
         );
+        let cancel = snapshot.sync.busy.then(|| {
+            let mut cancel_shell = self.shell;
+            rect()
+                .padding(Gaps::new(8., 12., 8., 12.))
+                .with_corner_radius(8.)
+                .a11y_alt("Cancel current Sync UI request")
+                .on_press(move |_| cancel_shell.write().sync.cancel_pending())
+                .child(label().font_weight(FontWeight::BOLD).text("Cancel"))
+        });
 
         let status_text = status_text(snapshot.sync.status.as_ref());
         let mut body = rect()
@@ -103,11 +134,18 @@ impl Component for SyncWorkspace {
                     .spacing(8.)
                     .child(label().font_weight(FontWeight::BOLD).text(status_text))
                     .child(label().text(if snapshot.sync.busy {
-                        "Sync service is processing an action…"
+                        "Sync service is processing an action in a background worker…"
                     } else {
                         "The service is idle."
                     }))
-                    .child(rect().horizontal().spacing(8.).child(refresh).child(scan)),
+                    .child(
+                        rect()
+                            .horizontal()
+                            .spacing(8.)
+                            .child(refresh)
+                            .child(scan)
+                            .maybe_child(cancel),
+                    ),
             );
 
         if let Some(message) = snapshot.sync.message {
@@ -215,12 +253,17 @@ fn action_button(
     shell: State<ShellState>,
     method: &'static str,
     params: Value,
+    busy: bool,
 ) -> Element {
     rect()
         .padding(Gaps::new(8., 12., 8., 12.))
         .with_corner_radius(8.)
         .a11y_alt(alt)
-        .on_press(move |_| invoke(shell, method, params.clone()))
+        .on_press(move |_| {
+            if !busy {
+                invoke(shell, method, params.clone());
+            }
+        })
         .child(label().font_weight(FontWeight::BOLD).text(text))
         .into_element()
 }
@@ -235,16 +278,25 @@ fn invoke(mut shell: State<ShellState>, method: &str, params: Value) {
         shell.write().sync.error = Some("No vault selected.".to_owned());
         return;
     };
-    let connection = shell.read().sync.clone();
-    {
-        let mut state = shell.write();
-        state.sync.busy = true;
-        state.sync.error = None;
-        state.sync.message = None;
+    let result = shell
+        .write()
+        .sync
+        .begin_call(root, method.to_owned(), params);
+    match result {
+        Ok(_) => eprintln!("[freya][sync] action=start method={method}"),
+        Err(error) => {
+            eprintln!("[freya][sync] action=start-failure method={method} error={error}");
+            shell.write().sync.error = Some(error);
+        }
     }
-    let result = connection.call(&root, method, params);
+}
+
+fn poll_sync(shell: &mut State<ShellState>) {
+    let outcome = shell.write().sync.poll_call();
+    let Some((method, result)) = outcome else {
+        return;
+    };
     let mut state = shell.write();
-    state.sync.busy = false;
     match result {
         Ok(value) => {
             if method == "sync.create-invite" {
@@ -257,7 +309,8 @@ fn invoke(mut shell: State<ShellState>, method: &str, params: Value) {
                     .to_owned();
             }
             state.sync.status = Some(value.clone());
-            state.sync.message = Some(action_message(method, &value));
+            state.sync.message = Some(action_message(&method, &value));
+            state.sync.error = None;
             eprintln!("[freya][sync] action=complete method={method}");
         }
         Err(error) => {
