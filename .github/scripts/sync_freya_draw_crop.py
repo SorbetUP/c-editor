@@ -85,19 +85,6 @@ def sync_scene() -> None:
         self.changed();
         true
     }
-
-    pub fn reset_selected_image_crop(&mut self) -> bool {
-        let Some(id) = self.selected_image_id().map(str::to_owned) else {
-            return false;
-        };
-        let before = self.document.clone();
-        if !self.document.set_image_crop(&id, None) {
-            return false;
-        }
-        self.history.push(before);
-        self.changed();
-        true
-    }
 '''
     text = replace_once(text, anchor, anchor + methods, "crop state methods")
     path.write_text(text)
