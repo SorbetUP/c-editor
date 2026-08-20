@@ -1,5 +1,7 @@
 mod arrow;
+mod autoshape;
 mod binding;
+mod bucket_fill;
 mod clipboard;
 mod crop;
 mod delete;
@@ -23,7 +25,12 @@ mod tool_type;
 mod transform;
 
 pub use arrow::{Arrowhead, ArrowheadPrimitive};
+pub use autoshape::{recognize_shape, recognized_arrow_endpoint, RecognizedShape, ShapeRecognition};
 pub use binding::ArrowEndpoint;
+pub use bucket_fill::{
+    compute_bucket_fill, BucketFillFailureReason, BucketFillInsertion, BucketFillOptions,
+    BucketFillPlacement, BucketFillResult,
+};
 pub use clipboard::SceneFragment;
 pub use crop::{crop_source_rect, ImageCrop, MINIMAL_CROP_SIZE};
 pub use delete::DeleteSelectionOutcome;
