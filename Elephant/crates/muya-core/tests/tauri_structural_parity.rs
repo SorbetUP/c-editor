@@ -129,3 +129,28 @@ fn adjacent_reference_definitions_stay_adjacent_and_resolve() {
     ) if destination == "https://two.example" && title == "Two"
   )));
 }
+
+#[test]
+fn bare_links_keep_renderer_activation_destinations() {
+  let document = parse_markdown("https://example.com www.example.com dev@example.com");
+  let mut destinations = document
+    .nodes
+    .values()
+    .filter_map(|node| match (&node.kind, &node.inline_syntax) {
+      (
+        NodeKind::Inline(InlineKind::Link { destination, .. }),
+        Some(InlineSyntax::BareAutoLink { .. }),
+      ) => Some(destination.clone()),
+      _ => None,
+    })
+    .collect::<Vec<_>>();
+  destinations.sort();
+  assert_eq!(
+    destinations,
+    vec![
+      "http://www.example.com".to_string(),
+      "https://example.com".to_string(),
+      "mailto:dev@example.com".to_string(),
+    ]
+  );
+}
