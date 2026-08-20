@@ -27,6 +27,7 @@ pub enum DrawingTool {
     Text,
     Image,
     Eraser,
+    Frame,
 }
 
 impl DrawingTool {
@@ -42,6 +43,7 @@ impl DrawingTool {
             "image" => Self::Image,
             "eraser" => Self::Eraser,
             "hand" => Self::Hand,
+            "frame" => Self::Frame,
             _ => Self::Selection,
         }
     }
@@ -59,6 +61,7 @@ impl DrawingTool {
             Self::Text => "text",
             Self::Image => "image",
             Self::Eraser => "eraser",
+            Self::Frame => "frame",
         }
     }
 
@@ -75,6 +78,7 @@ impl DrawingTool {
             Self::Text => "Text",
             Self::Image => "Image",
             Self::Eraser => "Eraser",
+            Self::Frame => "Frame",
         }
     }
 }
@@ -244,6 +248,7 @@ fn tool_palette(state: State<DrawingCanvasState>) -> Element {
         .child(tool_button(state, DrawingTool::Line))
         .child(tool_button(state, DrawingTool::Text))
         .child(tool_button(state, DrawingTool::Image))
+        .child(tool_button(state, DrawingTool::Frame))
         .child(tool_button(state, DrawingTool::Eraser))
         .into_element()
 }
@@ -280,6 +285,7 @@ fn new_element(tool: DrawingTool, start: [f32; 2], index: usize) -> DrawingEleme
         DrawingTool::Text => elephant_draw::DrawingTool::Text,
         DrawingTool::Image => elephant_draw::DrawingTool::Image,
         DrawingTool::Eraser => elephant_draw::DrawingTool::Eraser,
+        DrawingTool::Frame => elephant_draw::DrawingTool::Frame,
     };
     let mut element = elephant_draw::create_element(
         core_tool,
@@ -351,7 +357,10 @@ fn draw_gesture(canvas: &mut DrawingCanvasState, gesture: Gesture, point: [f32; 
                 element.width = (world[0] - gesture.start[0]).abs();
                 element.height = (world[1] - gesture.start[1]).abs();
             }
-            DrawingTool::Rectangle | DrawingTool::Diamond | DrawingTool::Ellipse => {
+            DrawingTool::Rectangle
+            | DrawingTool::Diamond
+            | DrawingTool::Ellipse
+            | DrawingTool::Frame => {
                 element.x = gesture.start[0].min(world[0]);
                 element.y = gesture.start[1].min(world[1]);
                 element.width = (world[0] - gesture.start[0]).abs();
