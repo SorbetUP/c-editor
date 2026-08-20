@@ -32,7 +32,7 @@ permissions:
 
 concurrency:
   group: draw-contract-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   mirror-contract:
@@ -115,7 +115,9 @@ jobs:
             Elephant/freya/src/app/drawing_canvas.rs \
             Elephant/freya/src/app/drawing_scene.rs \
             Elephant/freya/src/app/drawing_render.rs \
-            Elephant/freya/src/app/drawing_render_svg.rs
+            Elephant/freya/src/app/drawing_render_svg.rs \
+            Elephant/freya/src/app/drawing_library.rs \
+            Elephant/freya/tests/drawing_*.rs
           git diff --cached --check
           if git diff --cached --quiet; then
             echo 'Native Draw interactions already synchronized.'
