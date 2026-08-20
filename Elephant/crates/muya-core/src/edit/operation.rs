@@ -130,9 +130,14 @@ fn sync_autolink_parent(document: &mut Document, node_id: NodeId) {
   let Some(parent) = document.node(parent_id) else {
     return;
   };
-  let is_bare = matches!(parent.inline_syntax, Some(InlineSyntax::BareAutoLink { .. }))
-    && matches!(parent.kind, NodeKind::Inline(InlineKind::Link { .. }));
-  let is_angle = matches!(parent.kind, NodeKind::Inline(InlineKind::AutoLink { .. }));
+  let is_bare = matches!(
+    &parent.inline_syntax,
+    Some(InlineSyntax::BareAutoLink { .. })
+  ) && matches!(&parent.kind, NodeKind::Inline(InlineKind::Link { .. }));
+  let is_angle = matches!(
+    &parent.kind,
+    NodeKind::Inline(InlineKind::AutoLink { .. })
+  );
   if !is_bare && !is_angle {
     return;
   }
@@ -473,7 +478,7 @@ mod tests {
     );
     document.append_child(link, text);
 
-    Operation::ReplaceText {
+    let inverse = Operation::ReplaceText {
       node: text,
       range: Utf16Range::new(0, 15),
       inserted: "ops@example.org".to_string(),
@@ -483,6 +488,12 @@ mod tests {
     assert!(matches!(
       &document.node(link).unwrap().kind,
       NodeKind::Inline(InlineKind::AutoLink { destination }) if destination == "mailto:ops@example.org"
+    ));
+
+    inverse.apply(&mut document).unwrap();
+    assert!(matches!(
+      &document.node(link).unwrap().kind,
+      NodeKind::Inline(InlineKind::AutoLink { destination }) if destination == "mailto:dev@example.com"
     ));
 
     Operation::ReplaceText {
