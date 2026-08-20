@@ -46,16 +46,19 @@ fn has_label(runner: &TestingRunner, label: &str) -> bool {
 
 #[test]
 fn box_select_renders_marquee_and_group_drag_moves_every_selected_element() {
-    let (mut runner, state) = test_runner();
+    let (mut runner, mut state) = test_runner();
 
     runner.press_cursor((60., 50.));
     runner.move_cursor((360., 180.));
 
-    let selected = state.peek().selected_element_ids();
-    assert_eq!(selected.len(), 2);
-    assert!(selected.contains(&"left"));
-    assert!(selected.contains(&"right"));
-    assert!(!selected.contains(&"outside"));
+    {
+        let snapshot = state.peek();
+        let selected = snapshot.selected_element_ids();
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&"left"));
+        assert!(selected.contains(&"right"));
+        assert!(!selected.contains(&"outside"));
+    }
     assert!(has_label(&runner, "Drawing selection 0"));
     assert!(has_label(&runner, "Drawing selection 1"));
     assert!(has_label(&runner, "Drawing group selection"));
