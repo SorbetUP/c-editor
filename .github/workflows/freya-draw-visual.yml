@@ -67,6 +67,8 @@ jobs:
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
+            --test drawing_excalidraw_styles_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml \
             --test drawing_freya_testing -- --test-threads=1 --nocapture
@@ -78,13 +80,14 @@ jobs:
           mkdir -p test-results/freya-draw-visual
           python3 - <<'PY'
           from pathlib import Path
-          from PIL import Image, ImageChops
+          from PIL import Image, ImageChops, ImageStat
           import shutil
 
           required = [
               Path('/tmp/elephant-freya-drawing-canvas-primitives.png'),
               Path('/tmp/elephant-freya-drawing-multiselect.png'),
               Path('/tmp/elephant-freya-drawing-arrowheads.png'),
+              Path('/tmp/elephant-freya-drawing-excalidraw-styles.png'),
               Path('/tmp/elephant-freya-hand-before.png'),
               Path('/tmp/elephant-freya-hand-after.png'),
               Path('/tmp/elephant-freya-drawing-frame.png'),
@@ -111,8 +114,19 @@ jobs:
           if len({hash(crop) for crop in endpoint_crops}) < 8:
               raise AssertionError('arrowhead endpoint crops are not graphically diverse enough')
 
-          before = Image.open(required[3]).convert('RGBA')
-          after = Image.open(required[4]).convert('RGBA')
+          styles = Image.open(required[3]).convert('RGB')
+          regions = [
+              styles.crop((30, 30, 150, 110)),
+              styles.crop((180, 30, 300, 110)),
+              styles.crop((330, 30, 450, 110)),
+          ]
+          if any(ImageStat.Stat(region).var[0] < 25 for region in regions):
+              raise AssertionError('pattern-filled shapes do not contain enough graphical variance')
+          if len({hash(region.tobytes()) for region in regions}) != 3:
+              raise AssertionError('hachure/cross-hatch/zigzag regions are pixel-identical')
+
+          before = Image.open(required[4]).convert('RGBA')
+          after = Image.open(required[5]).convert('RGBA')
           diff = ImageChops.difference(before, after)
           if diff.getbbox() is None:
               raise AssertionError('hand-pan screenshots are pixel-identical')
