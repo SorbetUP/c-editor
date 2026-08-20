@@ -35,8 +35,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          expected_commit="78a919afdadef27621d44dc0f8397abff6da8246"
-          expected_src_tree="79cf957ebc66604dbc5ed94303ce796f120f7c04"
+          expected_commit="043b6abaf0ab8888397605346db4c31f257d5888"
+          expected_src_tree="655822bb55d3608db209553d007dcc308cfd2d50"
           expected_data_tree="7f09e2bd5ba5a1c014429a9f5e2ceeea9e452062"
 
           actual_commit="$(git ls-tree HEAD Elephant/feature-incoming/Note | awk '{print $3}')"
