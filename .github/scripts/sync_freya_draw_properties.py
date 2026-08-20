@@ -11,6 +11,34 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+def insert_after_method_call(text: str, marker: str, method: str, insertion: str, label: str) -> str:
+    if insertion.strip() in text:
+        return text
+    marker_at = text.find(marker)
+    if marker_at < 0:
+        raise SystemExit(f"{label}: marker not found")
+    method_at = text.rfind(method, 0, marker_at)
+    if method_at < 0:
+        raise SystemExit(f"{label}: method call not found")
+    opening = text.find("(", method_at)
+    if opening < 0 or opening > marker_at:
+        raise SystemExit(f"{label}: opening parenthesis not found")
+    depth = 0
+    end = None
+    for index in range(opening, len(text)):
+        char = text[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise SystemExit(f"{label}: closing parenthesis not found")
+    return text[:end] + "\n" + insertion.rstrip() + text[end:]
+
+
 def sync_scene() -> None:
     path = Path("Elephant/freya/src/app/drawing_scene.rs")
     text = path.read_text()
@@ -300,16 +328,17 @@ def sync_view() -> None:
 '''
     text = replace_once(text, anchor, panel + anchor, "advanced properties panel")
 
-    invoke_anchor = '''            .maybe_child(
-                (!canvas_state.read().selected_element_ids().is_empty())
-                    .then(|| properties_panel(canvas_state)),
-            )'''
-    invoke_new = invoke_anchor + '''
-            .maybe_child(
+    invocation = '''            .maybe_child(
                 (!canvas_state.read().selected_element_ids().is_empty())
                     .then(|| advanced_properties_panel(canvas_state)),
             )'''
-    text = replace_once(text, invoke_anchor, invoke_new, "advanced properties invocation")
+    text = insert_after_method_call(
+        text,
+        "then(|| properties_panel(canvas_state))",
+        ".maybe_child",
+        invocation,
+        "advanced properties invocation",
+    )
     path.write_text(text)
 
 
