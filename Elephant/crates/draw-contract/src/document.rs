@@ -147,6 +147,24 @@ impl DrawingElement {
                 }
                 ((point[0] - center[0]).abs() / rx) + ((point[1] - center[1]).abs() / ry) <= 1.0
             }
+            "frame" | "magicframe" => {
+                let outer = point[0] >= x - tolerance
+                    && point[0] <= x + width + tolerance
+                    && point[1] >= y - tolerance
+                    && point[1] <= y + height + tolerance;
+                if !outer {
+                    return false;
+                }
+                let border = tolerance.max(self.stroke_width.abs() / 2.0).max(1.0);
+                if width <= border * 2.0 || height <= border * 2.0 {
+                    return true;
+                }
+                let inside_inner = point[0] > x + border
+                    && point[0] < x + width - border
+                    && point[1] > y + border
+                    && point[1] < y + height - border;
+                !inside_inner
+            }
             _ => {
                 point[0] >= x - tolerance
                     && point[0] <= x + width + tolerance
