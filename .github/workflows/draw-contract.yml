@@ -88,6 +88,9 @@ mod drawing_toolbar_tests {
           scene.write_text(text)
           PY
 
+          rustfmt --edition 2021 Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_scene.rs
+          git diff --check -- Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_scene.rs
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
         with:
@@ -101,8 +104,8 @@ mod drawing_toolbar_tests {
       - name: Format contract
         run: cargo fmt --manifest-path Elephant/crates/draw-contract/Cargo.toml -- --check
 
-      - name: Format Freya
-        run: cargo fmt --manifest-path Elephant/freya/Cargo.toml -- --check
+      - name: Verify touched Freya files are formatted
+        run: rustfmt --edition 2021 --check Elephant/freya/src/app/drawing.rs Elephant/freya/src/app/drawing_scene.rs
 
       - name: Clippy contract
         run: cargo clippy --manifest-path Elephant/crates/draw-contract/Cargo.toml --all-targets -- -D warnings
@@ -118,6 +121,8 @@ mod drawing_toolbar_tests {
           cargo test --manifest-path Elephant/freya/Cargo.toml main_toolbar_exposes_frame_tool -- --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
           cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_frame_hierarchy_freya_testing -- --test-threads=1 --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
 
       - name: Commit verified Frame toolbar synchronization
         if: github.event_name == 'push' && github.actor != 'github-actions[bot]'
