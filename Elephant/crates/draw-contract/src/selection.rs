@@ -109,20 +109,7 @@ impl DrawingScene {
     }
 
     pub fn translate_selection(&mut self, selection: &SelectionSet, delta: [f32; 2]) -> usize {
-        if !delta[0].is_finite() || !delta[1].is_finite() || delta == [0.0, 0.0] {
-            return 0;
-        }
-        let mut changed = 0;
-        for element in &mut self.elements {
-            if !selection.contains(&element.id) || !selectable(element) {
-                continue;
-            }
-            element.x += delta[0];
-            element.y += delta[1];
-            mark_changed(element);
-            changed += 1;
-        }
-        changed
+        self.translate_selection_with_frame_children(selection, delta)
     }
 }
 
