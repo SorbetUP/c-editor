@@ -1,0 +1,95 @@
+name: Temporary Freya Note renderer proof driver
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: freya-note-renderer-proof-driver
+  cancel-in-progress: false
+
+jobs:
+  repair-and-prove:
+    if: github.event.pull_request.head.ref == 'ci/freya-note-proof-20260820'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout migration branch
+        uses: actions/checkout@v5
+        with:
+          ref: nsb/freya-native-migration
+          fetch-depth: 0
+
+      - name: Fast-forward migration branch
+        run: git pull --ff-only origin nsb/freya-native-migration
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt,clippy
+
+      - name: Install Freya Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Apply the reviewed bounded renderer repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/patch-freya-note-renderer.yml').read_text()
+          begin_marker = "          python3 - <<'PY'\n"
+          end_marker = "\n          PY\n          cargo fmt --manifest-path Elephant/freya/Cargo.toml"
+          start = workflow.index(begin_marker) + len(begin_marker)
+          end = workflow.index(end_marker, start)
+          embedded = workflow[start:end]
+          code = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in embedded.splitlines()
+          )
+          exec(compile(code, 'patch-freya-note-renderer.yml', 'exec'), {})
+          PY
+          cargo fmt --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Verify native Note renderer and editing integration
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets
+          for test in \
+            editor_atomic_inline_freya_testing \
+            editor_structured_markdown_freya_testing \
+            editor_link_freya_testing \
+            editor_keyboard_freya_testing \
+            editor_lifecycle_freya_testing \
+            editor_undo_redo_freya_testing \
+            muya_note_lifecycle_freya_testing \
+            muya_tauri_structural_parity
+          do
+            cargo test --manifest-path Elephant/freya/Cargo.toml --test "$test" -- --test-threads=1 --nocapture
+          done
+
+      - name: Commit only the verified renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- Elephant/freya/src/app/editor_view.rs
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'Renderer already matches the verified repair.'
+            exit 0
+          fi
+          git commit -m 'fix(freya): render structured Muya Note content natively'
+          git pull --rebase origin nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration
