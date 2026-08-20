@@ -1,0 +1,90 @@
+name: Temporary Freya Note repair driver
+
+on:
+  pull_request:
+    branches: [ci/validate-freya-20260820-base]
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tmp-freya-note-repair-driver
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: nsb/freya-native-migration
+          fetch-depth: 0
+
+      - name: Fast-forward migration branch
+        run: git pull --ff-only origin nsb/freya-native-migration
+
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt,clippy
+
+      - name: Install Freya Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Execute the reviewed bounded patch embedded on the migration branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'EXTRACT'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/patch-freya-note-renderer.yml').read_text()
+          marker = "          python3 - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY", start)
+          patch = textwrap.dedent(workflow[start:end])
+          if "path = Path('Elephant/freya/src/app/editor_view.rs')" not in patch:
+              raise SystemExit('reviewed renderer patch was not found')
+          Path('/tmp/freya-note-renderer-patch.py').write_text(patch)
+          EXTRACT
+          python3 /tmp/freya-note-renderer-patch.py
+          cargo fmt --manifest-path Elephant/freya/Cargo.toml
+
+      - name: Verify native Note renderer and editor integration
+        shell: bash
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets
+          for test in \
+            editor_atomic_inline_freya_testing \
+            editor_structured_markdown_freya_testing \
+            editor_link_freya_testing \
+            editor_keyboard_freya_testing \
+            editor_lifecycle_freya_testing \
+            editor_undo_redo_freya_testing \
+            muya_note_lifecycle_freya_testing \
+            muya_tauri_structural_parity
+          do
+            cargo test --manifest-path Elephant/freya/Cargo.toml --test "$test" -- --test-threads=1 --nocapture
+          done
+
+      - name: Commit verified renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Elephant/freya/src/app/editor_view.rs
+          git rm .github/workflows/patch-freya-note-renderer.yml
+          git diff --cached --check
+          git commit -m 'fix(freya): render structured Muya Note content natively'
+          git pull --rebase origin nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration
