@@ -26,6 +26,20 @@ impl DrawingScene {
         bounds_contain(frame.bounds(), element.bounds())
     }
 
+    pub fn element_overlaps_frame(&self, element_id: &str, frame_id: &str) -> bool {
+        let Some(element) = self.element_by_id(element_id) else {
+            return false;
+        };
+        let Some(frame) = self.element_by_id(frame_id).filter(|frame| is_frame_like(frame)) else {
+            return false;
+        };
+        if element.id == frame.id || element.is_deleted || frame.is_deleted || is_frame_like(element)
+        {
+            return false;
+        }
+        bounds_overlap(frame.bounds(), element.bounds())
+    }
+
     pub fn add_elements_to_frame(&mut self, frame_id: &str, element_ids: &[&str]) -> usize {
         let Some(frame_index) = self.elements.iter().position(|element| {
             element.id == frame_id
@@ -144,18 +158,63 @@ impl DrawingScene {
                 !frame.is_deleted
                     && is_frame_like(frame)
                     && frame.id != element_id
-                    && bounds_contain(frame.bounds(), element_bounds)
+                    && bounds_overlap(frame.bounds(), element_bounds)
             })
             .map(|frame| frame.id.clone());
 
         if current == target {
             return false;
         }
-        if let Some(frame_id) = target {
-            self.add_elements_to_frame(&frame_id, &[element_id]) > 0
-        } else {
-            self.remove_elements_from_frame(&[element_id]) > 0
+
+        let mut changed = false;
+        if current.is_some() {
+            changed |= self.remove_elements_from_frame(&[element_id]) > 0;
         }
+        if let Some(frame_id) = target {
+            changed |= self.add_elements_to_frame(&frame_id, &[element_id]) > 0;
+        }
+        changed
+    }
+
+    pub fn sync_frame_children_after_resize(&mut self, frame_id: &str) -> usize {
+        let Some(frame) = self
+            .element_by_id(frame_id)
+            .filter(|frame| !frame.is_deleted && is_frame_like(frame))
+        else {
+            return 0;
+        };
+        let frame_bounds = frame.bounds();
+
+        let detach = self
+            .elements
+            .iter()
+            .filter(|element| {
+                !element.is_deleted
+                    && element.extra.get("frameId").and_then(Value::as_str) == Some(frame_id)
+                    && !is_bound_text(element)
+                    && !bounds_overlap(frame_bounds, element.bounds())
+            })
+            .map(|element| element.id.clone())
+            .collect::<Vec<_>>();
+        let detach_refs = detach.iter().map(String::as_str).collect::<Vec<_>>();
+        let mut changed = self.remove_elements_from_frame(&detach_refs);
+
+        let adopt = self
+            .elements
+            .iter()
+            .filter(|element| {
+                !element.is_deleted
+                    && !is_frame_like(element)
+                    && !is_bound_text(element)
+                    && !is_locked(element)
+                    && element.extra.get("frameId").is_none_or(Value::is_null)
+                    && bounds_contain(frame_bounds, element.bounds())
+            })
+            .map(|element| element.id.clone())
+            .collect::<Vec<_>>();
+        let adopt_refs = adopt.iter().map(String::as_str).collect::<Vec<_>>();
+        changed += self.add_elements_to_frame(frame_id, &adopt_refs);
+        changed
     }
 
     pub fn translate_frame_with_children(&mut self, frame_id: &str, delta: [f32; 2]) -> usize {
@@ -280,6 +339,15 @@ fn is_locked(element: &DrawingElement) -> bool {
         .unwrap_or(false)
 }
 
+fn is_bound_text(element: &DrawingElement) -> bool {
+    element.kind == "text"
+        && element
+            .extra
+            .get("containerId")
+            .and_then(Value::as_str)
+            .is_some()
+}
+
 fn bound_text_ids(element: &DrawingElement) -> Vec<String> {
     element
         .extra
@@ -296,6 +364,12 @@ fn bounds_contain(container: (f32, f32, f32, f32), child: (f32, f32, f32, f32)) 
     let (cx, cy, cw, ch) = container;
     let (x, y, w, h) = child;
     x >= cx && y >= cy && x + w <= cx + cw && y + h <= cy + ch
+}
+
+fn bounds_overlap(first: (f32, f32, f32, f32), second: (f32, f32, f32, f32)) -> bool {
+    let (ax, ay, aw, ah) = first;
+    let (bx, by, bw, bh) = second;
+    ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
 }
 
 fn mark_changed(element: &mut DrawingElement) {

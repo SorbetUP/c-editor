@@ -8,6 +8,8 @@
 mod drawing_image;
 mod drawing_render;
 mod drawing_scene;
+#[path = "drawing_text_edit.rs"]
+mod drawing_text_edit;
 
 use freya::prelude::*;
 use serde_json::{json, Map, Value};
@@ -106,6 +108,7 @@ pub fn drawing_canvas_with_state_and_palette(
     let snapshot = state.read().clone();
     let gesture_state = use_state(|| Option::<Gesture>::None);
     let pointer_down_state = use_state(|| false);
+    let editing_text_state = use_state(|| Option::<usize>::None);
     let last_active_tool = use_state(|| snapshot.active_tool.clone());
     let rendered_active_tool = snapshot.active_tool.clone();
     let mut reset_gesture = gesture_state;
@@ -126,7 +129,9 @@ pub fn drawing_canvas_with_state_and_palette(
     let mut pointer_down = pointer_down_state;
     let move_pointer_down = pointer_down_state;
     let mut release_pointer_down = pointer_down_state;
+    let mut pointer_editing = editing_text_state;
     let primitives = drawing_render::render(&snapshot);
+    let editing_index = *editing_text_state.read();
 
     rect()
         .key(("native-excalidraw-canvas", snapshot.revision))
@@ -149,6 +154,9 @@ pub fn drawing_canvas_with_state_and_palette(
             pointer_down.set(true);
             let screen = point(event.global_location());
             let tool = DrawingTool::from_id(pointer_state.read().active_tool.as_str());
+            if tool != DrawingTool::Text && pointer_editing.read().is_some() {
+                pointer_editing.set(None);
+            }
             match tool {
                 DrawingTool::Selection | DrawingTool::Hand | DrawingTool::Eraser => {
                     pointer_state.write().begin_pointer(screen);
@@ -169,6 +177,42 @@ pub fn drawing_canvas_with_state_and_palette(
                             eprintln!("[freya][drawing] action:failure action=insert-image error={error}");
                         }
                     }
+                }
+                DrawingTool::Text => {
+                    pointer_gesture.set(None);
+                    pointer_down.set(false);
+                    let mut canvas = pointer_state.write();
+                    let world = canvas.to_world(screen);
+                    let existing = canvas
+                        .document
+                        .elements
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find_map(|(index, element)| {
+                            (!element.is_deleted
+                                && element.kind == "text"
+                                && !element.is_locked()
+                                && element.hit_test(world))
+                            .then_some(index)
+                        });
+                    let index = if let Some(index) = existing {
+                        canvas.checkpoint();
+                        index
+                    } else {
+                        let index = canvas.document.elements.len();
+                        canvas.checkpoint();
+                        let mut element = new_element(DrawingTool::Text, world, index);
+                        element.text.clear();
+                        element.extra.insert("originalText".to_owned(), Value::String(String::new()));
+                        element.width = element.font_size.max(20.0);
+                        element.height = element.font_size.max(20.0) * 1.25;
+                        canvas.document.elements.push(element);
+                        canvas.touch_element(index);
+                        index
+                    };
+                    drop(canvas);
+                    pointer_editing.set(Some(index));
                 }
                 _ => {
                     let mut canvas = pointer_state.write();
@@ -222,6 +266,14 @@ pub fn drawing_canvas_with_state_and_palette(
             event.stop_propagation();
         })
         .children(primitives)
+        .maybe_child(editing_index.map(|index| {
+            drawing_text_edit::TextEditOverlay {
+                canvas: state,
+                editing: editing_text_state,
+                index,
+            }
+            .into()
+        }))
         .maybe_child(show_palette.then(|| tool_palette(state)))
         .into_element()
 }
@@ -287,19 +339,7 @@ fn new_element(tool: DrawingTool, start: [f32; 2], index: usize) -> DrawingEleme
         DrawingTool::Eraser => elephant_draw::DrawingTool::Eraser,
         DrawingTool::Frame => elephant_draw::DrawingTool::Frame,
     };
-    let mut element = elephant_draw::create_element(
-        core_tool,
-        start,
-        format!("freya-element-{index}"),
-    );
-    if tool == DrawingTool::Text {
-        element.text = "Text".to_owned();
-        element.extra.insert(
-            "originalText".to_owned(),
-            Value::String(element.text.clone()),
-        );
-    }
-    element
+    elephant_draw::create_element(core_tool, start, format!("freya-element-{index}"))
 }
 
 fn insert_image(
@@ -354,8 +394,7 @@ fn draw_gesture(canvas: &mut DrawingCanvasState, gesture: Gesture, point: [f32; 
                 element
                     .points
                     .push([world[0] - gesture.start[0], world[1] - gesture.start[1]]);
-                element.width = (world[0] - gesture.start[0]).abs();
-                element.height = (world[1] - gesture.start[1]).abs();
+                update_linear_dimensions(element);
             }
             DrawingTool::Rectangle
             | DrawingTool::Diamond
@@ -373,16 +412,30 @@ fn draw_gesture(canvas: &mut DrawingCanvasState, gesture: Gesture, point: [f32; 
                     [0.0, 0.0],
                     [world[0] - gesture.start[0], world[1] - gesture.start[1]],
                 ];
-                element.width = (world[0] - gesture.start[0]).abs();
-                element.height = (world[1] - gesture.start[1]).abs();
-            }
-            DrawingTool::Text => {
-                element.width = (world[0] - gesture.start[0]).abs().max(1.0);
+                update_linear_dimensions(element);
             }
             _ => {}
         }
     }
     canvas.touch_element(gesture.index);
+}
+
+fn update_linear_dimensions(element: &mut DrawingElement) {
+    if element.points.is_empty() {
+        return;
+    }
+    let mut min_x = 0.0_f32;
+    let mut min_y = 0.0_f32;
+    let mut max_x = 0.0_f32;
+    let mut max_y = 0.0_f32;
+    for [x, y] in &element.points {
+        min_x = min_x.min(*x);
+        min_y = min_y.min(*y);
+        max_x = max_x.max(*x);
+        max_y = max_y.max(*y);
+    }
+    element.width = max_x - min_x;
+    element.height = max_y - min_y;
 }
 
 fn point(value: CursorPoint) -> [f32; 2] {

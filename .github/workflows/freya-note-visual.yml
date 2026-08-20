@@ -10,6 +10,8 @@ on:
       - "Elephant/freya/tests/muya_*.rs"
       - "Elephant/crates/muya-core/**"
       - ".github/workflows/freya-note-visual.yml"
+      - "tools/freya-note-finalize*.py"
+      - "tools/freya-note-visual-permanent.yml"
   pull_request:
     paths:
       - "Elephant/freya/src/app/editor_*.rs"
@@ -17,23 +19,31 @@ on:
       - "Elephant/freya/tests/muya_*.rs"
       - "Elephant/crates/muya-core/**"
       - ".github/workflows/freya-note-visual.yml"
+      - ".ci/trigger-freya-note-finalizer"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: freya-note-visual-${{ github.ref }}
+  group: freya-note-finalize-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
-  note-visual:
-    name: Native Note graphical contract
+  note-finalize:
+    name: Final native Note renderer gate
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
-      - name: Checkout
+      - name: Checkout trusted migration branch
         uses: actions/checkout@v5
+        with:
+          ref: nsb/freya-native-migration
+          fetch-depth: 0
+
+      - name: Fast-forward trusted branch
+        run: git pull --ff-only origin nsb/freya-native-migration
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
@@ -55,46 +65,113 @@ jobs:
         with:
           workspaces: |
             Elephant/freya -> target
+            Elephant/crates/muya-core -> target
 
-      - name: Run native Note interaction and structure suites
-        shell: bash
+      - name: Apply deterministic final renderer patch
+        run: |
+          set -euo pipefail
+          python3 tools/freya-note-finalize.py
+          python3 tools/freya-note-finalize-test-fix.py
+          cargo fmt --manifest-path Elephant/freya/Cargo.toml
+          if grep -nEi 'not rendered|non rendu|non rendue|fn unsupported_block\(' Elephant/freya/src/app/editor_view.rs; then
+            echo 'Unsupported Markdown renderer placeholder remains.' >&2
+            exit 1
+          fi
+          grep -q 'mod editor_image_preview;' Elephant/freya/src/app.rs
+          grep -q 'fn render_paragraph(' Elephant/freya/src/app/editor_view.rs
+          grep -q 'fn render_footnote_definition(' Elephant/freya/src/app/editor_view.rs
+          grep -q 'fn semantic_source_block(' Elephant/freya/src/app/editor_view.rs
+          grep -q 'super::editor_image_preview::render' Elephant/freya/src/app/editor_view.rs
+
+      - name: Verify canonical Muya core
+        run: |
+          set -euo pipefail
+          cargo fmt --manifest-path Elephant/crates/muya-core/Cargo.toml -- --check
+          cargo clippy --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path Elephant/crates/muya-core/Cargo.toml --all-targets
+
+      - name: Compile complete Freya editor
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets
+          cargo clippy --manifest-path Elephant/freya/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run native Note interaction suites
         env:
           RUST_BACKTRACE: full
         run: |
           set -euo pipefail
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test editor_atomic_inline_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test editor_structured_markdown_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test muya_tauri_structural_parity -- --test-threads=1 --nocapture
+          for test in \
+            editor_atomic_inline_freya_testing \
+            editor_structured_markdown_freya_testing \
+            editor_image_markdown_freya_testing \
+            editor_link_freya_testing \
+            editor_keyboard_freya_testing \
+            editor_lifecycle_freya_testing \
+            editor_undo_redo_freya_testing \
+            editor_rich_interactions_freya_testing \
+            editor_toolbar_parity \
+            muya_note_lifecycle_freya_testing \
+            muya_tauri_structural_parity
+          do
+            cargo test --manifest-path Elephant/freya/Cargo.toml --test "$test" -- --test-threads=1 --nocapture
+          done
 
-      - name: Validate real Freya Note screenshot output
-        shell: bash
+      - name: Validate real graphical evidence
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           from PIL import Image
-
-          path = Path('/tmp/elephant-freya-note-structured.png')
-          if not path.is_file() or path.stat().st_size == 0:
-              raise AssertionError(f'missing graphical evidence: {path}')
-          image = Image.open(path).convert('RGBA')
-          if image.size != (1400, 840):
-              raise AssertionError(f'expected 1400x840, got {image.size}')
-          colors = image.getcolors(maxcolors=image.width * image.height) or []
-          if len(colors) < 8:
-              raise AssertionError(f'Note screenshot is visually empty/degenerate: {len(colors)} colors')
-          print(f'validated Freya Note screenshot {image.size} with {len(colors)} colors')
+          expected = {
+              'elephant-freya-note-structured.png': (1400, 840),
+              'elephant-freya-note-image.png': None,
+          }
+          for name, dimensions in expected.items():
+              path = Path('/tmp') / name
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f'missing graphical evidence: {path}')
+              image = Image.open(path).convert('RGBA')
+              if dimensions and image.size != dimensions:
+                  raise SystemExit(f'unexpected dimensions for {name}: {image.size}')
+              if image.width < 100 or image.height < 100:
+                  raise SystemExit(f'degenerate graphical evidence {name}: {image.size}')
+              colors = image.getcolors(maxcolors=image.width * image.height) or []
+              if len(colors) < 8:
+                  raise SystemExit(f'visually degenerate evidence {name}: {len(colors)} colors')
+              print(f'{name}: {image.size}, colors={len(colors)}')
           PY
+
+      - name: Publish verified renderer to migration branch
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          cp tools/freya-note-visual-permanent.yml .github/workflows/freya-note-visual.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            Elephant/freya/src/app.rs \
+            Elephant/freya/src/app/editor_view.rs \
+            Elephant/freya/src/app/editor_image_preview.rs \
+            Elephant/freya/tests/editor_image_markdown_freya_testing.rs \
+            .github/workflows/freya-note-visual.yml
+          git rm -- \
+            tools/freya-note-finalize.py \
+            tools/freya-note-finalize-test-fix.py \
+            tools/freya-note-visual-permanent.yml
+          git diff --cached --check
+          git commit -m 'fix(freya): finalize native Muya Note rendering'
+          git pull --rebase origin nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration
 
       - name: Preserve graphical failure evidence
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: freya-note-visual-failure-${{ github.run_id }}-${{ github.run_attempt }}
-          path: /tmp/elephant-freya-note-structured.png
+          name: freya-note-finalization-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/elephant-freya-note-structured.png
+            /tmp/elephant-freya-note-image.png
           if-no-files-found: ignore
           retention-days: 1
           compression-level: 6

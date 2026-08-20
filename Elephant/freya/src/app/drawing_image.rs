@@ -11,6 +11,8 @@ pub struct DrawingImageAsset {
     pub data_url: String,
     pub width: f32,
     pub height: f32,
+    pub natural_width: f32,
+    pub natural_height: f32,
     pub created: u64,
 }
 
@@ -40,6 +42,8 @@ pub fn asset_from_bytes(path: &Path, bytes: &[u8]) -> Result<DrawingImageAsset, 
         data_url: format!("data:{mime_type};base64,{}", STANDARD.encode(bytes)),
         width,
         height,
+        natural_width: intrinsic_width.max(1) as f32,
+        natural_height: intrinsic_height.max(1) as f32,
         created,
     })
 }
@@ -191,4 +195,20 @@ fn webp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 
 fn valid_dimensions(width: u32, height: u32) -> Option<(u32, u32)> {
     (width > 0 && height > 0).then_some((width, height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn large_png_preserves_intrinsic_dimensions_while_fitting_display_size() {
+        let mut png = vec![0_u8; 24];
+        png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        png[16..20].copy_from_slice(&2000_u32.to_be_bytes());
+        png[20..24].copy_from_slice(&1000_u32.to_be_bytes());
+        let asset = asset_from_bytes(Path::new("large.png"), &png).unwrap();
+        assert_eq!((asset.natural_width, asset.natural_height), (2000.0, 1000.0));
+        assert_eq!((asset.width, asset.height), (720.0, 360.0));
+    }
 }

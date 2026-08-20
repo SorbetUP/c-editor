@@ -1,0 +1,263 @@
+name: One-shot Freya Muya feature actions
+
+on:
+  push:
+    branches: [nsb/freya-native-migration]
+    paths:
+      - '.github/workflows/patch-freya-note-actions.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: one-shot-freya-note-actions
+  cancel-in-progress: false
+
+jobs:
+  patch-and-prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: nsb/freya-native-migration
+          fetch-depth: 0
+
+      - name: Fast-forward migration branch
+        run: git pull --ff-only origin nsb/freya-native-migration
+
+      - name: Install Rust 1.91
+        uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt,clippy
+
+      - name: Install Freya Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libfreetype6-dev libfontconfig1-dev libegl-dev libwayland-dev libgles-dev
+
+      - name: Wire Freya actions to canonical Muya SessionCommand variants
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('Elephant/freya/src/editor.rs')
+          text = path.read_text()
+
+          def once(old: str, new: str, label: str):
+              global text
+              if new in text:
+                  return
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one anchor, found {count}')
+              text = text.replace(old, new, 1)
+
+          once(
+              'features::{BlockTypeCommand, TableNavigationCommand, TaskCommand},',
+              'features::{\n        BlockTypeCommand, CreateTable, InsertHorizontalRule, InsertImage, ListCommand,\n        TableNavigationCommand, TaskCommand,\n    },',
+              'Muya feature imports',
+          )
+          once(
+              '''    ToggleBlockQuote,\n    ToggleCodeBlock,\n    TableNavigation(TableNavigationCommand),''',
+              '''    ToggleBlockQuote,\n    ToggleCodeBlock,\n    CreateTable {\n        rows: u16,\n        columns: u16,\n    },\n    InsertImage {\n        source: String,\n        alt: String,\n        title: Option<String>,\n    },\n    InsertHorizontalRule,\n    List(ListCommand),\n    TableNavigation(TableNavigationCommand),''',
+              'EditorAction feature variants',
+          )
+          once(
+              '''            EditorAction::ToggleCodeBlock => {\n                SessionCommand::BlockType(BlockTypeCommand::ToggleCodeBlock)\n            }\n            EditorAction::TableNavigation(command) => SessionCommand::TableNavigation(command),''',
+              '''            EditorAction::ToggleCodeBlock => {\n                SessionCommand::BlockType(BlockTypeCommand::ToggleCodeBlock)\n            }\n            EditorAction::CreateTable { rows, columns } => {\n                SessionCommand::CreateTable(CreateTable { rows, columns })\n            }\n            EditorAction::InsertImage { source, alt, title } => {\n                SessionCommand::InsertImage(InsertImage { source, alt, title })\n            }\n            EditorAction::InsertHorizontalRule => {\n                SessionCommand::HorizontalRule(InsertHorizontalRule)\n            }\n            EditorAction::List(command) => SessionCommand::List(command),\n            EditorAction::TableNavigation(command) => SessionCommand::TableNavigation(command),''',
+              'SessionCommand feature routing',
+          )
+
+          required = [
+              'EditorAction::CreateTable { rows, columns }',
+              'SessionCommand::CreateTable(CreateTable { rows, columns })',
+              'SessionCommand::InsertImage(InsertImage { source, alt, title })',
+              'SessionCommand::HorizontalRule(InsertHorizontalRule)',
+              'EditorAction::List(command) => SessionCommand::List(command)',
+          ]
+          missing = [item for item in required if item not in text]
+          if missing:
+              raise SystemExit(f'feature wiring incomplete: {missing}')
+          path.write_text(text)
+
+          routes = Path('Elephant/freya/src/app/editor_key_routes.rs')
+          keyboard = routes.read_text()
+
+          def route_once(old: str, new: str, label: str):
+              global keyboard
+              if new in keyboard:
+                  return
+              count = keyboard.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one anchor, found {count}')
+              keyboard = keyboard.replace(old, new, 1)
+
+          route_once(
+              'use muya_core::{features::TableNavigationCommand, NodeId};',
+              'use muya_core::{\n    features::{ListCommand, TableNavigationCommand},\n    model::{BlockKind, NodeKind},\n    Document, NodeId,\n};',
+              'keyboard Muya imports',
+          )
+          route_once(
+              '''        Key::Named(NamedKey::Tab) if !modifiers.contains(Modifiers::ALT) => {\n            let inside_table = state\n                .read()\n                .editor\n                .as_ref()\n                .is_some_and(|editor| has_table_ancestor(editor.session().document(), node_id));\n            inside_table.then(|| {\n                let command = if modifiers.contains(Modifiers::SHIFT) {\n                    TableNavigationCommand::PreviousCell\n                } else {\n                    TableNavigationCommand::NextCell\n                };\n                with_editor(state, "cannot navigate without an open note", |editor| {\n                    editor\n                        .dispatch(EditorAction::TableNavigation(command))\n                        .map(|_| ())\n                })\n            })\n        }''',
+              '''        Key::Named(NamedKey::Tab) if !modifiers.contains(Modifiers::ALT) => {\n            let (inside_table, inside_list) = state\n                .read()\n                .editor\n                .as_ref()\n                .map(|editor| {\n                    let document = editor.session().document();\n                    (\n                        has_table_ancestor(document, node_id),\n                        has_list_ancestor(document, node_id),\n                    )\n                })\n                .unwrap_or((false, false));\n            if inside_table {\n                let command = if modifiers.contains(Modifiers::SHIFT) {\n                    TableNavigationCommand::PreviousCell\n                } else {\n                    TableNavigationCommand::NextCell\n                };\n                Some(with_editor(\n                    state,\n                    "cannot navigate without an open note",\n                    |editor| editor.dispatch(EditorAction::TableNavigation(command)).map(|_| ()),\n                ))\n            } else if inside_list {\n                let command = if modifiers.contains(Modifiers::SHIFT) {\n                    ListCommand::OutdentItem\n                } else {\n                    ListCommand::IndentItem\n                };\n                Some(dispatch(\n                    state,\n                    EditorAction::List(command),\n                    "cannot indent list without an open note",\n                ))\n            } else {\n                None\n            }\n        }''',
+              'Muya Tab list/table routing',
+          )
+          route_once(
+              '''fn dispatch(state: State<ShellState>, action: EditorAction, missing: &str) -> Result<(), String> {''',
+              '''fn has_list_ancestor(document: &Document, start: NodeId) -> bool {\n    let mut current = Some(start);\n    while let Some(id) = current {\n        let Some(node) = document.node(id) else {\n            return false;\n        };\n        if matches!(node.kind, NodeKind::Block(BlockKind::ListItem { .. })) {\n            return true;\n        }\n        current = node.parent;\n    }\n    false\n}\n\nfn dispatch(state: State<ShellState>, action: EditorAction, missing: &str) -> Result<(), String> {''',
+              'list ancestor helper',
+          )
+          routes.write_text(keyboard)
+          PY
+
+          cat > Elephant/freya/tests/editor_muya_feature_actions.rs <<'RS'
+          use elephant_freya::editor::{EditorAction, EditorDocument};
+          use muya_core::{
+              features::ListCommand,
+              model::{BlockKind, InlineKind, NodeKind},
+              Selection, SelectionPoint,
+          };
+
+          fn first_text(editor: &EditorDocument) -> (muya_core::NodeId, u32) {
+              let document = editor.session().document();
+              document
+                  .nodes
+                  .values()
+                  .find_map(|node| match &node.kind {
+                      NodeKind::Inline(InlineKind::Text { value }) => {
+                          Some((node.id, value.encode_utf16().count() as u32))
+                      }
+                      _ => None,
+                  })
+                  .expect("editable text node")
+          }
+
+          fn text_with_value(editor: &EditorDocument, expected: &str) -> muya_core::NodeId {
+              editor
+                  .session()
+                  .document()
+                  .nodes
+                  .values()
+                  .find_map(|node| match &node.kind {
+                      NodeKind::Inline(InlineKind::Text { value }) if value == expected => Some(node.id),
+                      _ => None,
+                  })
+                  .unwrap_or_else(|| panic!("missing text node {expected:?}"))
+          }
+
+          #[test]
+          fn table_toolbar_action_is_a_native_muya_transaction_and_undoes() {
+              let mut editor = EditorDocument::from_markdown("");
+              editor
+                  .dispatch(EditorAction::CreateTable { rows: 2, columns: 2 })
+                  .expect("create Muya table");
+              let document = editor.session().document();
+              let table = document
+                  .children(document.root)
+                  .find(|node| matches!(node.kind, NodeKind::Block(BlockKind::Table)))
+                  .expect("table block");
+              let rows = document.children(table.id).collect::<Vec<_>>();
+              assert_eq!(rows.len(), 2);
+              assert!(rows.iter().all(|row| document.children(row.id).count() == 2));
+              editor.undo().expect("undo table creation");
+              assert!(!editor
+                  .session()
+                  .document()
+                  .nodes
+                  .values()
+                  .any(|node| matches!(node.kind, NodeKind::Block(BlockKind::Table))));
+          }
+
+          #[test]
+          fn image_toolbar_action_uses_selected_text_as_muya_alt_and_undoes() {
+              let mut editor = EditorDocument::from_markdown("caption");
+              let (text, len) = first_text(&editor);
+              editor
+                  .set_selection(Selection {
+                      anchor: SelectionPoint { node: text, offset_utf16: 0 },
+                      focus: SelectionPoint { node: text, offset_utf16: len },
+                  })
+                  .expect("select image caption");
+              editor
+                  .dispatch(EditorAction::InsertImage {
+                      source: ".assets/photo.png".into(),
+                      alt: String::new(),
+                      title: None,
+                  })
+                  .expect("insert Muya image");
+              assert_eq!(editor.serialize(), "![caption](.assets/photo.png)");
+              editor.undo().expect("undo image insertion");
+              assert_eq!(editor.serialize(), "caption");
+          }
+
+          #[test]
+          fn horizontal_rule_action_routes_to_muya_and_is_undoable() {
+              let mut editor = EditorDocument::from_markdown("");
+              editor
+                  .dispatch(EditorAction::InsertHorizontalRule)
+                  .expect("insert Muya horizontal rule");
+              assert!(editor
+                  .session()
+                  .document()
+                  .nodes
+                  .values()
+                  .any(|node| matches!(node.kind, NodeKind::Block(BlockKind::ThematicBreak))));
+              editor.undo().expect("undo horizontal rule");
+              assert!(!editor
+                  .session()
+                  .document()
+                  .nodes
+                  .values()
+                  .any(|node| matches!(node.kind, NodeKind::Block(BlockKind::ThematicBreak))));
+          }
+
+          #[test]
+          fn list_tab_action_routes_to_muya_structure_and_undoes() {
+              let original = "- parent\n- child";
+              let mut editor = EditorDocument::from_markdown(original);
+              let child = text_with_value(&editor, "child");
+              editor
+                  .set_selection(Selection::collapsed(SelectionPoint {
+                      node: child,
+                      offset_utf16: 0,
+                  }))
+                  .expect("focus child list item");
+              editor
+                  .dispatch(EditorAction::List(ListCommand::IndentItem))
+                  .expect("indent Muya list item");
+              assert_eq!(editor.serialize(), "- parent\n  - child");
+              editor.undo().expect("undo list indentation");
+              assert_eq!(editor.serialize(), original);
+          }
+          RS
+          cargo fmt --manifest-path Elephant/freya/Cargo.toml
+          git diff --check
+
+      - name: Prove canonical Muya feature routing
+        env:
+          RUST_BACKTRACE: full
+        run: |
+          set -euo pipefail
+          cargo check --manifest-path Elephant/freya/Cargo.toml --all-targets
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_muya_feature_actions -- --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_toolbar_actions_freya_testing -- --nocapture
+          cargo test --manifest-path Elephant/freya/Cargo.toml --test editor_keyboard_freya_testing -- --nocapture
+
+      - name: Publish verified Freya feature routing
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            Elephant/freya/src/editor.rs \
+            Elephant/freya/src/app/editor_key_routes.rs \
+            Elephant/freya/tests/editor_muya_feature_actions.rs
+          git rm .github/workflows/patch-freya-note-actions.yml
+          git diff --cached --check
+          git commit -m 'feat(freya): route Muya structural actions natively'
+          git pull --rebase origin nsb/freya-native-migration
+          git push origin HEAD:nsb/freya-native-migration

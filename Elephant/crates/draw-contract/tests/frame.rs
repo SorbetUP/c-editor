@@ -105,6 +105,73 @@ fn multi_selection_with_frame_moves_child_once_and_keeps_locked_child_attached()
 }
 
 #[test]
+fn partial_overlap_attaches_and_moving_between_frames_transfers_owner() {
+    let mut scene = scene_with_frame();
+    let mut other = create_element(DrawingTool::Frame, [350.0, 0.0], "other-frame");
+    other.width = 300.0;
+    other.height = 200.0;
+    scene.elements.push(other);
+
+    {
+        let shape = scene
+            .elements
+            .iter_mut()
+            .find(|element| element.id == "shape")
+            .unwrap();
+        shape.x = 280.0;
+        shape.y = 80.0;
+    }
+    assert!(scene.element_overlaps_frame("shape", "frame"));
+    assert!(scene.sync_element_frame_membership("shape"));
+    assert_eq!(frame_id(&scene, "shape").as_deref(), Some("frame"));
+
+    {
+        let shape = scene
+            .elements
+            .iter_mut()
+            .find(|element| element.id == "shape")
+            .unwrap();
+        shape.x = 390.0;
+        shape.y = 60.0;
+    }
+    assert!(scene.sync_element_frame_membership("shape"));
+    assert_eq!(frame_id(&scene, "shape").as_deref(), Some("other-frame"));
+    assert!(scene.frame_children("frame").is_empty());
+}
+
+#[test]
+fn resize_reconciles_children_and_bound_text() {
+    let mut scene = scene_with_frame();
+    assert!(scene.bind_text_to_container("text", "shape"));
+    assert_eq!(scene.add_elements_to_frame("frame", &["shape"]), 2);
+    {
+        let frame = scene
+            .elements
+            .iter_mut()
+            .find(|element| element.id == "frame")
+            .unwrap();
+        frame.width = 20.0;
+        frame.height = 20.0;
+    }
+    assert_eq!(scene.sync_frame_children_after_resize("frame"), 2);
+    assert_eq!(frame_id(&scene, "shape"), None);
+    assert_eq!(frame_id(&scene, "text"), None);
+
+    {
+        let frame = scene
+            .elements
+            .iter_mut()
+            .find(|element| element.id == "frame")
+            .unwrap();
+        frame.width = 300.0;
+        frame.height = 200.0;
+    }
+    assert_eq!(scene.sync_frame_children_after_resize("frame"), 2);
+    assert_eq!(frame_id(&scene, "shape").as_deref(), Some("frame"));
+    assert_eq!(frame_id(&scene, "text").as_deref(), Some("frame"));
+}
+
+#[test]
 fn frame_border_is_selectable_without_swallowing_child_interior() {
     let mut scene = scene_with_frame();
     assert_eq!(scene.add_elements_to_frame("frame", &["shape"]), 1);

@@ -8,12 +8,16 @@ on:
       - "Elephant/freya/src/app/drawing*.rs"
       - "Elephant/freya/tests/drawing*.rs"
       - "Elephant/crates/draw-contract/**"
+      - ".github/scripts/sync_freya_draw_*.py"
+      - ".github/scripts/sync_freya_rough.py"
       - ".github/workflows/freya-draw-visual.yml"
   pull_request:
     paths:
       - "Elephant/freya/src/app/drawing*.rs"
       - "Elephant/freya/tests/drawing*.rs"
       - "Elephant/crates/draw-contract/**"
+      - ".github/scripts/sync_freya_draw_*.py"
+      - ".github/scripts/sync_freya_rough.py"
       - ".github/workflows/freya-draw-visual.yml"
   workflow_dispatch:
 
@@ -28,13 +32,45 @@ jobs:
   draw-visual:
     name: Native Draw graphical contract
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+
+      - name: Synchronize complete native Draw stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/sync_freya_draw_lasso.py
+          python3 .github/scripts/sync_freya_draw_interactions.py
+          python3 .github/scripts/sync_freya_draw_transform.py
+          python3 .github/scripts/sync_freya_draw_additive.py
+          python3 .github/scripts/sync_freya_draw_clipboard.py
+          python3 .github/scripts/sync_freya_draw_commands.py
+          python3 .github/scripts/sync_freya_draw_library.py
+          python3 .github/scripts/sync_freya_draw_search.py
+          python3 .github/scripts/sync_freya_draw_properties.py
+          python3 .github/scripts/sync_freya_draw_links.py
+          python3 .github/scripts/sync_freya_draw_crop.py
+          python3 .github/scripts/sync_freya_draw_bindings.py
+          python3 .github/scripts/sync_freya_draw_more_tools.py
+          python3 .github/scripts/sync_freya_draw_laser.py
+          python3 .github/scripts/sync_freya_draw_background.py
+          python3 .github/scripts/sync_freya_rough.py
+          rustfmt --edition 2021 \
+            Elephant/freya/src/app/drawing.rs \
+            Elephant/freya/src/app/drawing_canvas.rs \
+            Elephant/freya/src/app/drawing_scene.rs \
+            Elephant/freya/src/app/drawing_render.rs \
+            Elephant/freya/src/app/drawing_render_svg.rs \
+            Elephant/freya/src/app/drawing_library.rs \
+            Elephant/freya/tests/drawing_*.rs
+          git diff --check -- Elephant/freya/src/app/drawing*.rs Elephant/freya/tests/drawing*.rs
 
       - name: Install project dependencies
         uses: ./.github/actions/setup
@@ -58,18 +94,24 @@ jobs:
           RUST_BACKTRACE: full
         run: |
           set -euo pipefail
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test drawing_canvas_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test drawing_multiselect_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test drawing_multi_selection_contract -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test drawing_arrowheads_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test drawing_frame_freya_testing -- --test-threads=1 --nocapture
-          cargo test --manifest-path Elephant/freya/Cargo.toml \
-            --test drawing_freya_testing -- --test-threads=1 --nocapture
+          for test in \
+            drawing_canvas_freya_testing \
+            drawing_multiselect_freya_testing \
+            drawing_multi_selection_contract \
+            drawing_additive_selection_contract \
+            drawing_commands_contract \
+            drawing_crop_freya_testing \
+            drawing_background_contract \
+            drawing_more_tools_freya_testing \
+            drawing_laser_freya_testing \
+            drawing_arrowheads_freya_testing \
+            drawing_excalidraw_styles_freya_testing \
+            drawing_frame_freya_testing \
+            drawing_transform_handles_freya_testing \
+            drawing_binding_freya_testing \
+            drawing_freya_testing; do
+            cargo test --manifest-path Elephant/freya/Cargo.toml --test "$test" -- --test-threads=1 --nocapture
+          done
 
       - name: Validate real Freya screenshot output
         shell: bash
@@ -78,17 +120,21 @@ jobs:
           mkdir -p test-results/freya-draw-visual
           python3 - <<'PY'
           from pathlib import Path
-          from PIL import Image, ImageChops
+          from PIL import Image, ImageChops, ImageStat
           import shutil
 
           required = [
               Path('/tmp/elephant-freya-drawing-canvas-primitives.png'),
               Path('/tmp/elephant-freya-drawing-multiselect.png'),
               Path('/tmp/elephant-freya-drawing-arrowheads.png'),
+              Path('/tmp/elephant-freya-drawing-excalidraw-styles.png'),
               Path('/tmp/elephant-freya-hand-before.png'),
               Path('/tmp/elephant-freya-hand-after.png'),
               Path('/tmp/elephant-freya-drawing-frame.png'),
               Path('/tmp/elephant-freya-drawing-frame-like-imports.png'),
+              Path('/tmp/elephant-freya-drawing-transform-handles.png'),
+              Path('/tmp/elephant-freya-drawing-more-tools.png'),
+              Path('/tmp/elephant-freya-drawing-laser-during.png'),
           ]
           output = Path('test-results/freya-draw-visual')
           for path in required:
@@ -101,7 +147,7 @@ jobs:
                   raise AssertionError(f'{path.name}: screenshot is visually empty/monochrome')
               shutil.copy2(path, output / path.name)
 
-          arrowheads = Image.open(required[2]).convert('RGBA')
+          arrowheads = Image.open('/tmp/elephant-freya-drawing-arrowheads.png').convert('RGBA')
           endpoint_crops = []
           for column in range(2):
               for row in range(7):
@@ -111,8 +157,19 @@ jobs:
           if len({hash(crop) for crop in endpoint_crops}) < 8:
               raise AssertionError('arrowhead endpoint crops are not graphically diverse enough')
 
-          before = Image.open(required[3]).convert('RGBA')
-          after = Image.open(required[4]).convert('RGBA')
+          styles = Image.open('/tmp/elephant-freya-drawing-excalidraw-styles.png').convert('RGB')
+          regions = [
+              styles.crop((30, 30, 150, 110)),
+              styles.crop((180, 30, 300, 110)),
+              styles.crop((330, 30, 450, 110)),
+          ]
+          if any(ImageStat.Stat(region).var[0] < 25 for region in regions):
+              raise AssertionError('pattern-filled shapes do not contain enough graphical variance')
+          if len({hash(region.tobytes()) for region in regions}) != 3:
+              raise AssertionError('hachure/cross-hatch/zigzag regions are pixel-identical')
+
+          before = Image.open('/tmp/elephant-freya-hand-before.png').convert('RGBA')
+          after = Image.open('/tmp/elephant-freya-hand-after.png').convert('RGBA')
           diff = ImageChops.difference(before, after)
           if diff.getbbox() is None:
               raise AssertionError('hand-pan screenshots are pixel-identical')

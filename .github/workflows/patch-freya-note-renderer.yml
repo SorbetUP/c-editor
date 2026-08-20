@@ -300,51 +300,6 @@ fn semantic_source_block(
                 }
             }''', 'footnote and break inline')
 
-          # The renderer must trust muya-core's semantic destination. It must
-          # not implement a second Markdown/autolink parser in the UI layer.
-          old_links = '''        match &node.kind {
-            NodeKind::Inline(InlineKind::Link { destination, .. }) => {
-                let destination = match &node.inline_syntax {
-                    Some(InlineSyntax::BareAutoLink { .. }) => {
-                        let mut editable = Vec::new();
-                        editable_text_nodes(document, node.id, &mut editable);
-                        let edited = editable.into_iter().map(|(_, value)| value).collect::<String>();
-                        if edited.is_empty() {
-                            destination.clone()
-                        } else if destination.starts_with("mailto:") && !edited.starts_with("mailto:") {
-                            format!("mailto:{edited}")
-                        } else if destination.starts_with("http://www.") && edited.starts_with("www.") {
-                            format!("http://{edited}")
-                        } else {
-                            edited
-                        }
-                    }
-                    Some(InlineSyntax::Reference { .. }) | None => destination.clone(),
-                };
-                destinations.push(destination);
-                collect_inline_link_destinations(document, node.id, destinations);
-            }
-            NodeKind::Inline(InlineKind::AutoLink { destination }) => {
-                let mut editable = Vec::new();
-                editable_text_nodes(document, node.id, &mut editable);
-                let edited = editable.into_iter().map(|(_, value)| value).collect::<String>();
-                destinations.push(if edited.is_empty() { destination.clone() } else { edited });
-                collect_inline_link_destinations(document, node.id, destinations);
-            }
-            _ => collect_inline_link_destinations(document, node.id, destinations),
-        }'''
-          semantic_links = '''        match &node.kind {
-            NodeKind::Inline(InlineKind::Link { destination, .. })
-            | NodeKind::Inline(InlineKind::AutoLink { destination }) => {
-                destinations.push(destination.clone());
-                collect_inline_link_destinations(document, node.id, destinations);
-            }
-            _ => collect_inline_link_destinations(document, node.id, destinations),
-        }'''
-          if old_links in text:
-              text = text.replace(old_links, semantic_links, 1)
-
-          # Remove a now-unused InlineSyntax import left by an older one-shot.
           text = text.replace(
               'model::{BlockKind, InlineKind, InlineMarkKind, InlineSyntax, ListKind, NodeKind},',
               'model::{BlockKind, InlineKind, InlineMarkKind, ListKind, NodeKind},',
