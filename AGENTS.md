@@ -1,323 +1,150 @@
-# Elephant repository instructions — mandatory
+# Elephant engineering rules — mandatory
 
-These instructions apply to the entire repository. A more local `AGENTS.md` may add stricter rules, but it may not weaken or bypass this file.
+These instructions apply to the whole repository. The purpose is simple: deliver the requested Elephant behavior reliably, with the least unnecessary work.
 
-## Repository truth
+## 1. Delivery first
 
-- `develop` is the current product baseline. Preserve its working editor, vault, navigation, settings, rendering, persistence, desktop and mobile behavior unless the user explicitly requests a change.
-- The official add-on migration is not presumed correct merely because packages build or unit tests pass. Treat every migrated add-on as unverified until its real user path is proven.
-- Historical working branches, commits and pull requests are source material. When a working implementation exists, integrate that implementation. Do not recreate an approximation from memory.
-- The application, not the test suite, is the final source of truth.
+The user's requested behavior is the task. Architecture, refactors, abstractions, CI, documentation and cleanup exist only to support that behavior.
 
-## Prime directive
+- Work on one complete user-visible vertical slice at a time.
+- Do not replace a requested feature with an architecture project.
+- Do not add unrelated frameworks, crates, services, migrations, ADRs or generic infrastructure because they may be useful later.
+- Prefer the smallest compatible change to a broad redesign.
+- Source volume is not progress. A feature working through the real product path is progress.
+- If a feature cannot yet be executed/tested, stop adding dependent feature code and unblock execution first. Do not accumulate days of `implemented but not proven` work.
+- Report a blocker when it is discovered, not at the end after continuing to build on top of it.
 
-Preserve known-working behavior and make the smallest correct change. It is better to stop with a precise `BLOCKED` or `NOT PROVEN` report than to invent an implementation, weaken a test, hide an error, fake a runtime, or claim success without evidence.
+## 2. Reuse before rewriting
 
-## Mandatory workflow before editing
+Before implementing anything non-trivial, search the current repo, relevant branches/commits/PRs, Elephant-Addons and the upstream/reference project.
 
-For every non-trivial change:
+If the requested behavior already exists:
 
-1. Inspect the current branch, working tree and relevant history.
-2. Identify the exact working baseline and every source branch, commit or PR that already contains relevant behavior.
-3. Trace the complete path from user action to UI, state, IPC/API, backend or add-on runtime, persistence and error handling.
-4. Reproduce the reported failure before changing code.
-5. Record the failing command, runtime log, screenshot, DOM state, persisted state or artifact.
-6. Define what evidence will prove the fix, including which real application scenario must run.
-7. Only then modify code.
+- transplant, cherry-pick, merge or port the real implementation;
+- preserve its dependencies, UI, state, persistence and error behavior;
+- keep provenance of the source branch/commit/project;
+- adapt only what is necessary for the current runtime.
 
-If the failure cannot be reproduced, report that fact. Do not silently replace the task with a guessed implementation.
+Do not recreate an approximation from screenshots, summaries or memory when working source exists. For Excalidraw-, Muya- or other parity work, the reference codebase is the implementation specification: port behavior component-by-component rather than redesigning it.
 
-## Existing implementation and branch provenance
+Reinventing an existing solution requires a concrete demonstrated incompatibility, not a preference for a cleaner architecture.
 
-### Never rewrite a working feature by hand
+## 3. Short implementation loop
 
-When an earlier branch, commit or PR contains a working implementation:
+For every slice, use this order:
 
-- inspect its full diff and dependencies;
-- merge, cherry-pick or transplant the actual implementation with traceable provenance;
-- preserve its UI, state model, API contracts, tests and runtime wiring;
-- resolve conflicts deliberately, file by file;
-- document the source branch and commit SHA in the delivery report.
+1. Identify the exact user action and expected result.
+2. Find/reuse the closest working implementation.
+3. Reproduce the current failure or missing behavior when applicable.
+4. Implement the smallest production-path change.
+5. Compile/build immediately.
+6. Execute the real path immediately.
+7. Assert the visible result, persisted state and relevant error path.
+8. Only after that passes, move to the next slice.
 
-Forbidden:
+Never stack several unexecuted slices and hope CI will validate them later.
 
-- recreating the feature from screenshots or a summary while ignoring available source code;
-- replacing a complete implementation with a smaller placeholder;
-- copying only the visible UI while omitting backend, persistence or errors;
-- deleting the original path before parity is demonstrated;
-- calling an approximate reimplementation a merge.
+## 4. The user's manual test must become an automated test
 
-If a clean integration is not possible, stop and explain the concrete conflict. Do not fabricate a substitute.
+The user must not be the first person to discover that Elephant does not start, a button does nothing, a request returns `fetch failed`, a file cannot be saved, or a migrated editor is incomplete.
 
-## UI preservation rule
+For user-visible behavior, CI/acceptance should reproduce what the user would do:
 
-Moving a core feature into an add-on is an extraction, not a redesign.
+- start the real application/runtime;
+- use a clean temporary profile/vault when possible;
+- perform the actual interaction;
+- verify UI/state/persistence/side effect;
+- restart when persistence/lifecycle matters;
+- capture logs/artifacts on failure.
 
-Unless the user explicitly requests a redesign, preserve:
+Unit tests are useful but do not replace the real path. A fake proves only the boundary it replaces.
 
-- the existing components and layout;
-- routes, tabs, panels and settings placement;
-- class names, stable selectors and `data-testid` contracts;
-- translations and labels;
-- keyboard, mouse and mobile interactions;
-- persisted settings and migration behavior;
+If CI cannot execute the real scenario because CI itself is broken, fixing or replacing the executable verification path becomes the immediate task. Do not continue feature development underneath a broken verifier.
+
+## 5. Preserve working Elephant behavior
+
+`develop` and known-working historical branches are behavioral baselines unless the user explicitly requests a change.
+
+A migration/extraction is not a redesign. Preserve as applicable:
+
+- components, layout and navigation;
+- labels/translations;
+- keyboard, mouse, touch and mobile interactions;
+- persisted settings/data migrations;
 - loading, empty, success and error states;
-- accessibility behavior.
+- desktop/mobile behavior;
+- logs and error visibility.
 
-Before an extraction, capture the baseline with screenshots, DOM/selector checks and persisted-state fixtures. After the extraction, compare against that baseline.
+Do not delete the old working path before parity is demonstrated.
 
-Do not introduce replacement interfaces, generic settings cards, duplicate pages, extra wrappers, temporary panels or new navigation merely because they are easier to implement.
+## 6. Add-ons and modularity
 
-Forbidden UI integration patterns unless the task explicitly requires them and they are justified:
+For add-on work:
 
-- `MutationObserver`-based feature injection;
-- arbitrary timeouts used to wait for UI ownership;
-- querying the first matching generic settings group and inserting content there;
-- monkey-patching unrelated components;
-- duplicating an existing component inside an add-on;
-- hiding a regression with CSS.
+- the add-on owns its own behavior;
+- disabling/uninstalling it removes that behavior;
+- no hidden fallback remains in core;
+- expose only the smallest host API required by the real feature;
+- do not invent broad generic APIs to make one port aesthetically clean;
+- lifecycle and cleanup must be real, not registration-only.
 
-## Add-on extraction and parity contract
+Test the meaningful lifecycle: install/enable/use/restart/disable/uninstall/reinstall when the feature requires those states.
 
-A core-to-add-on migration is complete only when all of the following are proven.
+## 7. UI and editor parity
 
-### Ownership
+For Note/Markdown, Draw/Excalidraw and similar ports:
 
-- The implementation is physically absent from the core bundle when the add-on is not installed.
-- The add-on owns its UI, commands, resources, services and persisted configuration through explicit host APIs.
-- There is no hidden fallback to the old core implementation.
-- Disabling or uninstalling the add-on leaves no active route, panel, command, toolbar item, background process, listener or service.
+- prioritize behavioral parity over internal elegance;
+- compare directly against the reference implementation;
+- port existing algorithms/components/contracts instead of creating simplified substitutes;
+- make basic editing interactions work before adding architecture around them;
+- do not claim parity from screenshots or rendering alone;
+- test input, selection, editing, undo/redo, persistence, shortcuts and the feature-specific interactions the user actually cares about.
 
-### Lifecycle
+## 8. Runtime/provider behavior
 
-Test the complete lifecycle from a clean profile and clean vault:
+A runtime/provider is working only when the real executable/service and protocol path are exercised. Spawn/status alone is insufficient.
 
-1. app starts without the add-on;
-2. add-on installs from its real package;
-3. add-on enables;
-4. its real UI opens;
-5. its primary action produces the expected external or persisted effect;
-6. its error path is visible and logged;
-7. the app restarts and the state remains correct;
-8. add-on disables and all owned behavior disappears;
-9. add-on uninstalls and leaves no runtime residue;
-10. add-on reinstalls and works again.
+Verify as applicable: startup, handshake/discovery, real request, output/streaming, cancellation, persistence, error propagation and shutdown. Do not hardcode fake availability or silently route to another engine.
 
-Packaging or registration alone is not functional validation.
+## 9. Logging
 
-### API discipline
+Logs exist to diagnose the real failing layer, not to satisfy a checklist.
 
-- Add only the smallest reusable host API needed by the real feature.
-- Keep APIs explicit, versioned where appropriate, validated and permission-scoped.
-- Do not expose unrestricted internals merely to make one add-on easy to port.
-- Do not preserve a hidden core dependency behind an add-on-shaped wrapper.
-- Do not deprecate existing APIs during a migration unless the user explicitly requested it and compatibility is proven.
+For affected user actions, retain enough information to identify action start/end/failure, request correlation, relevant component/add-on, sanitized path/runtime identity, state transition and full error chain. Never log secrets.
 
-### Official add-on proof
+Do not spend time building a logging framework when existing logging can expose the failure sufficiently.
 
-For official add-on changes, run the existing focused tests and the real Tauri acceptance scenario. At minimum, use the relevant commands among:
+## 10. Scope and architecture
 
-```bash
-node build/scripts/verify-agent-governance.mjs
-pnpm test:unit
-pnpm test:official-addons:e2e
-pnpm test:desktop:acceptance
-pnpm test:desktop:acceptance:packaged
-pnpm prod:check
-```
+Use modular code, but modularity is a means, not the deliverable.
 
-The exact command set depends on the changed surface, but unit-only proof is never enough for a user-visible add-on claim.
+- No opportunistic redesign during a bug/feature task.
+- No mass refactor unless the requested feature is concretely blocked by the current structure.
+- No arbitrary file-size refactor while the feature is unfinished.
+- No new abstraction without at least one current production caller.
+- No duplicate implementation of a working feature.
+- Prefer existing components/services/test harnesses.
 
-## AI and runtime engines, including Marvin
+When a minimal patch and a broad architecture both solve the current requirement correctly, choose the minimal patch unless the user explicitly asks for architectural work.
 
-An AI provider, Marvin engine, Codex connection, open-model runtime, local model service or sidecar is considered available only after its real protocol and process are exercised.
+## 11. Truthful but useful status
 
-A valid runtime proof must cover the applicable items:
+Never say `everything works`, `fully validated`, `production-ready` or equivalent without actual execution evidence.
 
-- the real executable or service starts;
-- executable path, version and launch arguments are logged without secrets;
-- protocol handshake succeeds;
-- provider and model discovery come from the runtime, not a hardcoded list;
-- a real request is sent through the production path;
-- streaming or incremental output reaches the actual UI when supported;
-- cancellation reaches the runtime;
-- conversation/configuration persistence works after restart;
-- runtime stderr, non-zero exits, malformed replies and timeouts surface as visible errors;
-- shutdown cleans up the process;
-- logs let a developer identify the exact failing layer.
+But do not use `NOT PROVEN` as a substitute for delivery either. If required execution evidence is missing, that is an immediate blocker to resolve before continuing dependent work.
 
-Forbidden:
+A useful handoff is concise:
 
-- hardcoded `connected`, `available`, model lists or `{ ok: true }` responses;
-- treating process spawn as proof that inference works;
-- treating a status endpoint as proof that chat works;
-- replacing the real runtime with a mock and then claiming the engine works;
-- silently routing Marvin or another provider to a different engine;
-- swallowing provider errors and returning an empty response;
-- showing an enabled UI when the backend path is absent.
+- what user-visible behavior now works;
+- what exact test/interaction actually ran;
+- what still fails, if anything;
+- the concrete blocker/fix, if blocked.
 
-A fake server or subprocess may validate protocol parsing deterministically, but it proves only the protocol adapter. It does not prove the real Marvin, Codex, llama, OpenCode or provider runtime. Report those proof levels separately.
+Do not bury the result under a long architecture report unless the user asked for one.
 
-## Ponytail-style engineering constraints
+## 12. Definition of done
 
-Use a modular, explicit architecture instead of accumulating patches.
+A task is done when the requested behavior works through the real production path on the relevant target, its important regression/error path is exercised, and the user should be able to perform the same interaction without discovering a fundamental failure first.
 
-- Prefer small, focused modules with one responsibility. As a guideline, handwritten files should remain near or below 200 lines; justify exceptions.
-- Separate UI, domain state, host API, platform/runtime adapter and persistence.
-- Reuse existing components and services instead of copying them.
-- Keep dependencies directional and explicit.
-- Validate data at boundaries.
-- Make ownership and lifecycle cleanup obvious.
-- Use typed or schema-checked contracts where the codebase supports them.
-- Keep functions small enough to understand and test.
-- Remove dead compatibility code only after parity is proven.
-
-Forbidden without explicit justification:
-
-- giant components or services mixing unrelated concerns;
-- duplicate implementations of the same feature;
-- global mutable registries with hidden side effects;
-- broad catch blocks that suppress errors;
-- boolean success returns that discard diagnostic information;
-- copy-pasted provider or add-on logic;
-- unrelated refactors in a bug-fix PR;
-- generated-looking boilerplate that is not wired into production.
-
-If the requested change cannot be implemented cleanly within the available context, report the limitation instead of adding architectural debt.
-
-## Logging and observability contract
-
-Logs are part of the feature. Adding one generic line such as `started` or `failed` is not sufficient.
-
-For every affected user action, capture the applicable events across renderer, host/Tauri and add-on runtime:
-
-- action start, completion and failure;
-- correlation/request ID;
-- add-on ID, command/resource/service name;
-- sanitized paths and selected runtime executable;
-- relevant payload shape, never credentials or private note content unless the test fixture is synthetic;
-- state transition;
-- duration;
-- exit code, signal and stderr summary for subprocesses;
-- full error chain or stack at the layer where it is handled;
-- cleanup and shutdown result.
-
-Errors must be both visible to the user and present in retrievable logs. Do not catch and ignore errors. Do not print secrets, tokens, authorization headers or raw credentials.
-
-When a task asks for logs, prove the log entries by running the failing or successful scenario and include the resulting log path or captured artifact. Merely adding logging statements is not runtime proof.
-
-## Test integrity rules
-
-Read and obey:
-
-- `agent/skill/test-integrity/SKILL.md`
-- `agent/skill/truthful-delivery/SKILL.md`
-- `agent/skill/real-implementation/SKILL.md`
-- `agent/skill/completion-audit/SKILL.md`
-- `agent/skill/elephant-change-safety/SKILL.md`
-
-### Red-before-green requirement
-
-For every bug fix or regression:
-
-1. reproduce the broken behavior on the pre-fix revision;
-2. add or identify a test that fails for that exact behavior;
-3. retain the failure output;
-4. apply the smallest fix;
-5. show the same test passing afterward;
-6. run the broader relevant suites;
-7. run the real application scenario.
-
-When practical, temporarily break the implementation after writing a new test to demonstrate that the test turns red, then restore the implementation. A test that remains green when the behavior is removed is not evidence.
-
-### Tests may not redefine success
-
-Do not:
-
-- weaken or delete an assertion to accommodate a regression;
-- update snapshots without manually inspecting the behavioral change;
-- change expected UI or API output unless the task explicitly changes the contract;
-- mock the implementation being claimed;
-- test a reduced helper and claim the complete product path works;
-- accept any truthy value when a precise effect can be asserted;
-- catch the tested error and ignore it;
-- skip a failing test without an explicit user-approved reason;
-- mark flaky or platform-dependent behavior as passing without evidence.
-
-Every changed test must state which product behavior it protects and which concrete defect makes it fail.
-
-## Real application validation
-
-Compilation, linting, unit tests, package creation and mocked browser tests are separate evidence classes. None alone proves that Elephant works.
-
-For desktop behavior, use the real Tauri application and, when the claim concerns distributable behavior, the packaged application:
-
-```bash
-pnpm test:desktop:acceptance
-pnpm test:desktop:acceptance:packaged
-```
-
-The acceptance run must use a clean temporary profile/vault and retain renderer, Tauri and add-on logs plus generated artifacts.
-
-For Android behavior, build and install the new APK on an emulator or physical device, clear prior app state when appropriate, exercise the real permission and document-provider flow, kill and relaunch the process, and retain `adb logcat` plus screenshots/video. Desktop simulation does not prove Android behavior.
-
-For macOS-specific behavior, run the real macOS build. For Linux- or Windows-specific behavior, run that platform. Do not claim cross-platform validation from one OS.
-
-## Clean-state and regression requirements
-
-Before final delivery:
-
-- validate from the exact final commit;
-- use a clean checkout or equivalent clean CI workspace;
-- remove stale build outputs when they could affect the result;
-- use a fresh test vault/profile for lifecycle tests;
-- verify that no unrelated feature regressed;
-- inspect the final diff for accidental generated files, duplicate code, test weakening and missing cleanup.
-
-## Scope control
-
-- One bug or bounded migration at a time.
-- No opportunistic redesign.
-- No mass refactor bundled with a fix.
-- No new framework, abstraction or custom language unless the existing acceptance harness cannot express the required scenario and the limitation is demonstrated.
-- Extend the existing observable Tauri acceptance runner before inventing a second automation system.
-- Keep commits reviewable and attributable.
-
-## Delivery and claim policy
-
-Every final claim must use one of these states:
-
-- `PROVEN`: exact runtime/test evidence from the final commit exists.
-- `PARTIALLY PROVEN`: some evidence exists, but a required platform/runtime check is missing.
-- `NOT PROVEN`: implementation or static inspection exists without sufficient execution evidence.
-- `BLOCKED`: a named blocker prevents proof or completion.
-- `OUT OF SCOPE`: deliberately excluded.
-
-A delivery report must include:
-
-- final commit SHA and branch;
-- source branch/commit provenance when code was integrated;
-- files and behavior changed;
-- exact commands executed;
-- pre-fix failure evidence;
-- post-fix evidence;
-- runtime environment and platform;
-- log and artifact paths;
-- tests changed and why;
-- what remains unproven or broken.
-
-Forbidden unsupported phrases include:
-
-- `everything works`;
-- `all tests pass` without exact command and final result;
-- `fully validated` without real runtime proof;
-- `the engine works` after only a status probe;
-- `logs were added` without an executed log artifact;
-- `merged the branch` when the feature was manually recreated;
-- `production-ready` without packaged and platform-appropriate validation.
-
-## Definition of done
-
-A task is done only when the requested product behavior is implemented through the real production path, the original regression is proven, meaningful tests fail before and pass after, the real application scenario succeeds on the required platform, logs and artifacts are retained, the final diff is clean, and every remaining limitation is reported honestly.
-
-When any required item is missing, the task is not done. State the missing proof instead of pretending otherwise.
+If that condition is not met, keep working on the blocker rather than expanding the scope.
